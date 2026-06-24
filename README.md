@@ -47,6 +47,14 @@ bun packages/cli/src/index.ts show auth.student_oauth.uid_is_tenant_scoped --inc
 bun packages/cli/src/index.ts system auth
 ```
 
+## Phase 7 Command
+
+```bash
+bun packages/cli/src/index.ts context --task "fix student oauth"
+bun packages/cli/src/index.ts context --changed-files src/auth.js
+bun packages/cli/src/index.ts context --git-diff
+```
+
 Build the executable bundle:
 
 ```bash

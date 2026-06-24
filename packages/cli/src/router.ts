@@ -2,6 +2,7 @@ import { AgentMemoryError, formatError, NotFoundError, toAgentMemoryError } from
 import type { ExitCode } from "../../core/src/types";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../../core/src/version";
 import { runCompileCommand } from "./commands/compile";
+import { runContextCommand } from "./commands/context";
 import { renderHelp } from "./commands/help";
 import { runInitCommand } from "./commands/init";
 import { runNewCommand } from "./commands/new";
@@ -144,6 +145,17 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
     }
 
     return runSystemCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "context") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("context")
+      };
+    }
+
+    return runContextCommand(rest, { cwd: context.cwd });
   }
 
   if (command === "new") {

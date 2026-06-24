@@ -113,10 +113,17 @@ const TOPICS: HelpTopic[] = [
   {
     name: "context",
     purpose: "Build task-ready memory context for agent work.",
-    usage: ['agent-memory context --task "fix student oauth"'],
+    usage: [
+      'agent-memory context --task "fix student oauth"',
+      "agent-memory context --changed-files file1 file2",
+      "agent-memory context --git-diff",
+      "agent-memory context --task \"fix auth\" --budget small|medium|full",
+      "agent-memory context --task \"fix auth\" --depth 2",
+      "agent-memory context --task \"fix auth\" --json"
+    ],
     examples: ['agent-memory context --changed-files src/auth.js', "agent-memory context --git-diff"],
-    agentNotes: ["Planned for Phase 7. Run this before editing code in a memory-enabled repo."],
-    phase: "Phase 7 planned"
+    agentNotes: ["Requires a compiled SQLite database. Run this before editing code in a memory-enabled repo."],
+    phase: "Phase 7"
   }
 ];
 
@@ -151,10 +158,11 @@ export function renderHelp(topicName?: string): string {
     "  query                Search compiled claims.",
     "  show                 Show one compiled claim.",
     "  system               Summarize compiled memory for one system.",
+    "  context              Build agent-ready task or file context.",
     "  --version            Print package version.",
     "",
     "Planned command groups:",
-    "  context, doctor, sync, coverage, install-hooks, install-skill, agent-manifest, governance",
+    "  doctor, sync, coverage, install-hooks, install-skill, agent-manifest, governance",
     "",
     "Examples:",
     "  agent-memory help",

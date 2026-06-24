@@ -16,6 +16,10 @@ export function discoverFiles(root: string, patterns: string[]): string[] {
     .sort();
 }
 
+export function pathMatchesPattern(pattern: string, value: string): boolean {
+  return globMatches(pattern, toPosix(value));
+}
+
 export function toPosix(value: string): string {
   return value.split(path.sep).join("/");
 }
