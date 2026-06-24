@@ -2,6 +2,7 @@ import { AgentMemoryError, formatError, NotFoundError, toAgentMemoryError } from
 import type { ExitCode } from "../../core/src/types";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../../core/src/version";
 import { renderHelp } from "./commands/help";
+import { runInitCommand } from "./commands/init";
 
 export interface CliStreams {
   stdout: Pick<NodeJS.WriteStream, "write">;
@@ -14,9 +15,13 @@ export interface CliResult {
   stderr?: string;
 }
 
-export async function runCli(args: string[], streams: CliStreams = process): Promise<ExitCode> {
+export interface CliContext {
+  cwd?: string;
+}
+
+export async function runCli(args: string[], streams: CliStreams = process, context: CliContext = {}): Promise<ExitCode> {
   try {
-    const result = await dispatch(args);
+    const result = await dispatch(args, context);
 
     if (result.stdout) {
       streams.stdout.write(result.stdout.endsWith("\n") ? result.stdout : `${result.stdout}\n`);
@@ -34,7 +39,7 @@ export async function runCli(args: string[], streams: CliStreams = process): Pro
   }
 }
 
-export async function dispatch(args: string[]): Promise<CliResult> {
+export async function dispatch(args: string[], context: CliContext = {}): Promise<CliResult> {
   const [command, ...rest] = args;
 
   if (!command || command === "help" || command === "--help" || command === "-h") {
@@ -48,6 +53,20 @@ export async function dispatch(args: string[]): Promise<CliResult> {
     return {
       exitCode: 0,
       stdout: `${PACKAGE_NAME} ${PACKAGE_VERSION}`
+    };
+  }
+
+  if (command === "init") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("init")
+      };
+    }
+
+    return {
+      exitCode: 0,
+      stdout: runInitCommand(rest, { cwd: context.cwd })
     };
   }
 

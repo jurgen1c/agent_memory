@@ -22,10 +22,17 @@ const TOPICS: HelpTopic[] = [
   {
     name: "init",
     purpose: "Scaffold memory files in a consuming repository.",
-    usage: ["agent-memory init --yes"],
+    usage: [
+      "agent-memory init --yes",
+      "agent-memory init --yes --package-manager npm",
+      "agent-memory init --yes --package-manager bun",
+      "agent-memory init --yes --agent codex",
+      "agent-memory init --yes --agent generic",
+      "agent-memory init --yes --install-hooks"
+    ],
     examples: ["agent-memory init --yes --agent codex", "agent-memory init --package-manager bun"],
-    agentNotes: ["Planned for Phase 2. Do not create repo memory scaffolding manually once this command exists."],
-    phase: "Phase 2 planned"
+    agentNotes: ["Safe to run repeatedly. Existing files are skipped unless --force is passed."],
+    phase: "Phase 2"
   },
   {
     name: "compile",
@@ -84,6 +91,7 @@ export function renderHelp(topicName?: string): string {
     "",
     "Available now:",
     "  help                 Show command help.",
+    "  init                 Scaffold memory files in a consuming repository.",
     "  --version            Print package version.",
     "",
     "Planned command groups:",

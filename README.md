@@ -11,6 +11,12 @@ bun packages/cli/src/index.ts help
 bun packages/cli/src/index.ts --version
 ```
 
+## Phase 2 Command
+
+```bash
+bun packages/cli/src/index.ts init --yes
+```
+
 Build the executable bundle:
 
 ```bash
