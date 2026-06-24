@@ -124,6 +124,30 @@ const TOPICS: HelpTopic[] = [
     examples: ['agent-memory context --changed-files src/auth.js', "agent-memory context --git-diff"],
     agentNotes: ["Requires a compiled SQLite database. Run this before editing code in a memory-enabled repo."],
     phase: "Phase 7"
+  },
+  {
+    name: "doctor",
+    purpose: "Check whether the compiled SQLite database is present, fresh, and compatible.",
+    usage: ["agent-memory doctor", "agent-memory doctor --json"],
+    examples: ["agent-memory doctor", "agent-memory doctor --json"],
+    agentNotes: ["Use doctor when retrieval commands fail or after switching branches."],
+    phase: "Phase 8"
+  },
+  {
+    name: "sync",
+    purpose: "Refresh the memory database and run validation and health checks.",
+    usage: ["agent-memory sync", "agent-memory sync --json"],
+    examples: ["agent-memory sync", "bin/memory sync"],
+    agentNotes: ["Use sync after pull, checkout, rebase, merge, or before agent work."],
+    phase: "Phase 8"
+  },
+  {
+    name: "install-hooks",
+    purpose: "Install non-blocking git hooks that run bin/memory sync after repository state changes.",
+    usage: ["agent-memory install-hooks", "agent-memory install-hooks --force"],
+    examples: ["agent-memory install-hooks", "agent-memory install-hooks --force"],
+    agentNotes: ["Hooks warn but do not block git operations."],
+    phase: "Phase 8"
   }
 ];
 
@@ -159,10 +183,13 @@ export function renderHelp(topicName?: string): string {
     "  show                 Show one compiled claim.",
     "  system               Summarize compiled memory for one system.",
     "  context              Build agent-ready task or file context.",
+    "  doctor               Check compiled database health.",
+    "  sync                 Compile, validate, and doctor memory.",
+    "  install-hooks        Install non-blocking git sync hooks.",
     "  --version            Print package version.",
     "",
     "Planned command groups:",
-    "  doctor, sync, coverage, install-hooks, install-skill, agent-manifest, governance",
+    "  coverage, install-skill, agent-manifest, governance",
     "",
     "Examples:",
     "  agent-memory help",

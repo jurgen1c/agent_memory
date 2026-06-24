@@ -3,12 +3,15 @@ import type { ExitCode } from "../../core/src/types";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../../core/src/version";
 import { runCompileCommand } from "./commands/compile";
 import { runContextCommand } from "./commands/context";
+import { runDoctorCommand } from "./commands/doctor";
 import { renderHelp } from "./commands/help";
+import { runInstallHooksCommand } from "./commands/install_hooks";
 import { runInitCommand } from "./commands/init";
 import { runNewCommand } from "./commands/new";
 import { runQueryCommand } from "./commands/query";
 import { runShowCommand } from "./commands/show";
 import { runSystemCommand } from "./commands/system";
+import { runSyncCommand } from "./commands/sync";
 import { runTemplatesCommand } from "./commands/templates";
 import { runValidateCommand } from "./commands/validate";
 
@@ -156,6 +159,39 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
     }
 
     return runContextCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "doctor") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("doctor")
+      };
+    }
+
+    return runDoctorCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "sync") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("sync")
+      };
+    }
+
+    return runSyncCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "install-hooks") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("install-hooks")
+      };
+    }
+
+    return runInstallHooksCommand(rest, { cwd: context.cwd });
   }
 
   if (command === "new") {

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { AgentMemoryError } from "./errors";
+import { installMemoryHooks } from "./hooks";
 import { findRepoRoot } from "./repo";
 import type { RepoInfo } from "./types";
 
@@ -27,8 +28,6 @@ export interface InitResult {
   actions: InitAction[];
   warnings: string[];
 }
-
-const DEFAULT_HOOKS = ["post-merge", "post-checkout", "post-rewrite"];
 
 export function initRepository(options: InitOptions): InitResult {
   const repo = findRepoRoot(options.cwd);
@@ -61,7 +60,9 @@ export function initRepository(options: InitOptions): InitResult {
   }
 
   if (options.installHooks) {
-    installHooks(repo.root, options.force, actions, warnings);
+    const hookResult = installMemoryHooks({ cwd: repo.root, force: options.force });
+    actions.push(...hookResult.actions);
+    warnings.push(...hookResult.warnings.filter((warning) => !warnings.includes(warning)));
   }
 
   return {
@@ -109,19 +110,6 @@ function ensureGitignoreEntry(repoRoot: string, entry: string, actions: InitActi
   const prefix = existing.length > 0 && !existing.endsWith("\n\n") ? "" : "";
   fs.writeFileSync(absolutePath, `${existing}${separator}${prefix}${entry}\n`);
   actions.push({ path: relativePath, status: existing.length > 0 ? "updated" : "created", detail: `added ${entry}` });
-}
-
-function installHooks(repoRoot: string, force: boolean, actions: InitAction[], warnings: string[]): void {
-  const gitDir = path.join(repoRoot, ".git");
-
-  if (!fs.existsSync(gitDir) || !fs.statSync(gitDir).isDirectory()) {
-    warnings.push("Git hooks were requested, but .git/ was not found.");
-    return;
-  }
-
-  for (const hookName of DEFAULT_HOOKS) {
-    writeExecutable(repoRoot, `.git/hooks/${hookName}`, hookTemplate(), force, actions);
-  }
 }
 
 function configTemplate(): string {
@@ -204,16 +192,6 @@ if command -v agent-memory >/dev/null 2>&1; then
 fi
 
 exec ${fallback} "$@"
-`;
-}
-
-function hookTemplate(): string {
-  return `#!/usr/bin/env bash
-
-if [ -x bin/memory ]; then
-  echo "Refreshing agent memory..."
-  bin/memory sync || echo "Warning: agent memory sync failed. Run bin/memory sync manually."
-fi
 `;
 }
 

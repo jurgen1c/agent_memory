@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { AgentMemoryError } from "./errors";
+import { canonicalMemoryFileInventory } from "./files";
 import { loadMemory, type LoadedMemory, type MemoryClaim, type MemoryGraphEdge } from "./memory";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
 import { validateRepository, type ValidationResult } from "./validator";
@@ -454,6 +455,8 @@ function relationKey(relation: RelationRow): string {
 
 function insertMetadata(database: SqliteDatabase, memory: LoadedMemory, databasePath: string): void {
   const configPath = memory.loadedConfig.path;
+  const memoryRoot = path.join(memory.loadedConfig.repo.root, memory.loadedConfig.config.memory_root);
+  const canonicalFileInventory = canonicalMemoryFileInventory(memoryRoot, memory.loadedConfig.config);
   const metadata: Record<string, string> = {
     schema_version: "1",
     package_version: PACKAGE_VERSION,
@@ -462,6 +465,8 @@ function insertMetadata(database: SqliteDatabase, memory: LoadedMemory, database
     compiled_at: new Date().toISOString(),
     memory_root: memory.loadedConfig.config.memory_root,
     config_hash: sha256(fs.readFileSync(configPath, "utf8")),
+    canonical_files_hash: sha256(JSON.stringify(canonicalFileInventory)),
+    canonical_files_count: String(canonicalFileInventory.length),
     database_path: databasePath
   };
 

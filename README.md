@@ -55,6 +55,14 @@ bun packages/cli/src/index.ts context --changed-files src/auth.js
 bun packages/cli/src/index.ts context --git-diff
 ```
 
+## Phase 8 Commands
+
+```bash
+bun packages/cli/src/index.ts doctor
+bun packages/cli/src/index.ts sync
+bun packages/cli/src/index.ts install-hooks
+```
+
 Build the executable bundle:
 
 ```bash

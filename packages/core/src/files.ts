@@ -1,6 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
+export interface CanonicalMemoryFilePatterns {
+  claims: string[];
+  graphs: string[];
+  indexes: string[];
+  recipes: string[];
+  waivers: string[];
+}
+
 export function discoverFiles(root: string, patterns: string[]): string[] {
   if (!fs.existsSync(root)) {
     return [];
@@ -13,6 +21,22 @@ export function discoverFiles(root: string, patterns: string[]): string[] {
       const relativePath = toPosix(path.relative(root, filePath));
       return patterns.some((pattern) => globMatches(pattern, relativePath));
     })
+    .sort();
+}
+
+export function discoverCanonicalMemoryFiles(memoryRoot: string, config: CanonicalMemoryFilePatterns): string[] {
+  return [
+    ...discoverFiles(memoryRoot, config.claims),
+    ...discoverFiles(memoryRoot, config.graphs),
+    ...discoverFiles(memoryRoot, config.indexes),
+    ...discoverFiles(memoryRoot, config.recipes),
+    ...discoverFiles(memoryRoot, config.waivers)
+  ].sort();
+}
+
+export function canonicalMemoryFileInventory(memoryRoot: string, config: CanonicalMemoryFilePatterns): string[] {
+  return discoverCanonicalMemoryFiles(memoryRoot, config)
+    .map((filePath) => toPosix(path.relative(memoryRoot, filePath)))
     .sort();
 }
 
