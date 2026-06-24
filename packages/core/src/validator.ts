@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ConfigError } from "./errors";
 import { loadConfig } from "./config";
+import { discoverFiles } from "./files";
 import { parseMarkdownFile, extractMarkdownSection } from "./markdown";
 import { parseYaml } from "./yaml";
 import { CLAIM_TYPES } from "./templates";
@@ -499,77 +500,6 @@ function validateRecipeReferences(recipes: LoadedRecipe[], claimsById: Map<strin
   }
 }
 
-function discoverFiles(memoryRoot: string, patterns: string[]): string[] {
-  if (!fs.existsSync(memoryRoot)) {
-    return [];
-  }
-
-  const allFiles = walkFiles(memoryRoot).filter((filePath) => !filePath.endsWith(".gitkeep"));
-
-  return allFiles
-    .filter((filePath) => {
-      const relativePath = toPosix(path.relative(memoryRoot, filePath));
-      return patterns.some((pattern) => globMatches(pattern, relativePath));
-    })
-    .sort();
-}
-
-function walkFiles(root: string): string[] {
-  const entries = fs.readdirSync(root, { withFileTypes: true });
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    const entryPath = path.join(root, entry.name);
-
-    if (entry.isDirectory()) {
-      files.push(...walkFiles(entryPath));
-    } else if (entry.isFile()) {
-      files.push(entryPath);
-    }
-  }
-
-  return files;
-}
-
-function globMatches(pattern: string, value: string): boolean {
-  return globToRegex(toPosix(pattern)).test(value);
-}
-
-function globToRegex(pattern: string): RegExp {
-  let source = "^";
-
-  for (let index = 0; index < pattern.length; index += 1) {
-    const char = pattern[index];
-    const next = pattern[index + 1];
-    const afterNext = pattern[index + 2];
-
-    if (char === "*" && next === "*" && afterNext === "/") {
-      source += "(?:.*/)?";
-      index += 2;
-      continue;
-    }
-
-    if (char === "*" && next === "*") {
-      source += ".*";
-      index += 1;
-      continue;
-    }
-
-    if (char === "*") {
-      source += "[^/]*";
-      continue;
-    }
-
-    source += escapeRegExp(char);
-  }
-
-  return new RegExp(`${source}$`);
-}
-
-function toPosix(value: string): string {
-  return value.split(path.sep).join("/");
-}
-
 function validateStringField(data: Record<string, unknown>, field: string, relativePath: string, code: string, issues: ValidationIssue[]): void {
   if (typeof data[field] !== "string" || String(data[field]).trim().length === 0) {
     addError(issues, code, `Missing or invalid required field: ${field}`, relativePath);
@@ -616,8 +546,4 @@ function formatCaughtError(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

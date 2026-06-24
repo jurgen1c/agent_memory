@@ -1,6 +1,7 @@
 import { AgentMemoryError, formatError, NotFoundError, toAgentMemoryError } from "../../core/src/errors";
 import type { ExitCode } from "../../core/src/types";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../../core/src/version";
+import { runCompileCommand } from "./commands/compile";
 import { renderHelp } from "./commands/help";
 import { runInitCommand } from "./commands/init";
 import { runNewCommand } from "./commands/new";
@@ -96,6 +97,17 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
     }
 
     return runValidateCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "compile") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("compile")
+      };
+    }
+
+    return runCompileCommand(rest, { cwd: context.cwd });
   }
 
   if (command === "new") {

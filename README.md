@@ -32,6 +32,13 @@ bun packages/cli/src/index.ts validate
 bun packages/cli/src/index.ts validate --json
 ```
 
+## Phase 5 Command
+
+```bash
+bun packages/cli/src/index.ts compile
+bun packages/cli/src/index.ts compile --json
+```
+
 Build the executable bundle:
 
 ```bash

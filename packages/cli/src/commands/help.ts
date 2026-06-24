@@ -37,10 +37,10 @@ const TOPICS: HelpTopic[] = [
   {
     name: "compile",
     purpose: "Compile canonical Markdown and YAML memory into repo-local SQLite.",
-    usage: ["agent-memory compile"],
+    usage: ["agent-memory compile", "agent-memory compile --db .agent-memory/memory.sqlite", "agent-memory compile --json", "agent-memory compile --verbose"],
     examples: ["agent-memory compile --json", "agent-memory compile --db .agent-memory/memory.sqlite"],
-    agentNotes: ["Planned for Phase 5. SQLite is generated cache and should not be committed."],
-    phase: "Phase 5 planned"
+    agentNotes: ["SQLite is generated cache and should not be committed."],
+    phase: "Phase 5"
   },
   {
     name: "validate",
@@ -128,10 +128,11 @@ export function renderHelp(topicName?: string): string {
     "  templates            List, show, and copy built-in templates.",
     "  new claim            Create a claim from a built-in template.",
     "  validate             Validate canonical memory files.",
+    "  compile              Build the repo-local SQLite memory cache.",
     "  --version            Print package version.",
     "",
     "Planned command groups:",
-    "  compile, query, show, system, context, doctor, sync, coverage, install-hooks, install-skill, agent-manifest, governance",
+    "  query, show, system, context, doctor, sync, coverage, install-hooks, install-skill, agent-manifest, governance",
     "",
     "Examples:",
     "  agent-memory help",
