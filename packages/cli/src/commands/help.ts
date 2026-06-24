@@ -161,6 +161,48 @@ const TOPICS: HelpTopic[] = [
     examples: ["agent-memory install-hooks", "agent-memory install-hooks --force"],
     agentNotes: ["Hooks warn but do not block git operations."],
     phase: "Phase 8"
+  },
+  {
+    name: "install-skill",
+    purpose: "Install agent-specific repository memory instructions from configured paths.",
+    usage: [
+      "agent-memory install-skill --agent codex",
+      "agent-memory install-skill --agent generic",
+      "agent-memory install-skill --agent codex --kind migration",
+      "agent-memory install-skill --agent codex --location .codex",
+      "agent-memory install-skill --agent generic --location .agents",
+      "agent-memory install-skill --agent codex --location .agent-skills",
+      "agent-memory install-skill --agent codex --path .codex/skills/repo-memory/SKILL.md",
+      "agent-memory install-skill --agent codex --force",
+      "agent-memory install-skill --agent generic --json"
+    ],
+    examples: ["agent-memory install-skill --agent codex", "agent-memory install-skill --agent codex --kind migration"],
+    agentNotes: ["Use --location for roots like .codex, .agents, or .claude; migration skills write under repo-memory-migration."],
+    phase: "Phase 10"
+  },
+  {
+    name: "migrate-docs",
+    purpose: "Plan or create current memory drafts from existing repository docs.",
+    usage: [
+      "agent-memory migrate-docs --from docs/legacy --system auth",
+      "agent-memory migrate-docs --from docs/legacy --system auth --automatic",
+      "agent-memory migrate-docs --from docs/legacy --system auth --automatic --force",
+      "agent-memory migrate-docs --from docs/legacy --system auth --json"
+    ],
+    examples: [
+      "agent-memory migrate-docs --from docs/legacy --system auth",
+      "agent-memory migrate-docs --from docs/legacy --system auth --automatic"
+    ],
+    agentNotes: ["Automatic mode creates current, low-confidence drafts; agents must review and split them into precise atomic claims."],
+    phase: "Phase 10"
+  },
+  {
+    name: "agent-manifest",
+    purpose: "Return machine-readable command descriptions and repo-specific memory paths for agents.",
+    usage: ["agent-memory agent-manifest", "agent-memory agent-manifest --json"],
+    examples: ["agent-memory agent-manifest --json"],
+    agentNotes: ["Use this when an agent needs a compact list of available memory commands."],
+    phase: "Phase 10"
   }
 ];
 
@@ -200,10 +242,13 @@ export function renderHelp(topicName?: string): string {
     "  doctor               Check compiled database health.",
     "  sync                 Compile, validate, and doctor memory.",
     "  install-hooks        Install non-blocking git sync hooks.",
+    "  install-skill        Install agent memory instructions.",
+    "  migrate-docs         Plan or draft memory from existing docs.",
+    "  agent-manifest       Print machine-readable agent command metadata.",
     "  --version            Print package version.",
     "",
     "Planned command groups:",
-    "  install-skill, agent-manifest, governance",
+    "  governance",
     "",
     "Examples:",
     "  agent-memory help",

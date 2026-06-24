@@ -1,3 +1,4 @@
+export * from "./agent_commands";
 export * from "./config";
 export * from "./compiler";
 export * from "./context_builder";
@@ -9,9 +10,12 @@ export * from "./hooks";
 export * from "./init";
 export * from "./markdown";
 export * from "./memory";
+export * from "./manifest";
+export * from "./migration";
 export * from "./repo";
 export * from "./retrieval";
 export * from "./sqlite";
+export * from "./skills";
 export * from "./sync";
 export * from "./templates";
 export * from "./types";

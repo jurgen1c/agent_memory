@@ -2,12 +2,12 @@ import {
   initRepository,
   parseInitAgent,
   parseInitPackageManager,
-  type AgentTarget,
   type InitOptions,
   type InitResult,
   type PackageManager
 } from "../../../core/src/init";
 import { AgentMemoryError } from "../../../core/src/errors";
+import type { AgentTarget } from "../../../core/src/skills";
 
 export interface InitCommandContext {
   cwd?: string;

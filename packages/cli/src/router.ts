@@ -1,12 +1,15 @@
 import { AgentMemoryError, formatError, NotFoundError, toAgentMemoryError } from "../../core/src/errors";
 import type { ExitCode } from "../../core/src/types";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../../core/src/version";
+import { runAgentManifestCommand } from "./commands/agent_manifest";
 import { runCompileCommand } from "./commands/compile";
 import { runContextCommand } from "./commands/context";
 import { runCoverageCommand } from "./commands/coverage";
 import { runDoctorCommand } from "./commands/doctor";
 import { renderHelp } from "./commands/help";
 import { runInstallHooksCommand } from "./commands/install_hooks";
+import { runInstallSkillCommand } from "./commands/install_skill";
+import { runMigrateDocsCommand } from "./commands/migrate_docs";
 import { runInitCommand } from "./commands/init";
 import { runNewCommand } from "./commands/new";
 import { runQueryCommand } from "./commands/query";
@@ -204,6 +207,39 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
     }
 
     return runInstallHooksCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "install-skill") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("install-skill")
+      };
+    }
+
+    return runInstallSkillCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "agent-manifest") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("agent-manifest")
+      };
+    }
+
+    return runAgentManifestCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "migrate-docs") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("migrate-docs")
+      };
+    }
+
+    return runMigrateDocsCommand(rest, { cwd: context.cwd });
   }
 
   if (command === "new") {

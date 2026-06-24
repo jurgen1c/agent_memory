@@ -71,6 +71,20 @@ bun packages/cli/src/index.ts coverage --git-diff
 bun packages/cli/src/index.ts coverage --git-diff --base origin/main
 ```
 
+## Phase 10 Commands
+
+```bash
+bun packages/cli/src/index.ts install-skill --agent codex
+bun packages/cli/src/index.ts install-skill --agent codex --kind migration
+bun packages/cli/src/index.ts install-skill --agent codex --location .codex
+bun packages/cli/src/index.ts install-skill --agent generic --location .agents
+bun packages/cli/src/index.ts install-skill --agent codex --location .agent-skills
+bun packages/cli/src/index.ts install-skill --agent generic
+bun packages/cli/src/index.ts migrate-docs --from docs/legacy --system auth
+bun packages/cli/src/index.ts migrate-docs --from docs/legacy --system auth --automatic
+bun packages/cli/src/index.ts agent-manifest --json
+```
+
 Build the executable bundle:
 
 ```bash
