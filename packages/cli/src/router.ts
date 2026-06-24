@@ -5,6 +5,9 @@ import { runCompileCommand } from "./commands/compile";
 import { renderHelp } from "./commands/help";
 import { runInitCommand } from "./commands/init";
 import { runNewCommand } from "./commands/new";
+import { runQueryCommand } from "./commands/query";
+import { runShowCommand } from "./commands/show";
+import { runSystemCommand } from "./commands/system";
 import { runTemplatesCommand } from "./commands/templates";
 import { runValidateCommand } from "./commands/validate";
 
@@ -108,6 +111,39 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
     }
 
     return runCompileCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "query") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("query")
+      };
+    }
+
+    return runQueryCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "show") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("show")
+      };
+    }
+
+    return runShowCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "system") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("system")
+      };
+    }
+
+    return runSystemCommand(rest, { cwd: context.cwd });
   }
 
   if (command === "new") {

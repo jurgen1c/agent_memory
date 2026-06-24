@@ -6,6 +6,7 @@ export * from "./init";
 export * from "./markdown";
 export * from "./memory";
 export * from "./repo";
+export * from "./retrieval";
 export * from "./sqlite";
 export * from "./templates";
 export * from "./types";

@@ -60,8 +60,27 @@ const TOPICS: HelpTopic[] = [
     purpose: "Search compiled memory by text and metadata.",
     usage: ['agent-memory query "student oauth tenant"'],
     examples: ['agent-memory query "oauth" --system auth', 'agent-memory query "oauth" --json'],
-    agentNotes: ["Planned for Phase 6. Prefer query over manually scanning memory files."],
-    phase: "Phase 6 planned"
+    agentNotes: ["Requires a compiled SQLite database. Prefer query over manually scanning memory files."],
+    phase: "Phase 6"
+  },
+  {
+    name: "show",
+    purpose: "Show one compiled claim and optionally its graph-related claims.",
+    usage: ["agent-memory show <claim-id>", "agent-memory show <claim-id> --include-related", "agent-memory show <claim-id> --depth 2", "agent-memory show <claim-id> --json"],
+    examples: [
+      "agent-memory show auth.student_oauth.uid_is_tenant_scoped",
+      "agent-memory show auth.student_oauth.uid_is_tenant_scoped --include-related"
+    ],
+    agentNotes: ["Use show when you need exact claim metadata, source files, tags, or related constraints."],
+    phase: "Phase 6"
+  },
+  {
+    name: "system",
+    purpose: "Summarize compiled memory for one system.",
+    usage: ["agent-memory system <system>", "agent-memory system <system> --json"],
+    examples: ["agent-memory system auth", "agent-memory system tenancy --json"],
+    agentNotes: ["Use system before editing a subsystem to inspect its critical claims, recipes, watched files, and graph activity."],
+    phase: "Phase 6"
   },
   {
     name: "templates",
@@ -129,10 +148,13 @@ export function renderHelp(topicName?: string): string {
     "  new claim            Create a claim from a built-in template.",
     "  validate             Validate canonical memory files.",
     "  compile              Build the repo-local SQLite memory cache.",
+    "  query                Search compiled claims.",
+    "  show                 Show one compiled claim.",
+    "  system               Summarize compiled memory for one system.",
     "  --version            Print package version.",
     "",
     "Planned command groups:",
-    "  query, show, system, context, doctor, sync, coverage, install-hooks, install-skill, agent-manifest, governance",
+    "  context, doctor, sync, coverage, install-hooks, install-skill, agent-manifest, governance",
     "",
     "Examples:",
     "  agent-memory help",

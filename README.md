@@ -39,6 +39,14 @@ bun packages/cli/src/index.ts compile
 bun packages/cli/src/index.ts compile --json
 ```
 
+## Phase 6 Commands
+
+```bash
+bun packages/cli/src/index.ts query "student oauth tenant"
+bun packages/cli/src/index.ts show auth.student_oauth.uid_is_tenant_scoped --include-related
+bun packages/cli/src/index.ts system auth
+```
+
 Build the executable bundle:
 
 ```bash
