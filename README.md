@@ -54,6 +54,14 @@ bin/memory context --changed-files src/auth.js
 bin/memory context --git-diff
 ```
 
+Open the local browser UI when you want to inspect memory visually:
+
+```bash
+bin/memory ui
+```
+
+The command prints a local URL with a session token. Open that URL in your browser and keep the command running while using the UI.
+
 When behavior changes, add or update memory before finishing:
 
 ```bash
@@ -83,6 +91,7 @@ Use `agent-memory help <command>` for full usage and examples.
 | `doctor` | Check whether the compiled database exists, is fresh, and is compatible. |
 | `sync` | Compile, validate, and doctor memory in one command. |
 | `install-hooks` | Install non-blocking git hooks that run `bin/memory sync`. |
+| `ui` | Serve a local browser UI for inspecting and reviewing repository memory. |
 | `install-skill` | Install repository memory instructions under `.codex`, `.agents`, `.claude`, or a custom path. |
 | `migrate-docs` | Plan or create starter memory drafts from existing repository docs. |
 | `agent-manifest` | Print machine-readable command metadata and repo-specific paths for agents. |
@@ -93,11 +102,61 @@ Useful examples:
 bin/memory query "student oauth tenant" --system auth
 bin/memory show auth.student_oauth.uid_is_tenant_scoped --include-related
 bin/memory system auth --json
+bin/memory ui --port 0
 bin/memory install-skill --agent codex --location .codex
 bin/memory install-skill --agent codex --kind migration
 bin/memory migrate-docs --from docs/legacy --system auth
 bin/memory migrate-docs --from docs/legacy --system auth --automatic
 bin/memory agent-manifest --json
+```
+
+## Local Web UI
+
+The UI is a local developer tool for browsing and reviewing canonical memory files. It is not a hosted service.
+
+Start it from the repository that owns the memory:
+
+```bash
+bin/memory ui
+```
+
+By default the server binds to `127.0.0.1:4317`. If the port is busy, it automatically tries the next available port. Use `--port 0` to request an ephemeral port:
+
+```bash
+bin/memory ui --port 0
+bin/memory ui --host 127.0.0.1 --port 4317
+bin/memory ui --json
+```
+
+The command prints:
+
+- URL: browser URL with the session token in the query string.
+- Session token: required for write actions such as review updates and sync.
+- Static assets: packaged UI asset location.
+
+Keep the process running while the browser is open. The UI serves only from the local machine by default; do not bind it to a public interface unless you understand the exposure.
+
+The UI includes:
+
+- Graph view: pan, zoom, drag, minimap, claim nodes, explicit graph edges, optional inferred/recipe/replacement relations, filters, and search.
+- File view: tree rooted at `memory_root`, including claims, graph files, indexes, recipes, and waivers.
+- Detail drawer: claim metadata, Markdown body, related claims, source files, tags, review controls, and copy helpers.
+- Review queue: claims sorted by review risk, including `needs_review`, `needs_verification`, `proposed`, migrated low-confidence claims, stale claims, and deprecated claims.
+- Health banner: validation errors, doctor warnings, missing or stale database state, and sync status.
+
+Review actions update only claim frontmatter and preserve the Markdown body plus unknown frontmatter fields. `Approve` sets:
+
+```yaml
+status: current
+confidence: high
+```
+
+The status dropdown can also set `proposed`, `stale`, `deprecated`, `experimental`, `needs_verification`, `needs_review`, or `rejected`. After a write, the server validates memory immediately and recompiles the SQLite cache when validation passes.
+
+If the health banner says the database is missing or stale, click `Sync` in the UI or run:
+
+```bash
+bin/memory sync
 ```
 
 ## Claim Authoring Guide
@@ -233,6 +292,14 @@ cd "$tmpdir"
 "$repo_root/dist/agent-memory.js" context --task "fix student oauth"
 "$repo_root/dist/agent-memory.js" coverage --changed-files README.md
 ```
+
+Run the web UI against a temporary copy of the mock app:
+
+```bash
+bun run ui:mock
+```
+
+The script builds the package, copies `examples/mock-app` to `/tmp`, seeds one proposed claim for the review queue, and starts `agent-memory ui --port 0`. Use `bun run ui:mock -- --clean` to skip the seeded review item or `bun run ui:mock -- --no-build` to reuse the existing build.
 
 ## Publishing and Versioning
 

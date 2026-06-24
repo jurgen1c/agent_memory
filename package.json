@@ -14,6 +14,20 @@
   "bin": {
     "agent-memory": "dist/agent-memory.js"
   },
+  "dependencies": {
+    "@xyflow/react": "^12.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^7.0.0"
+  },
   "files": [
     "dist/",
     "packages/",
@@ -24,10 +38,12 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bun build packages/cli/src/index.ts --target=node --outfile=dist/agent-memory.js",
+    "build": "bun run build:web && bun build packages/cli/src/index.ts --target=node --outfile=dist/agent-memory.js",
+    "build:web": "bun run --cwd packages/web build",
     "test": "bun test",
     "test:coverage": "bun test --coverage",
     "dev": "bun packages/cli/src/index.ts",
+    "ui:mock": "scripts/run-mock-ui.sh",
     "prepack": "bun run build"
   },
   "engines": {

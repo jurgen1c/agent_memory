@@ -17,6 +17,7 @@ import { runShowCommand } from "./commands/show";
 import { runSystemCommand } from "./commands/system";
 import { runSyncCommand } from "./commands/sync";
 import { runTemplatesCommand } from "./commands/templates";
+import { runUiCommand } from "./commands/ui";
 import { runValidateCommand } from "./commands/validate";
 
 export interface CliStreams {
@@ -207,6 +208,17 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
     }
 
     return runInstallHooksCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "ui") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("ui")
+      };
+    }
+
+    return runUiCommand(rest, { cwd: context.cwd });
   }
 
   if (command === "install-skill") {

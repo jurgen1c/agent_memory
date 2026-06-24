@@ -19,6 +19,8 @@ export * from "./skills";
 export * from "./sync";
 export * from "./templates";
 export * from "./types";
+export * from "./ui_model";
+export * from "./ui_server";
 export * from "./validator";
 export * from "./version";
 export * from "./yaml";

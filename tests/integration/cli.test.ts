@@ -31,6 +31,7 @@ describe("CLI", () => {
       "doctor",
       "sync",
       "install-hooks",
+      "ui",
       "install-skill",
       "agent-manifest",
       "migrate-docs",

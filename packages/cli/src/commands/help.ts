@@ -163,6 +163,14 @@ const TOPICS: HelpTopic[] = [
     phase: "Phase 8"
   },
   {
+    name: "ui",
+    purpose: "Serve a local browser UI for inspecting and reviewing repository memory.",
+    usage: ["agent-memory ui", "agent-memory ui --port 0", "agent-memory ui --host 127.0.0.1 --port 4317", "agent-memory ui --json"],
+    examples: ["agent-memory ui", "agent-memory ui --port 0"],
+    agentNotes: ["The UI binds locally by default and uses a session token for write actions."],
+    phase: "Future UI"
+  },
+  {
     name: "install-skill",
     purpose: "Install agent-specific repository memory instructions from configured paths.",
     usage: [
@@ -242,6 +250,7 @@ export function renderHelp(topicName?: string): string {
     "  doctor               Check compiled database health.",
     "  sync                 Compile, validate, and doctor memory.",
     "  install-hooks        Install non-blocking git sync hooks.",
+    "  ui                   Serve the local memory review UI.",
     "  install-skill        Install agent memory instructions.",
     "  migrate-docs         Plan or draft memory from existing docs.",
     "  agent-manifest       Print machine-readable agent command metadata.",
