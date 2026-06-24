@@ -25,6 +25,13 @@ bun packages/cli/src/index.ts templates show claim:constraint
 bun packages/cli/src/index.ts new claim --type fact --system auth --title "Student OAuth UID is tenant scoped"
 ```
 
+## Phase 4 Command
+
+```bash
+bun packages/cli/src/index.ts validate
+bun packages/cli/src/index.ts validate --json
+```
+
 Build the executable bundle:
 
 ```bash

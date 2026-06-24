@@ -5,6 +5,7 @@ import { renderHelp } from "./commands/help";
 import { runInitCommand } from "./commands/init";
 import { runNewCommand } from "./commands/new";
 import { runTemplatesCommand } from "./commands/templates";
+import { runValidateCommand } from "./commands/validate";
 
 export interface CliStreams {
   stdout: Pick<NodeJS.WriteStream, "write">;
@@ -84,6 +85,17 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
       exitCode: 0,
       stdout: runTemplatesCommand(rest, context.cwd)
     };
+  }
+
+  if (command === "validate") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("validate")
+      };
+    }
+
+    return runValidateCommand(rest, { cwd: context.cwd });
   }
 
   if (command === "new") {

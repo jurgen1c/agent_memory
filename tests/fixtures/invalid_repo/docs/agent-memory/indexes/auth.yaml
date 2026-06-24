@@ -1,0 +1,12 @@
+id: auth
+name: Auth
+summary: Invalid auth fixture.
+
+claim_globs:
+  - claims/auth/**/*.md
+
+watched_files:
+  - src/auth.js
+
+tags:
+  - auth

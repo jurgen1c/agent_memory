@@ -32,7 +32,7 @@ export function parseYaml(input: string): YamlValue {
         throw yamlError(line, "List item found where a mapping entry was expected.");
       }
 
-      parseArrayItem(parent, line, lines, index, stack);
+      index = parseArrayItem(parent, line, lines, index, stack);
       continue;
     }
 
@@ -46,6 +46,10 @@ export function parseYaml(input: string): YamlValue {
       const child = createContainerForNextLine(lines, index);
       parent[entry.key] = child;
       stack.push({ indent: line.indent, value: child });
+    } else if (isBlockScalar(entry.value)) {
+      const block = readBlockScalar(lines, index, line.indent, entry.value);
+      parent[entry.key] = block.value;
+      index = block.lastIndex;
     } else {
       parent[entry.key] = parseScalar(entry.value, line);
     }
@@ -81,14 +85,14 @@ function parseArrayItem(
   lines: ParsedLine[],
   index: number,
   stack: StackFrame[]
-): void {
+): number {
   const item = line.text.slice(2).trim();
 
   if (item.length === 0) {
     const child = createContainerForNextLine(lines, index);
     parent.push(child);
     stack.push({ indent: line.indent, value: child });
-    return;
+    return index;
   }
 
   if (looksLikeMapping(item)) {
@@ -101,16 +105,25 @@ function parseArrayItem(
       parent.push(object);
       stack.push({ indent: line.indent, value: object });
       stack.push({ indent: line.indent + 2, value: child });
-      return;
+      return index;
+    }
+
+    if (isBlockScalar(entry.value)) {
+      const block = readBlockScalar(lines, index, line.indent, entry.value);
+      object[entry.key] = block.value;
+      parent.push(object);
+      stack.push({ indent: line.indent, value: object });
+      return block.lastIndex;
     }
 
     object[entry.key] = parseScalar(entry.value, line);
     parent.push(object);
     stack.push({ indent: line.indent, value: object });
-    return;
+    return index;
   }
 
   parent.push(parseScalar(item, line));
+  return index;
 }
 
 function createContainerForNextLine(lines: ParsedLine[], index: number): YamlValue[] | { [key: string]: YamlValue } {
@@ -175,11 +188,37 @@ function parseScalar(value: string, line: ParsedLine): YamlValue {
     return value.slice(1, -1);
   }
 
-  if (value === ">" || value === "|") {
-    throw yamlError(line, "Block scalar YAML values are not supported by the Phase 1 parser.");
+  return value;
+}
+
+function isBlockScalar(value: string): value is ">" | "|" {
+  return value === ">" || value === "|";
+}
+
+function readBlockScalar(
+  lines: ParsedLine[],
+  index: number,
+  parentIndent: number,
+  style: ">" | "|"
+): { value: string; lastIndex: number } {
+  const values: string[] = [];
+  let lastIndex = index;
+
+  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    const line = lines[cursor];
+
+    if (line.indent <= parentIndent) {
+      break;
+    }
+
+    values.push(line.text);
+    lastIndex = cursor;
   }
 
-  return value;
+  return {
+    value: style === ">" ? values.join(" ") : values.join("\n"),
+    lastIndex
+  };
 }
 
 function yamlError(line: ParsedLine, message: string): ConfigError {

@@ -1,0 +1,10 @@
+id: recipe.auth.broken
+title: Broken auth recipe
+system: auth
+status: current
+
+required_claims:
+  - auth.missing.recipe_claim
+
+steps:
+  - Confirm missing recipe claims are rejected.

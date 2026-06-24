@@ -45,10 +45,15 @@ const TOPICS: HelpTopic[] = [
   {
     name: "validate",
     purpose: "Validate config, claims, graphs, indexes, recipes, and coverage rules.",
-    usage: ["agent-memory validate"],
+    usage: [
+      "agent-memory validate",
+      "agent-memory validate --json",
+      "agent-memory validate --strict",
+      "agent-memory validate --changed-files file1 file2"
+    ],
     examples: ["agent-memory validate --json", "agent-memory validate --strict"],
-    agentNotes: ["Planned for Phase 4. Validation prevents drift and ambiguous memory."],
-    phase: "Phase 4 planned"
+    agentNotes: ["Validation prevents drift, broken references, missing evidence, and ambiguous memory."],
+    phase: "Phase 4"
   },
   {
     name: "query",
@@ -122,10 +127,11 @@ export function renderHelp(topicName?: string): string {
     "  init                 Scaffold memory files in a consuming repository.",
     "  templates            List, show, and copy built-in templates.",
     "  new claim            Create a claim from a built-in template.",
+    "  validate             Validate canonical memory files.",
     "  --version            Print package version.",
     "",
     "Planned command groups:",
-    "  validate, compile, query, show, system, context, doctor, sync, coverage, install-hooks, install-skill, agent-manifest, governance",
+    "  compile, query, show, system, context, doctor, sync, coverage, install-hooks, install-skill, agent-manifest, governance",
     "",
     "Examples:",
     "  agent-memory help",

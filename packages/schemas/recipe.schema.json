@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Memory Recipe",
+  "type": "object",
+  "required": ["id", "title", "system", "status"],
+  "properties": {
+    "id": { "type": "string" },
+    "title": { "type": "string" },
+    "system": { "type": "string" },
+    "status": { "enum": ["current", "proposed", "stale", "deprecated", "experimental", "needs_verification", "needs_review", "rejected"] },
+    "required_claims": { "type": "array", "items": { "type": "string" } },
+    "intent_triggers": { "type": "array", "items": { "type": "string" } },
+    "relevant_files": { "type": "array", "items": { "type": "string" } },
+    "steps": { "type": "array", "items": { "type": "string" } },
+    "verification": { "type": "array", "items": { "type": "string" } }
+  }
+}
