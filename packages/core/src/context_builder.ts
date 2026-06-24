@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
 import { loadConfig } from "./config";
 import { NotFoundError } from "./errors";
-import { pathMatchesPattern, toPosix } from "./files";
+import { pathMatchesPattern } from "./files";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
 
 export type ContextBudget = "small" | "medium" | "full";
@@ -422,49 +422,6 @@ function warningLines(claims: ContextClaim[]): string[] {
   return claims
     .filter((claim) => ["stale", "deprecated", "needs_verification", "proposed", "needs_review"].includes(claim.status))
     .map((claim) => `${claim.id} has status ${claim.status}.`);
-}
-
-function readGitDiffFiles(repoRoot: string): string[] {
-  const commands: string[][] = [
-    ["diff", "--name-only", "HEAD"],
-    ["diff", "--cached", "--name-only"],
-    ["ls-files", "--others", "--exclude-standard"]
-  ];
-  const files = new Set<string>();
-
-  for (const args of commands) {
-    try {
-      const output = execFileSync("git", args, {
-        cwd: repoRoot,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"]
-      });
-
-      for (const line of output.split(/\r?\n/)) {
-        const file = line.trim();
-
-        if (file.length > 0) {
-          files.add(toPosix(file));
-        }
-      }
-    } catch {
-      // Ignore git diff failures. Repos without commits can still use --changed-files.
-    }
-  }
-
-  return Array.from(files);
-}
-
-function normalizeChangedFiles(files: string[], repoRoot: string): string[] {
-  return files
-    .map((file) => file.trim())
-    .filter((file) => file.length > 0)
-    .map((file) => {
-      const normalized = path.normalize(file);
-      const relative = path.isAbsolute(normalized) ? path.relative(repoRoot, normalized) : normalized;
-      return toPosix(relative).replace(/^(?:\.\/)+/, "");
-    })
-    .filter((file) => file.length > 0 && file !== ".");
 }
 
 function toFtsQuery(query: string): string {

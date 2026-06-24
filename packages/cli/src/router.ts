@@ -3,6 +3,7 @@ import type { ExitCode } from "../../core/src/types";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../../core/src/version";
 import { runCompileCommand } from "./commands/compile";
 import { runContextCommand } from "./commands/context";
+import { runCoverageCommand } from "./commands/coverage";
 import { runDoctorCommand } from "./commands/doctor";
 import { renderHelp } from "./commands/help";
 import { runInstallHooksCommand } from "./commands/install_hooks";
@@ -159,6 +160,17 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
     }
 
     return runContextCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "coverage") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("coverage")
+      };
+    }
+
+    return runCoverageCommand(rest, { cwd: context.cwd });
   }
 
   if (command === "doctor") {

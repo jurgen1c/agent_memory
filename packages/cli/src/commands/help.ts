@@ -126,6 +126,19 @@ const TOPICS: HelpTopic[] = [
     phase: "Phase 7"
   },
   {
+    name: "coverage",
+    purpose: "Check whether changed watched files have related memory updates or valid waivers.",
+    usage: [
+      "agent-memory coverage --changed-files file1 file2",
+      "agent-memory coverage --git-diff",
+      "agent-memory coverage --git-diff --base origin/main",
+      "agent-memory coverage --git-diff --json"
+    ],
+    examples: ["agent-memory coverage --changed-files src/auth.js", "agent-memory coverage --git-diff --base origin/main"],
+    agentNotes: ["Returns exit code 6 when watched code changed without a related claim, index, recipe, or waiver."],
+    phase: "Phase 9"
+  },
+  {
     name: "doctor",
     purpose: "Check whether the compiled SQLite database is present, fresh, and compatible.",
     usage: ["agent-memory doctor", "agent-memory doctor --json"],
@@ -183,13 +196,14 @@ export function renderHelp(topicName?: string): string {
     "  show                 Show one compiled claim.",
     "  system               Summarize compiled memory for one system.",
     "  context              Build agent-ready task or file context.",
+    "  coverage             Check watched-file memory coverage.",
     "  doctor               Check compiled database health.",
     "  sync                 Compile, validate, and doctor memory.",
     "  install-hooks        Install non-blocking git sync hooks.",
     "  --version            Print package version.",
     "",
     "Planned command groups:",
-    "  coverage, install-skill, agent-manifest, governance",
+    "  install-skill, agent-manifest, governance",
     "",
     "Examples:",
     "  agent-memory help",

@@ -63,6 +63,14 @@ bun packages/cli/src/index.ts sync
 bun packages/cli/src/index.ts install-hooks
 ```
 
+## Phase 9 Commands
+
+```bash
+bun packages/cli/src/index.ts coverage --changed-files src/auth.js
+bun packages/cli/src/index.ts coverage --git-diff
+bun packages/cli/src/index.ts coverage --git-diff --base origin/main
+```
+
 Build the executable bundle:
 
 ```bash

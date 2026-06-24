@@ -1,6 +1,7 @@
 export * from "./config";
 export * from "./compiler";
 export * from "./context_builder";
+export * from "./coverage";
 export * from "./doctor";
 export * from "./errors";
 export * from "./files";
