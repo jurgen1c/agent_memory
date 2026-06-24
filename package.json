@@ -2,6 +2,14 @@
   "name": "agent-memory",
   "version": "0.1.0",
   "description": "Repository-local agent memory CLI based on atomic claims and generated indexes.",
+  "license": "MIT",
+  "keywords": [
+    "agent",
+    "memory",
+    "cli",
+    "codex",
+    "repository"
+  ],
   "type": "module",
   "bin": {
     "agent-memory": "dist/agent-memory.js"
@@ -19,9 +27,10 @@
     "build": "bun build packages/cli/src/index.ts --target=node --outfile=dist/agent-memory.js",
     "test": "bun test",
     "test:coverage": "bun test --coverage",
-    "dev": "bun packages/cli/src/index.ts"
+    "dev": "bun packages/cli/src/index.ts",
+    "prepack": "bun run build"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=25"
   }
 }
