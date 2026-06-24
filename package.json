@@ -1,0 +1,26 @@
+{
+  "name": "agent-memory",
+  "version": "0.1.0",
+  "description": "Repository-local agent memory CLI based on atomic claims and generated indexes.",
+  "type": "module",
+  "bin": {
+    "agent-memory": "dist/agent-memory.js"
+  },
+  "files": [
+    "dist/",
+    "packages/",
+    "README.md",
+    "LICENSE"
+  ],
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun build packages/cli/src/index.ts --target=node --outfile=dist/agent-memory.js",
+    "test": "bun test",
+    "dev": "bun packages/cli/src/index.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

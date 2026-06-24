@@ -1,0 +1,23 @@
+id: auth
+name: Authentication
+summary: Student OAuth identity resolution and tenant-aware auth behavior.
+
+claim_globs:
+  - claims/auth/**/*.md
+
+recipe_globs:
+  - recipes/auth/**/*.yaml
+
+default_queries:
+  - oauth
+  - student login
+  - tenant
+
+watched_files:
+  - src/auth.js
+  - src/tenant.js
+
+tags:
+  - auth
+  - oauth
+  - tenancy

@@ -1,0 +1,25 @@
+# Agent Memory
+
+`agent-memory` is a repository-local CLI for maintaining agent-readable memory from canonical Markdown and YAML files.
+
+This repository is being built phase by phase from `agent-memory-tool-development-spec.md`.
+
+## Phase 1 Commands
+
+```bash
+bun packages/cli/src/index.ts help
+bun packages/cli/src/index.ts --version
+```
+
+Build the executable bundle:
+
+```bash
+bun run build
+dist/agent-memory.js help
+```
+
+Run tests:
+
+```bash
+bun test
+```

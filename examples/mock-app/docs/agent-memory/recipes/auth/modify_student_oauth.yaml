@@ -1,0 +1,26 @@
+id: recipe.auth.modify_student_oauth
+title: Modify student OAuth safely
+system: auth
+status: current
+
+required_claims:
+  - auth.student_oauth.uid_is_tenant_scoped
+  - tenancy.current_tenant.required_for_student_auth
+
+intent_triggers:
+  - modify student oauth
+  - fix student login
+  - change oauth tenant behavior
+
+relevant_files:
+  - src/auth.js
+  - src/tenant.js
+
+steps:
+  - Query current auth and tenancy claims.
+  - Keep provider user IDs scoped by tenant.
+  - Test overlapping provider user IDs across tenants.
+  - Update or add atomic claims if behavior changes.
+
+verification:
+  - bun test
