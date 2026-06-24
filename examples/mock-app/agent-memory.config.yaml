@@ -1,0 +1,45 @@
+version: 1
+memory_root: docs/agent-memory
+database_path: .agent-memory/memory.sqlite
+
+claims:
+  - claims/**/*.md
+
+graphs:
+  - graph/**/*.yaml
+
+indexes:
+  - indexes/**/*.yaml
+
+recipes:
+  - recipes/**/*.yaml
+
+waivers:
+  - waivers/**/*.yaml
+
+agent_skills:
+  codex:
+    enabled: true
+    path: .codex/skills/repo-memory/SKILL.md
+  generic:
+    enabled: true
+    path: docs/agent-memory/AGENT_SKILL.md
+
+git:
+  install_hooks: true
+  hooks:
+    - post-merge
+    - post-checkout
+    - post-rewrite
+
+validation:
+  require_source_files: true
+  require_verification: true
+  reject_multi_claim_documents: true
+  require_unique_titles_within_system: true
+  require_claim_file_matches_id: false
+
+context:
+  default_budget: medium
+  default_depth: 1
+  include_inferred_edges_by_default: false

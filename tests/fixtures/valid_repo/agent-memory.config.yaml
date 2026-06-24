@@ -1,0 +1,18 @@
+version: 1
+memory_root: docs/agent-memory
+database_path: .agent-memory/memory.sqlite
+
+claims:
+  - claims/**/*.md
+
+graphs:
+  - graph/**/*.yaml
+
+indexes:
+  - indexes/**/*.yaml
+
+recipes:
+  - recipes/**/*.yaml
+
+waivers:
+  - waivers/**/*.yaml

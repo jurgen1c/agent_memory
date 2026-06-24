@@ -1,0 +1,10 @@
+id: graph.auth_tenancy
+name: Auth and Tenancy Claim Relationships
+
+edges:
+  - source: auth.student_oauth.uid_is_tenant_scoped
+    target: tenancy.current_tenant.required_for_student_auth
+    relation: requires
+    reason: Student OAuth identity resolution depends on tenant context.
+    strength: 95
+    bidirectional: false

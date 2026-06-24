@@ -1,0 +1,10 @@
+id: graph.auth
+name: Invalid auth graph
+
+edges:
+  - source: auth.broken.missing_source
+    target: auth.missing.claim
+    relation: requires
+    reason: This intentionally points to a missing claim.
+    strength: 90
+    bidirectional: false
