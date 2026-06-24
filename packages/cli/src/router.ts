@@ -3,6 +3,8 @@ import type { ExitCode } from "../../core/src/types";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../../core/src/version";
 import { renderHelp } from "./commands/help";
 import { runInitCommand } from "./commands/init";
+import { runNewCommand } from "./commands/new";
+import { runTemplatesCommand } from "./commands/templates";
 
 export interface CliStreams {
   stdout: Pick<NodeJS.WriteStream, "write">;
@@ -67,6 +69,34 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
     return {
       exitCode: 0,
       stdout: runInitCommand(rest, { cwd: context.cwd })
+    };
+  }
+
+  if (command === "templates") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("templates")
+      };
+    }
+
+    return {
+      exitCode: 0,
+      stdout: runTemplatesCommand(rest, context.cwd)
+    };
+  }
+
+  if (command === "new") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("new")
+      };
+    }
+
+    return {
+      exitCode: 0,
+      stdout: await runNewCommand(rest, { cwd: context.cwd })
     };
   }
 

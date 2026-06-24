@@ -59,6 +59,34 @@ const TOPICS: HelpTopic[] = [
     phase: "Phase 6 planned"
   },
   {
+    name: "templates",
+    purpose: "List, show, or copy built-in claim templates.",
+    usage: [
+      "agent-memory templates list",
+      "agent-memory templates show claim:fact",
+      "agent-memory templates show claim:constraint",
+      "agent-memory templates copy claim:fact --to /tmp/fact.md"
+    ],
+    examples: ["agent-memory templates list", "agent-memory templates show claim:constraint"],
+    agentNotes: ["Use templates before creating claims so the durable memory shape stays consistent."],
+    phase: "Phase 3"
+  },
+  {
+    name: "new",
+    purpose: "Create new memory artifacts from templates.",
+    usage: [
+      "agent-memory new claim --type fact --system auth --title \"Student OAuth UID is tenant scoped\"",
+      "agent-memory new claim --interactive",
+      "agent-memory new claim --type rule --system ci --severity critical"
+    ],
+    examples: [
+      "agent-memory new claim --type fact --system auth --title \"Student OAuth UID is tenant scoped\"",
+      "agent-memory new claim --type constraint --system auth --id auth.ios_webview.cookies_not_reliable --title \"Cookies are not reliable in iOS webview\""
+    ],
+    agentNotes: ["Creates one Markdown file per claim and avoids overwriting existing claim files."],
+    phase: "Phase 3"
+  },
+  {
     name: "context",
     purpose: "Build task-ready memory context for agent work.",
     usage: ['agent-memory context --task "fix student oauth"'],
@@ -92,10 +120,12 @@ export function renderHelp(topicName?: string): string {
     "Available now:",
     "  help                 Show command help.",
     "  init                 Scaffold memory files in a consuming repository.",
+    "  templates            List, show, and copy built-in templates.",
+    "  new claim            Create a claim from a built-in template.",
     "  --version            Print package version.",
     "",
     "Planned command groups:",
-    "  init, templates, new, validate, compile, query, show, system, context, doctor, sync, coverage, install-hooks, install-skill, agent-manifest, governance",
+    "  validate, compile, query, show, system, context, doctor, sync, coverage, install-hooks, install-skill, agent-manifest, governance",
     "",
     "Examples:",
     "  agent-memory help",
