@@ -21,7 +21,7 @@ export interface SkillInstallAction {
 
 export interface SkillReferenceWriteAction {
   path: string;
-  status: "created" | "skipped" | "overwritten" | "updated";
+  status: "created" | "skipped" | "overwritten";
   detail?: string;
 }
 
