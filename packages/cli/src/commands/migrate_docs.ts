@@ -211,7 +211,7 @@ function renderMigrateDocsResult(result: MigrateDocsResult): string {
 function renderClassifyDocsResult(result: ClassifyDocsResult): string {
   const lowConfidence = result.mappings.filter((mapping) => mapping.confidence === "low").length;
   const lines = [
-    "Agent Memory docs migration system map created.",
+    classifyDocsHeadline(result.status),
     "",
     `Source: ${result.sourceRoot}`,
     `System map: ${result.systemMapPath}`,
@@ -240,6 +240,18 @@ function renderClassifyDocsResult(result: ClassifyDocsResult): string {
   );
 
   return lines.join("\n");
+}
+
+function classifyDocsHeadline(status: ClassifyDocsResult["status"]): string {
+  if (status === "created") {
+    return "Agent Memory docs migration system map created.";
+  }
+
+  if (status === "overwritten") {
+    return "Agent Memory docs migration system map overwritten.";
+  }
+
+  return "Agent Memory docs migration system map skipped.";
 }
 
 function renderDoc(doc: MigratedDocPlan): string[] {

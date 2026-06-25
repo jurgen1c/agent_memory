@@ -79,6 +79,8 @@ const DEPRECATED_CONFIG_FIELDS = new Map<string, string>([
   ["context.include_inferred_edges", "Use context.include_inferred_edges_by_default instead."]
 ]);
 
+const AGENT_TARGETS = ["codex", "generic"] satisfies AgentTarget[];
+
 export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
   const repo = findRepoRoot(options.cwd);
   const actions: UpgradeAction[] = [];
@@ -88,6 +90,7 @@ export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
   const rawConfig = fs.readFileSync(configPath, "utf8");
   const parsedConfig = parseYaml(rawConfig);
   const config = applyDeprecatedConfigAliases(structuredClone(loaded.config), parsedConfig, warnings);
+  preserveLegacySingleAgentSelection(repo.root, config, warnings);
   const unknownConfigPaths = collectUnknownConfigPaths(parsedConfig);
 
   for (const unknownPath of unknownConfigPaths) {
@@ -176,7 +179,7 @@ function upgradeSkillFiles(
   actions: UpgradeAction[],
   warnings: string[]
 ): void {
-  for (const agent of ["codex", "generic"] satisfies AgentTarget[]) {
+  for (const agent of AGENT_TARGETS) {
     const skill = config.agent_skills[agent];
 
     if (!skill.enabled) {
@@ -223,6 +226,29 @@ function upgradeSkillFiles(
       upgradeCodexSkillReferences(repoRoot, absolutePath, options, actions, warnings);
     }
   }
+}
+
+function preserveLegacySingleAgentSelection(repoRoot: string, config: AgentMemoryConfig, warnings: string[]): void {
+  const enabledAgents = AGENT_TARGETS.filter((agent) => config.agent_skills[agent].enabled);
+
+  if (enabledAgents.length !== AGENT_TARGETS.length) {
+    return;
+  }
+
+  const existingAgents = enabledAgents.filter((agent) => fs.existsSync(resolveInsideRepo(repoRoot, config.agent_skills[agent].path)));
+  const missingAgents = enabledAgents.filter((agent) => !fs.existsSync(resolveInsideRepo(repoRoot, config.agent_skills[agent].path)));
+
+  if (existingAgents.length !== 1 || missingAgents.length !== 1) {
+    return;
+  }
+
+  const existingAgent = existingAgents[0];
+  const missingAgent = missingAgents[0];
+
+  config.agent_skills[missingAgent].enabled = false;
+  warnings.push(
+    `Preserved legacy single-agent install: disabled ${missingAgent} skill because only the ${existingAgent} skill is installed.`
+  );
 }
 
 function upgradeCodexSkillReferences(

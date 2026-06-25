@@ -71,7 +71,7 @@ export function installAgentSkill(options: InstallAgentSkillOptions): SkillInsta
     warnings.push(`Agent skill ${options.agent} is disabled in config; installing because it was explicitly requested.`);
   }
 
-  writeFile(
+  const skillAction = writeFile(
     absolutePath,
     displayPath,
     renderAgentSkill({ agent: options.agent, kind, config: loaded.config, commandPrefix }),
@@ -79,7 +79,7 @@ export function installAgentSkill(options: InstallAgentSkillOptions): SkillInsta
     actions
   );
 
-  if (options.agent === "codex") {
+  if (options.agent === "codex" && skillAction.status !== "skipped") {
     writeCodexSkillReferences(repo.root, absolutePath, kind, Boolean(options.force), actions);
   }
 
@@ -359,17 +359,26 @@ export function writeCodexSkillReferences(
   }
 }
 
-function writeFile(absolutePath: string, displayPath: string, content: string, force: boolean, actions: SkillInstallAction[]): void {
+function writeFile(
+  absolutePath: string,
+  displayPath: string,
+  content: string,
+  force: boolean,
+  actions: SkillInstallAction[]
+): SkillInstallAction {
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
   const existedBefore = fs.existsSync(absolutePath);
 
   if (existedBefore && !force) {
-    actions.push({ path: displayPath, status: "skipped", detail: "already exists" });
-    return;
+    const action: SkillInstallAction = { path: displayPath, status: "skipped", detail: "already exists" };
+    actions.push(action);
+    return action;
   }
 
   fs.writeFileSync(absolutePath, content);
-  actions.push({ path: displayPath, status: existedBefore ? "overwritten" : "created" });
+  const action: SkillInstallAction = { path: displayPath, status: existedBefore ? "overwritten" : "created" };
+  actions.push(action);
+  return action;
 }
 
 function displayRepoPath(repoRoot: string, absolutePath: string): string {

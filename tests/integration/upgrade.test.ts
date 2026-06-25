@@ -188,6 +188,42 @@ validation:
     expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/AGENT_SKILL.md"))).toBe(false);
   });
 
+  test("preserves legacy codex-only installs with both agent targets enabled", async () => {
+    const repoRoot = makeRepo(oldConfigWithBothAgentsEnabled());
+    const skillPath = path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md");
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, oldGeneratedSkill());
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Preserved legacy single-agent install");
+    expect(config.agent_skills.codex.enabled).toBe(true);
+    expect(config.agent_skills.generic.enabled).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"))).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"))).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/AGENT_SKILL.md"))).toBe(false);
+  });
+
+  test("preserves legacy generic-only installs with both agent targets enabled", async () => {
+    const repoRoot = makeRepo(oldConfigWithBothAgentsEnabled());
+    const skillPath = path.join(repoRoot, "docs/agent-memory/AGENT_SKILL.md");
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, oldGeneratedSkill());
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Preserved legacy single-agent install");
+    expect(config.agent_skills.codex.enabled).toBe(false);
+    expect(config.agent_skills.generic.enabled).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"))).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"))).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/AGENT_SKILL.md"))).toBe(true);
+  });
+
   test("skips custom skill files unless forced", async () => {
     const repoRoot = makeRepo(oldConfig());
     const skillPath = path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md");
@@ -287,6 +323,10 @@ context:
   default_depth: 2
   include_inferred_edges_by_default: true
 `;
+}
+
+function oldConfigWithBothAgentsEnabled(): string {
+  return oldConfig().replace("    enabled: false", "    enabled: true");
 }
 
 function oldAgents(): string {

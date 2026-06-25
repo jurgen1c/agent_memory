@@ -145,6 +145,23 @@ user-invocable: false
     expect(fs.readFileSync(skillPath, "utf8")).toContain("Repository Memory Instructions");
   });
 
+  test("does not create codex references when the main skill is skipped", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes", "--agent", "generic"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    const skillPath = path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md");
+    const referencesPath = path.join(repoRoot, ".codex/skills/repo-memory/references");
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, "# Handwritten Codex Skill\n");
+
+    const skipped = await dispatch(["install-skill", "--agent", "codex"], { cwd: repoRoot });
+
+    expect(skipped.exitCode).toBe(0);
+    expect(skipped.stdout).toContain("skipped");
+    expect(fs.readFileSync(skillPath, "utf8")).toBe("# Handwritten Codex Skill\n");
+    expect(fs.existsSync(referencesPath)).toBe(false);
+  });
+
   test("reports invalid install-skill options", async () => {
     let stderr = "";
     const conflictingLocation = await runCli(

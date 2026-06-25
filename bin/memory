@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "${AGENT_MEMORY_CLI:-}" ]; then
+  exec "${AGENT_MEMORY_CLI}" "$@"
+fi
+
+if command -v agent-memory >/dev/null 2>&1; then
+  exec agent-memory "$@"
+fi
+
+exec npx agent-memory "$@"

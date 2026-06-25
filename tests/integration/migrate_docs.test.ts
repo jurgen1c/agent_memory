@@ -88,6 +88,7 @@ describe("migrate-docs command", () => {
     const systemMap = fs.readFileSync(mapPath, "utf8");
 
     expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Agent Memory docs migration system map created.");
     expect(result.stdout).toContain("Status: created");
     expect(result.stdout).toContain("System map: .agent-memory/migrations/docs-canonical.yaml");
     expect(systemMap).toContain("source_root: docs/canonical");
@@ -115,12 +116,14 @@ describe("migrate-docs command", () => {
 
     const skipped = await dispatch(["migrate-docs", "--from", "docs/canonical", "--classify"], { cwd: repoRoot });
     expect(skipped.exitCode).toBe(0);
+    expect(skipped.stdout).toContain("Agent Memory docs migration system map skipped.");
     expect(skipped.stdout).toContain("Status: skipped");
     expect(skipped.stdout).toContain("leaving reviewed map unchanged");
     expect(fs.readFileSync(mapPath, "utf8")).toContain("# reviewed edit");
 
     const forced = await dispatch(["migrate-docs", "--from", "docs/canonical", "--classify", "--force"], { cwd: repoRoot });
     expect(forced.exitCode).toBe(0);
+    expect(forced.stdout).toContain("Agent Memory docs migration system map overwritten.");
     expect(forced.stdout).toContain("Status: overwritten");
     expect(fs.readFileSync(mapPath, "utf8")).not.toContain("# reviewed edit");
   });

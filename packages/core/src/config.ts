@@ -347,7 +347,7 @@ function renderStringList(values: string[], indent: number): string {
 }
 
 function yamlScalar(value: string): string {
-  if (/^[A-Za-z0-9_./*@{}-]+$/.test(value) && !isYamlReservedScalar(value)) {
+  if (/^[A-Za-z0-9_./*@{}-]+$/.test(value) && !isYamlReservedScalar(value) && !startsWithYamlIndicator(value)) {
     return value;
   }
 
@@ -356,6 +356,10 @@ function yamlScalar(value: string): string {
 
 function isYamlReservedScalar(value: string): boolean {
   return value === "true" || value === "false" || value === "null" || value === "~" || /^-?\d+$/.test(value);
+}
+
+function startsWithYamlIndicator(value: string): boolean {
+  return /^[!#&*,:>?@`[\]{}|%-]/.test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

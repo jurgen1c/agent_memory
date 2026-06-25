@@ -72,14 +72,16 @@ export function initRepository(options: InitOptions): InitResult {
   ensureGitignoreEntry(repo.root, ".agent-memory/", actions);
 
   if (agents.includes("codex")) {
-    writeFile(
+    const skillAction = writeFile(
       repo.root,
       config.agent_skills.codex.path,
       renderAgentSkill({ agent: "codex", config, commandPrefix: "bin/memory" }),
       options.force,
       actions
     );
-    writeCodexSkillReferences(repo.root, resolveOutputPath(repo.root, config.agent_skills.codex.path), "repo", options.force, actions);
+    if (skillAction.status !== "skipped") {
+      writeCodexSkillReferences(repo.root, resolveOutputPath(repo.root, config.agent_skills.codex.path), "repo", options.force, actions);
+    }
   }
 
   if (agents.includes("generic")) {
@@ -105,19 +107,22 @@ export function initRepository(options: InitOptions): InitResult {
   };
 }
 
-function writeFile(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): void {
+function writeFile(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): InitAction {
   const absolutePath = resolveOutputPath(repoRoot, relativePath);
   const displayPath = displayOutputPath(repoRoot, absolutePath);
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
   const existedBefore = fs.existsSync(absolutePath);
 
   if (existedBefore && !force) {
-    actions.push({ path: displayPath, status: "skipped", detail: "already exists" });
-    return;
+    const action: InitAction = { path: displayPath, status: "skipped", detail: "already exists" };
+    actions.push(action);
+    return action;
   }
 
   fs.writeFileSync(absolutePath, content);
-  actions.push({ path: displayPath, status: existedBefore && force ? "overwritten" : "created" });
+  const action: InitAction = { path: displayPath, status: existedBefore && force ? "overwritten" : "created" };
+  actions.push(action);
+  return action;
 }
 
 function writeExecutable(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): void {

@@ -262,6 +262,21 @@ Keep this footer too.
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"))).toBe(false);
   });
 
+  test("does not create codex references when init skips an existing skill", async () => {
+    const repoRoot = makeGitRepo();
+    const skillPath = path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md");
+    const referencesPath = path.join(repoRoot, ".codex/skills/repo-memory/references");
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, "# Handwritten Codex Skill\n");
+
+    const result = await dispatch(["init", "--yes", "--agent", "codex"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("skipped");
+    expect(fs.readFileSync(skillPath, "utf8")).toBe("# Handwritten Codex Skill\n");
+    expect(fs.existsSync(referencesPath)).toBe(false);
+  });
+
   test("installs a selected agent skill under a custom location", async () => {
     const repoRoot = makeGitRepo();
     const result = await dispatch(["init", "--yes", "--agent", "codex", "--skill-location", ".agents"], { cwd: repoRoot });
