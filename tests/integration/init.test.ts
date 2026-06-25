@@ -22,6 +22,7 @@ describe("init command", () => {
       "docs/agent-memory/recipes/.gitkeep",
       "docs/agent-memory/waivers/.gitkeep",
       "bin/memory",
+      "AGENTS.md",
       ".codex/skills/repo-memory/SKILL.md",
       "docs/agent-memory/AGENT_SKILL.md"
     ]) {
@@ -29,11 +30,179 @@ describe("init command", () => {
     }
 
     expect(fs.readFileSync(path.join(repoRoot, ".gitignore"), "utf8")).toContain(".agent-memory/");
+    const agents = fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8");
+    expect(agents).toContain("<!-- agent-memory:start -->");
+    expect(agents).toContain("## Agent Memory Knowledge Base");
+    expect(agents).toContain("Use the repo-memory skill or instruction file whenever it is available.");
+    expect(agents).toContain("bin/memory context --task");
+    expect(agents).toContain("After non-trivial work:");
+    expect(agents).toContain("Update memory in the same change when durable repository knowledge changed.");
+    expect(agents).toContain("Recipes for new or changed repeatable workflows.");
+    expect(agents).toContain("Waivers for intentional coverage exceptions with a reason and expiration.");
     expect(fs.statSync(path.join(repoRoot, "bin/memory")).mode & 0o111).toBeGreaterThan(0);
 
     const second = await dispatch(["init", "--yes"], { cwd: repoRoot });
     expect(second.exitCode).toBe(0);
     expect(second.stdout).toContain("skipped");
+    expect(fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")).toBe(agents);
+  });
+
+  test("updates the managed AGENTS section without replacing local instructions", async () => {
+    const repoRoot = makeGitRepo();
+    const agentsPath = path.join(repoRoot, "AGENTS.md");
+    fs.writeFileSync(
+      agentsPath,
+      `# Agent Instructions
+
+Keep project-specific guidance.
+
+<!-- agent-memory:start -->
+## Old Agent Memory Section
+<!-- agent-memory:end -->
+
+Keep this footer too.
+`
+    );
+
+    const result = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const agents = fs.readFileSync(agentsPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("refreshed agent-memory section");
+    expect(agents).toContain("Keep project-specific guidance.");
+    expect(agents).toContain("Keep this footer too.");
+    expect(agents).toContain("## Agent Memory Knowledge Base");
+    expect(agents).not.toContain("## Old Agent Memory Section");
+  });
+
+  test("preserves user whitespace around refreshed AGENTS sections", async () => {
+    const repoRoot = makeGitRepo();
+    const agentsPath = path.join(repoRoot, "AGENTS.md");
+    fs.writeFileSync(
+      agentsPath,
+      `# Agent Instructions
+
+Keep project-specific guidance.${"   "}
+
+<!-- agent-memory:start -->
+## Old Agent Memory Section
+<!-- agent-memory:end -->
+
+    Keep this indented footer too.
+`
+    );
+
+    const result = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const agents = fs.readFileSync(agentsPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("refreshed agent-memory section");
+    expect(agents).toContain("Keep project-specific guidance.   \n\n<!-- agent-memory:start -->");
+    expect(agents).toContain("<!-- agent-memory:end -->\n\n    Keep this indented footer too.");
+  });
+
+  test("pairs AGENTS markers after the managed start marker", async () => {
+    const repoRoot = makeGitRepo();
+    const agentsPath = path.join(repoRoot, "AGENTS.md");
+    fs.writeFileSync(
+      agentsPath,
+      `# Agent Instructions
+
+Document a literal <!-- agent-memory:end --> marker before the managed section.
+
+<!-- agent-memory:start -->
+## Old Agent Memory Section
+<!-- agent-memory:end -->
+
+Keep this footer too.
+`
+    );
+
+    const result = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const agents = fs.readFileSync(agentsPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("refreshed agent-memory section");
+    expect(agents).toContain("Document a literal <!-- agent-memory:end --> marker before the managed section.");
+    expect(agents).toContain("Keep this footer too.");
+    expect(agents).toContain("## Agent Memory Knowledge Base");
+    expect(agents).not.toContain("## Old Agent Memory Section");
+  });
+
+  test("preserves inline marker text when appending an AGENTS section", async () => {
+    const repoRoot = makeGitRepo();
+    const agentsPath = path.join(repoRoot, "AGENTS.md");
+    fs.writeFileSync(
+      agentsPath,
+      `# Agent Instructions
+
+Document a literal <!-- agent-memory:end --> marker without creating a managed section.
+`
+    );
+
+    const result = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const agents = fs.readFileSync(agentsPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("appended agent-memory section");
+    expect(agents).toContain("Document a literal <!-- agent-memory:end --> marker without creating a managed section.");
+    expect(agents).toContain("## Agent Memory Knowledge Base");
+  });
+
+  test("repairs an AGENTS section with an unmatched start marker", async () => {
+    const repoRoot = makeGitRepo();
+    const agentsPath = path.join(repoRoot, "AGENTS.md");
+    fs.writeFileSync(
+      agentsPath,
+      `# Agent Instructions
+
+Keep project-specific guidance.
+
+<!-- agent-memory:start -->
+## Old Agent Memory Section
+This section is missing its end marker.
+`
+    );
+
+    const result = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const agents = fs.readFileSync(agentsPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("repaired agent-memory section");
+    expect(agents).toContain("Keep project-specific guidance.");
+    expect(agents).toContain("## Agent Memory Knowledge Base");
+    expect(agents).toContain("<!-- agent-memory:end -->");
+    expect(agents).not.toContain("## Old Agent Memory Section");
+    expect(agents).not.toContain("This section is missing its end marker.");
+  });
+
+  test("repairs an AGENTS section with an unmatched end marker", async () => {
+    const repoRoot = makeGitRepo();
+    const agentsPath = path.join(repoRoot, "AGENTS.md");
+    fs.writeFileSync(
+      agentsPath,
+      `# Agent Instructions
+
+Keep project-specific guidance.
+
+## Old Agent Memory Section
+<!-- agent-memory:end -->
+
+Keep this footer too.
+`
+    );
+
+    const result = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const agents = fs.readFileSync(agentsPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("repaired agent-memory section");
+    expect(agents).toContain("Keep project-specific guidance.");
+    expect(agents).toContain("Keep this footer too.");
+    expect(agents).toContain("## Agent Memory Knowledge Base");
+    expect(agents).toContain("<!-- agent-memory:start -->");
+    expect(agents).toContain("<!-- agent-memory:end -->");
+    expect(agents.match(/<!-- agent-memory:end -->/g)).toHaveLength(1);
   });
 
   test("creates a wrapper that can execute the built CLI through AGENT_MEMORY_CLI", async () => {

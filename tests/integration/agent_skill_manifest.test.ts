@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dispatch, runCli } from "../../packages/cli/src/router";
+import { PACKAGE_VERSION } from "../../packages/core/src/version";
 
 describe("install-skill command", () => {
   test("installs the codex skill to the configured default path", async () => {
@@ -17,6 +18,15 @@ describe("install-skill command", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("created");
+    expect(content.startsWith(`---
+name: repo-memory
+description: Use this skill whenever working in this repository to sync and retrieve agent-memory context before code changes and update durable claims when behavior or critical repository knowledge changes.
+version: ${PACKAGE_VERSION}
+user-invocable: false
+---
+
+# Repo Memory Skill
+`)).toBe(true);
     expect(content).toContain("bin/memory sync");
     expect(content).toContain(".agent-memory/memory.sqlite");
     expect(content).toContain("templates show claim:fact");
@@ -79,7 +89,17 @@ describe("install-skill command", () => {
     expect(result.stdout).toContain("Kind: migration");
     expect(result.stdout).toContain(".codex/skills/repo-memory-migration/SKILL.md");
     expect(fs.existsSync(skillPath)).toBe(true);
-    expect(fs.readFileSync(skillPath, "utf8")).toContain("migrate-docs --from <existing-docs> --system <system> --automatic");
+    const content = fs.readFileSync(skillPath, "utf8");
+    expect(content.startsWith(`---
+name: repo-memory-migration
+description: Use this skill when migrating existing repository documentation into agent-memory atomic claims, indexes, recipes, and graph relationships.
+version: ${PACKAGE_VERSION}
+user-invocable: false
+---
+
+# Repo Memory Migration Skill
+`)).toBe(true);
+    expect(content).toContain("migrate-docs --from <existing-docs> --system <system> --automatic");
   });
 
   test("installs a skill to an exact requested path", async () => {

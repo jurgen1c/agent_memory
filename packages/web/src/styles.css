@@ -54,7 +54,8 @@ select {
 
 .shell {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) var(--drawer-width, 360px);
+  grid-template-areas: "sidebar workspace drawer";
+  grid-template-columns: var(--sidebar-width, 300px) minmax(0, 1fr) var(--drawer-width, 360px);
   width: 100vw;
   height: 100vh;
   overflow: hidden;
@@ -68,17 +69,23 @@ select {
 }
 
 .sidebar {
+  grid-area: sidebar;
+  min-width: 0;
   border-right: 1px solid #d7dee8;
   padding: 16px;
 }
 
 .drawer {
+  grid-area: drawer;
+  min-width: 0;
   border-left: 1px solid #d7dee8;
   padding: 16px;
   position: relative;
 }
 
 .workspace {
+  position: relative;
+  grid-area: workspace;
   min-width: 0;
   background: #e8edf3;
 }
@@ -89,6 +96,13 @@ select {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.brand-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .brand h1,
@@ -117,6 +131,31 @@ select {
 
 .health.ok {
   background: #0f766e;
+}
+
+.panel-button,
+.panel-toggle {
+  min-height: 28px;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+.panel-toggle {
+  position: absolute;
+  top: 50%;
+  z-index: 12;
+  transform: translateY(-50%);
+  border-color: #94a3b8;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16);
+}
+
+.panel-toggle.left {
+  left: 12px;
+}
+
+.panel-toggle.right {
+  right: 12px;
 }
 
 .tabs {
@@ -287,7 +326,14 @@ select {
 .drawer.empty-drawer {
   display: grid;
   place-items: center;
+  align-content: center;
+  gap: 8px;
   color: #64748b;
+  text-align: center;
+}
+
+.drawer.empty-drawer p {
+  margin: 0;
 }
 
 .drawer-resize-handle {
@@ -596,7 +642,8 @@ pre {
 
 @media (max-width: 1100px) {
   .shell {
-    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-areas: "sidebar workspace";
+    grid-template-columns: var(--sidebar-width, 280px) minmax(0, 1fr);
   }
 
   .drawer {
@@ -612,6 +659,9 @@ pre {
 
 @media (max-width: 760px) {
   .shell {
+    grid-template-areas:
+      "sidebar"
+      "workspace";
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr);
   }

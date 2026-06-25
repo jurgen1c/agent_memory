@@ -64,5 +64,3 @@ repo and the shell has no Node version selected.
 - `node_modules/`, `dist/`, and `.agent-memory/` are ignored.
 - The mock consuming app lives in `examples/mock-app`.
 - Tests live in `tests/unit`, `tests/integration`, and `examples/mock-app/tests`.
-- Phase commits should be made only after verification unless the user asks
-  otherwise.

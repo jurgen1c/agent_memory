@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 25
+      - run: bun install --frozen-lockfile
+      - run: bun run audit
+      - run: bun run lint
+      - run: bun test
+      - run: bun run build

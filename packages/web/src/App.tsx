@@ -5,8 +5,10 @@ import {
   MiniMap,
   Panel,
   ReactFlow,
+  applyNodeChanges,
   type Edge,
-  type Node
+  type Node,
+  type NodeChange
 } from "@xyflow/react";
 import { type CSSProperties, type PointerEvent, useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -112,6 +114,8 @@ export default function App() {
   const [memory, setMemory] = useState<UiMemoryModel | null>(null);
   const [detail, setDetail] = useState<ClaimDetail | null>(null);
   const [drawerWidth, setDrawerWidth] = useState(readStoredDrawerWidth);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [readerOpen, setReaderOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("graph");
   const [query, setQuery] = useState("");
@@ -195,6 +199,7 @@ export default function App() {
 
   async function selectClaim(id: string) {
     setDetail(await api<ClaimDetail>(`/api/claims/${encodeURIComponent(id)}`));
+    setDrawerOpen(true);
   }
 
   function resizeDrawer(clientX: number) {
@@ -249,89 +254,109 @@ export default function App() {
     }
   }
 
-  const shellStyle = { "--drawer-width": `${drawerWidth}px` } as CSSProperties;
+  const shellStyle = {
+    "--sidebar-width": sidebarOpen ? "300px" : "0px",
+    "--drawer-width": drawerOpen ? `${drawerWidth}px` : "0px"
+  } as CSSProperties;
 
   return (
     <main className="shell" style={shellStyle}>
-      <aside className="sidebar">
-        <div className="brand">
-          <div>
-            <h1>Agent Memory</h1>
-            <p>{memory?.memoryRoot ?? "Loading repository memory"}</p>
+      {sidebarOpen && (
+        <aside className="sidebar">
+          <div className="brand">
+            <div>
+              <h1>Agent Memory</h1>
+              <p>{memory?.memoryRoot ?? "Loading repository memory"}</p>
+            </div>
+            <div className="brand-actions">
+              <span className={memory?.validation.valid && memory.doctor.healthy ? "health ok" : "health warn"} />
+              <button className="panel-button" onClick={() => setSidebarOpen(false)}>
+                Hide
+              </button>
+            </div>
           </div>
-          <span className={memory?.validation.valid && memory.doctor.healthy ? "health ok" : "health warn"} />
-        </div>
 
-        <nav className="tabs" aria-label="Views">
-          <button className={mode === "graph" ? "active" : ""} onClick={() => setMode("graph")}>
-            Graph
-          </button>
-          <button className={mode === "files" ? "active" : ""} onClick={() => setMode("files")}>
-            Files
-          </button>
-          <button className={mode === "review" ? "active" : ""} onClick={() => setMode("review")}>
-            Review
-          </button>
-        </nav>
+          <nav className="tabs" aria-label="Views">
+            <button className={mode === "graph" ? "active" : ""} onClick={() => setMode("graph")}>
+              Graph
+            </button>
+            <button className={mode === "files" ? "active" : ""} onClick={() => setMode("files")}>
+              Files
+            </button>
+            <button className={mode === "review" ? "active" : ""} onClick={() => setMode("review")}>
+              Review
+            </button>
+          </nav>
 
-        <label className="field">
-          <span>Search</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="title, claim, tag, file" />
-        </label>
-
-        <div className="filters">
-          <label>
-            <span>System</span>
-            <select value={system} onChange={(event) => setSystem(event.target.value)}>
-              <option value="all">All</option>
-              {systems.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
+          <label className="field">
+            <span>Search</span>
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="title, claim, tag, file" />
           </label>
-          <label>
-            <span>Status</span>
-            <select value={status} onChange={(event) => setStatus(event.target.value)}>
-              <option value="all">All</option>
-              {statuses.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Severity</span>
-            <select value={severity} onChange={(event) => setSeverity(event.target.value)}>
-              <option value="all">All</option>
-              {severities.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
 
-        <div className="origin-list">
-          {origins.map((origin) => (
-            <label key={origin}>
-              <input
-                type="checkbox"
-                checked={enabledOrigins.has(origin)}
-                onChange={() => setEnabledOrigins(toggleSet(enabledOrigins, origin))}
-              />
-              <span>{origin}</span>
+          <div className="filters">
+            <label>
+              <span>System</span>
+              <select value={system} onChange={(event) => setSystem(event.target.value)}>
+                <option value="all">All</option>
+                {systems.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
             </label>
-          ))}
-        </div>
+            <label>
+              <span>Status</span>
+              <select value={status} onChange={(event) => setStatus(event.target.value)}>
+                <option value="all">All</option>
+                {statuses.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Severity</span>
+              <select value={severity} onChange={(event) => setSeverity(event.target.value)}>
+                <option value="all">All</option>
+                {severities.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
-        <HealthPanel memory={memory} notice={notice} busy={busy} onSync={syncMemory} />
-      </aside>
+          <div className="origin-list">
+            {origins.map((origin) => (
+              <label key={origin}>
+                <input
+                  type="checkbox"
+                  checked={enabledOrigins.has(origin)}
+                  onChange={() => setEnabledOrigins(toggleSet(enabledOrigins, origin))}
+                />
+                <span>{origin}</span>
+              </label>
+            ))}
+          </div>
+
+          <HealthPanel memory={memory} notice={notice} busy={busy} onSync={syncMemory} />
+        </aside>
+      )}
 
       <section className="workspace">
+        {!sidebarOpen && (
+          <button className="panel-toggle left" onClick={() => setSidebarOpen(true)}>
+            Filters
+          </button>
+        )}
+        {!drawerOpen && detail && (
+          <button className="panel-toggle right" onClick={() => setDrawerOpen(true)}>
+            Details
+          </button>
+        )}
         {mode === "graph" && (
           <GraphView
             nodes={graph.nodes}
@@ -346,16 +371,22 @@ export default function App() {
         {mode === "review" && memory && <ReviewView items={memory.reviewQueue} onSelect={selectClaim} onApprove={approveClaim} />}
       </section>
 
-      <ClaimDrawer
-        detail={detail}
-        commandPrefix={memory?.commandPrefix ?? "agent-memory"}
-        onClose={() => setDetail(null)}
-        onOpenReader={() => setReaderOpen(true)}
-        onResize={resizeDrawer}
-        onResizeBy={resizeDrawerBy}
-        onResizeStart={startDrawerResize}
-        onReview={reviewClaim}
-      />
+      {drawerOpen && (
+        <ClaimDrawer
+          detail={detail}
+          commandPrefix={memory?.commandPrefix ?? "agent-memory"}
+          onClose={() => {
+            setDetail(null);
+            setDrawerOpen(false);
+          }}
+          onHide={() => setDrawerOpen(false)}
+          onOpenReader={() => setReaderOpen(true)}
+          onResize={resizeDrawer}
+          onResizeBy={resizeDrawerBy}
+          onResizeStart={startDrawerResize}
+          onReview={reviewClaim}
+        />
+      )}
       {readerOpen && detail && (
         <ClaimReader
           detail={detail}
@@ -376,13 +407,23 @@ function GraphView(props: {
   onFocus(id: string): void;
   onClearFocus(): void;
 }) {
+  const [nodes, setNodes] = useState(props.nodes);
+  const onNodesChange = useCallback((changes: NodeChange[]) => {
+    setNodes((current) => applyNodeChanges(changes, current));
+  }, []);
+
+  useEffect(() => {
+    setNodes((current) => mergeGraphNodes(current, props.nodes));
+  }, [props.nodes]);
+
   return (
     <div className="graph-surface">
       <ReactFlow
-        nodes={props.nodes}
+        nodes={nodes}
         edges={props.edges}
         fitView
         minZoom={0.15}
+        onNodesChange={onNodesChange}
         onNodeClick={(_event, node) => void props.onSelect(node.id)}
         onNodeDoubleClick={(_event, node) => props.onFocus(node.id)}
       >
@@ -396,6 +437,15 @@ function GraphView(props: {
       </ReactFlow>
     </div>
   );
+}
+
+function mergeGraphNodes(currentNodes: Node[], nextNodes: Node[]): Node[] {
+  const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+
+  return nextNodes.map((node) => {
+    const current = currentById.get(node.id);
+    return current ? { ...node, position: current.position } : node;
+  });
 }
 
 function HealthPanel(props: { memory: UiMemoryModel | null; notice: string; busy: boolean; onSync(): void }) {
@@ -483,6 +533,7 @@ function ClaimDrawer(props: {
   detail: ClaimDetail | null;
   commandPrefix: string;
   onClose(): void;
+  onHide(): void;
   onOpenReader(): void;
   onResize(clientX: number): void;
   onResizeBy(delta: number): void;
@@ -495,7 +546,10 @@ function ClaimDrawer(props: {
     return (
       <aside className="drawer empty-drawer">
         <DrawerResizeHandle onResize={props.onResize} onResizeBy={props.onResizeBy} onResizeStart={props.onResizeStart} />
-        Select a claim to inspect its contents.
+        <button className="panel-button" onClick={props.onHide}>
+          Hide
+        </button>
+        <p>Select a claim to inspect its contents.</p>
       </aside>
     );
   }
@@ -510,6 +564,7 @@ function ClaimDrawer(props: {
         </div>
         <div className="button-row drawer-actions">
           <button onClick={props.onOpenReader}>Read</button>
+          <button onClick={props.onHide}>Hide</button>
           <button onClick={props.onClose}>Close</button>
         </div>
       </div>
@@ -733,20 +788,27 @@ function List(props: { values: string[] }) {
   );
 }
 
-function buildGraph(claims: UiClaim[], relations: UiRelation[], claimIds: Set<string>, enabledOrigins: Set<Origin>): { nodes: Node[]; edges: Edge[] } {
+export function buildGraph(
+  claims: UiClaim[],
+  relations: UiRelation[],
+  claimIds: Set<string>,
+  enabledOrigins: Set<Origin>
+): { nodes: Node[]; edges: Edge[] } {
   const systems = unique(claims.map((claim) => claim.system));
   const systemIndex = new Map(systems.map((value, index) => [value, index]));
-  const nodes = claims.map((claim, index) => {
-    const lane = systemIndex.get(claim.system) ?? 0;
-    const position = {
-      x: lane * 320 + (index % 2) * 36,
-      y: Math.floor(index / Math.max(1, systems.length)) * 190
-    };
+  const nodeWidth = 260;
+  const laneGap = 120;
+  const rowHeight = 190;
+  const visibleRelations = compactGraphRelations(
+    relations.filter((relation) => enabledOrigins.has(relation.origin) && claimIds.has(relation.source) && claimIds.has(relation.target))
+  );
+  const positions = layoutGraphClaims(claims, visibleRelations, systemIndex, nodeWidth, laneGap, rowHeight);
+  const nodes = claims.map((claim) => {
     const color = statusColor(claim.status);
 
     return {
       id: claim.id,
-      position,
+      position: positions.get(claim.id) ?? { x: 0, y: 0 },
       data: {
         color,
         label: (
@@ -763,25 +825,173 @@ function buildGraph(claims: UiClaim[], relations: UiRelation[], claimIds: Set<st
         borderColor: color,
         background: "#ffffff",
         borderRadius: 8,
-        width: 240
+        width: nodeWidth
       }
     };
   });
 
-  const edges = relations
-    .filter((relation) => enabledOrigins.has(relation.origin) && claimIds.has(relation.source) && claimIds.has(relation.target))
-    .map((relation) => ({
-      id: relation.id,
-      source: relation.source,
-      target: relation.target,
-      label: relation.relation,
-      markerEnd: { type: MarkerType.ArrowClosed },
-      style: { stroke: originColor(relation.origin), strokeWidth: Math.max(1, Math.round(relation.strength / 35)) },
-      labelStyle: { fill: "#334155", fontSize: 11 },
-      data: relation
-    }));
+  const edges = visibleRelations.map((relation) => ({
+    id: relation.id,
+    source: relation.source,
+    target: relation.target,
+    label: relation.relation,
+    markerStart: relation.bidirectional ? { type: MarkerType.ArrowClosed } : undefined,
+    markerEnd: { type: MarkerType.ArrowClosed },
+    style: { stroke: originColor(relation.origin), strokeWidth: Math.max(1, Math.round(relation.strength / 35)) },
+    labelStyle: { fill: "#334155", fontSize: 11 },
+    data: relation
+  }));
 
   return { nodes, edges };
+}
+
+function layoutGraphClaims(
+  claims: UiClaim[],
+  relations: UiRelation[],
+  systemIndex: Map<string, number>,
+  nodeWidth: number,
+  laneGap: number,
+  rowHeight: number
+): Map<string, { x: number; y: number }> {
+  const claimById = new Map(claims.map((claim) => [claim.id, claim]));
+  const claimOrder = new Map(claims.map((claim, index) => [claim.id, index]));
+  const adjacency = buildRelationAdjacency(relations, claimOrder);
+  const occupiedRows = new Map<string, Set<number>>();
+  const positions = new Map<string, { x: number; y: number }>();
+
+  for (const claim of claims) {
+    if (positions.has(claim.id)) {
+      continue;
+    }
+
+    const desiredRow = firstAvailableRow(occupiedRows.get(claim.system));
+    const queue = [{ id: claim.id, desiredRow }];
+
+    for (let index = 0; index < queue.length; index += 1) {
+      const item = queue[index];
+
+      if (positions.has(item.id)) {
+        continue;
+      }
+
+      const current = claimById.get(item.id);
+
+      if (!current) {
+        continue;
+      }
+
+      const row = reserveNearestRow(current.system, item.desiredRow, occupiedRows);
+      const lane = systemIndex.get(current.system) ?? 0;
+      positions.set(current.id, {
+        x: lane * (nodeWidth + laneGap),
+        y: row * rowHeight
+      });
+
+      for (const neighborId of adjacency.get(current.id) ?? []) {
+        if (positions.has(neighborId)) {
+          continue;
+        }
+
+        const neighbor = claimById.get(neighborId);
+
+        if (!neighbor) {
+          continue;
+        }
+
+        queue.push({
+          id: neighbor.id,
+          desiredRow: neighbor.system === current.system ? row + 1 : row
+        });
+      }
+    }
+  }
+
+  return positions;
+}
+
+function buildRelationAdjacency(relations: UiRelation[], claimOrder: Map<string, number>): Map<string, string[]> {
+  const adjacency = new Map<string, Set<string>>();
+
+  for (const relation of relations) {
+    if (!adjacency.has(relation.source)) {
+      adjacency.set(relation.source, new Set());
+    }
+
+    if (!adjacency.has(relation.target)) {
+      adjacency.set(relation.target, new Set());
+    }
+
+    adjacency.get(relation.source)?.add(relation.target);
+    adjacency.get(relation.target)?.add(relation.source);
+  }
+
+  return new Map(
+    [...adjacency].map(([id, neighbors]) => [
+      id,
+      [...neighbors].sort((left, right) => (claimOrder.get(left) ?? Number.MAX_SAFE_INTEGER) - (claimOrder.get(right) ?? Number.MAX_SAFE_INTEGER))
+    ])
+  );
+}
+
+function reserveNearestRow(system: string, desiredRow: number, occupiedRows: Map<string, Set<number>>): number {
+  let rows = occupiedRows.get(system);
+
+  if (!rows) {
+    rows = new Set();
+    occupiedRows.set(system, rows);
+  }
+
+  const row = nearestAvailableRow(rows, Math.max(0, desiredRow));
+  rows.add(row);
+  return row;
+}
+
+function firstAvailableRow(rows: Set<number> | undefined): number {
+  return nearestAvailableRow(rows ?? new Set(), 0);
+}
+
+function nearestAvailableRow(rows: Set<number>, desiredRow: number): number {
+  if (!rows.has(desiredRow)) {
+    return desiredRow;
+  }
+
+  for (let offset = 1; ; offset += 1) {
+    const after = desiredRow + offset;
+
+    if (!rows.has(after)) {
+      return after;
+    }
+
+    const before = desiredRow - offset;
+
+    if (before >= 0 && !rows.has(before)) {
+      return before;
+    }
+  }
+}
+
+function compactGraphRelations(relations: UiRelation[]): UiRelation[] {
+  const compacted: UiRelation[] = [];
+  const seen = new Set<string>();
+
+  for (const relation of relations) {
+    const key = relation.bidirectional
+      ? [
+          relation.origin,
+          relation.relation,
+          ...[relation.source, relation.target].sort()
+        ].join(":")
+      : relation.id;
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    compacted.push(relation);
+  }
+
+  return compacted;
 }
 
 function focusedClaimIds(id: string, relations: UiRelation[]): Set<string> {
