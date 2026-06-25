@@ -33,6 +33,7 @@ describe("upgrade command", () => {
     const configText = fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8");
     const agents = fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8");
     const skill = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"), "utf8");
+    const claimsReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"), "utf8");
     const loaded = loadConfig({ repoRoot });
 
     expect(result.exitCode).toBe(0);
@@ -47,6 +48,8 @@ describe("upgrade command", () => {
     expect(agents).not.toContain("Old managed text");
     expect(skill).toContain("## Available Commands");
     expect(skill).toContain("memory/claims/**/*.md");
+    expect(skill).toContain("references/claims.md");
+    expect(claimsReference).toContain("<!-- agent-memory:generated-reference repo-memory/claims.md -->");
   });
 
   test("is idempotent after writing the current support files", async () => {
@@ -59,6 +62,7 @@ describe("upgrade command", () => {
     const configAfterFirst = fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8");
     const agentsAfterFirst = fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8");
     const skillAfterFirst = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"), "utf8");
+    const referenceAfterFirst = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"), "utf8");
     const second = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
 
     expect(first.exitCode).toBe(0);
@@ -67,6 +71,7 @@ describe("upgrade command", () => {
     expect(fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8")).toBe(configAfterFirst);
     expect(fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")).toBe(agentsAfterFirst);
     expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"), "utf8")).toBe(skillAfterFirst);
+    expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"), "utf8")).toBe(referenceAfterFirst);
   });
 
   test("supports JSON output for upgrade plans", async () => {
@@ -199,6 +204,29 @@ validation:
 
     expect(forced.exitCode).toBe(0);
     expect(fs.readFileSync(skillPath, "utf8")).toContain("This repository uses `agent-memory`");
+  });
+
+  test("refreshes generated skill references and skips custom references unless forced", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const skillPath = path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md");
+    const generatedReferencePath = path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md");
+    const customReferencePath = path.join(repoRoot, ".codex/skills/repo-memory/references/recipes.md");
+    fs.mkdirSync(path.dirname(generatedReferencePath), { recursive: true });
+    fs.writeFileSync(skillPath, oldGeneratedSkill());
+    fs.writeFileSync(generatedReferencePath, "<!-- agent-memory:generated-reference repo-memory/claims.md -->\n# Old\n");
+    fs.writeFileSync(customReferencePath, "# Custom Recipes\n");
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Skill reference .codex/skills/repo-memory/references/recipes.md does not look generated");
+    expect(fs.readFileSync(generatedReferencePath, "utf8")).toContain("# Claims");
+    expect(fs.readFileSync(customReferencePath, "utf8")).toBe("# Custom Recipes\n");
+
+    const forced = await dispatch(["upgrade", "--write", "--force"], { cwd: repoRoot });
+
+    expect(forced.exitCode).toBe(0);
+    expect(fs.readFileSync(customReferencePath, "utf8")).toContain("<!-- agent-memory:generated-reference repo-memory/recipes.md -->");
   });
 
   test("can refresh configured absolute skill paths", async () => {

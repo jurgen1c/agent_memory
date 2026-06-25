@@ -219,18 +219,23 @@ const TOPICS: HelpTopic[] = [
     name: "migrate-docs",
     purpose: "Plan or create current memory drafts from existing repository docs.",
     usage: [
+      "agent-memory migrate-docs --from docs/canonical --classify",
+      "agent-memory migrate-docs --system-map .agent-memory/migrations/docs-canonical.yaml",
+      "agent-memory migrate-docs --system-map .agent-memory/migrations/docs-canonical.yaml --automatic",
       "agent-memory migrate-docs --from docs/legacy --system auth",
       "agent-memory migrate-docs --from docs/legacy --system auth --automatic",
       "agent-memory migrate-docs --from docs/legacy --system auth --automatic --force",
       "agent-memory migrate-docs --from docs/legacy --system auth --json"
     ],
     examples: [
+      "agent-memory migrate-docs --from docs/canonical --classify",
+      "agent-memory migrate-docs --system-map .agent-memory/migrations/docs-canonical.yaml --automatic",
       "agent-memory migrate-docs --from docs/legacy --system auth",
-      "agent-memory migrate-docs --from docs/canonical --system docs",
       "agent-memory migrate-docs --from docs/legacy --system auth --automatic"
     ],
     agentNotes: [
-      "The required --system value is the lowercase memory namespace for generated claim IDs and paths, such as auth, docs, billing, or platform.",
+      "For broad folders, first run --classify, review or edit the generated system map, then run --system-map with --automatic.",
+      "The --system value is still required for focused single-system migrations; it is the lowercase memory namespace for generated claim IDs and paths.",
       "Automatic mode creates current, low-confidence drafts; agents must review and split them into precise atomic claims."
     ],
     phase: "Phase 10"

@@ -3,7 +3,13 @@ import path from "node:path";
 import { loadConfig, renderConfigTemplate } from "./config";
 import { buildAgentsMemoryContent } from "./init";
 import { findRepoRoot, resolveInsideRepo } from "./repo";
-import { commandPrefixForRepo, renderAgentSkill, type AgentTarget } from "./skills";
+import {
+  codexSkillReferenceFiles,
+  commandPrefixForRepo,
+  isGeneratedSkillReferenceFile,
+  renderAgentSkill,
+  type AgentTarget
+} from "./skills";
 import type { AgentMemoryConfig, RepoInfo } from "./types";
 import { parseYaml } from "./yaml";
 
@@ -185,6 +191,9 @@ function upgradeSkillFiles(
 
     if (existing === next) {
       actions.push({ path: relativePath, status: "skipped", detail: "already current" });
+      if (agent === "codex") {
+        upgradeCodexSkillReferences(repoRoot, absolutePath, options, actions, warnings);
+      }
       continue;
     }
 
@@ -198,6 +207,9 @@ function upgradeSkillFiles(
       fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
       fs.writeFileSync(absolutePath, next);
       actions.push({ path: relativePath, status: existing === null ? "created" : "updated", detail: existing === null ? "installed skill" : "refreshed skill" });
+      if (agent === "codex") {
+        upgradeCodexSkillReferences(repoRoot, absolutePath, options, actions, warnings);
+      }
       continue;
     }
 
@@ -205,6 +217,54 @@ function upgradeSkillFiles(
       path: relativePath,
       status: existing === null ? "would_create" : "would_update",
       detail: existing === null ? "install skill" : "refresh skill"
+    });
+
+    if (agent === "codex") {
+      upgradeCodexSkillReferences(repoRoot, absolutePath, options, actions, warnings);
+    }
+  }
+}
+
+function upgradeCodexSkillReferences(
+  repoRoot: string,
+  absoluteSkillPath: string,
+  options: UpgradeOptions,
+  actions: UpgradeAction[],
+  warnings: string[]
+): void {
+  const skillDir = path.dirname(absoluteSkillPath);
+
+  for (const reference of codexSkillReferenceFiles("repo")) {
+    const absolutePath = path.join(skillDir, reference.path);
+    const relativePath = displayRepoPath(repoRoot, absolutePath);
+    const existing = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : null;
+
+    if (existing === reference.content) {
+      actions.push({ path: relativePath, status: "skipped", detail: "already current" });
+      continue;
+    }
+
+    if (existing !== null && !options.force && !isGeneratedSkillReferenceFile(existing)) {
+      warnings.push(`Skill reference ${relativePath} does not look generated; skipping to avoid overwriting user content.`);
+      actions.push({ path: relativePath, status: "skipped", detail: "custom content requires --force" });
+      continue;
+    }
+
+    if (options.write) {
+      fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+      fs.writeFileSync(absolutePath, reference.content);
+      actions.push({
+        path: relativePath,
+        status: existing === null ? "created" : "updated",
+        detail: existing === null ? "installed skill reference" : "refreshed skill reference"
+      });
+      continue;
+    }
+
+    actions.push({
+      path: relativePath,
+      status: existing === null ? "would_create" : "would_update",
+      detail: existing === null ? "install skill reference" : "refresh skill reference"
     });
   }
 }

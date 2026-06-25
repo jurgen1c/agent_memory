@@ -4,7 +4,7 @@ import { defaultConfig, renderConfigTemplate } from "./config";
 import { AgentMemoryError } from "./errors";
 import { installMemoryHooks } from "./hooks";
 import { findRepoRoot } from "./repo";
-import { parseAgentTarget, renderAgentSkill, skillPathForLocation, type AgentTarget } from "./skills";
+import { parseAgentTarget, renderAgentSkill, skillPathForLocation, writeCodexSkillReferences, type AgentTarget } from "./skills";
 import type { RepoInfo } from "./types";
 
 export type PackageManager = "npm" | "bun";
@@ -73,6 +73,7 @@ export function initRepository(options: InitOptions): InitResult {
       options.force,
       actions
     );
+    writeCodexSkillReferences(repo.root, path.join(repo.root, config.agent_skills.codex.path), "repo", options.force, actions);
   }
 
   if (agents.includes("generic")) {

@@ -32,6 +32,11 @@ user-invocable: false
     expect(content).toContain("templates show claim:fact");
     expect(content).toContain("Relationship Graphs");
     expect(content).toContain("Do not edit or commit the SQLite database");
+    expect(content).toContain("references/claims.md");
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"), "utf8")).toContain(
+      "<!-- agent-memory:generated-reference repo-memory/claims.md -->"
+    );
   });
 
   test("installs the generic skill to a configured custom path", async () => {
@@ -100,6 +105,11 @@ user-invocable: false
 # Repo Memory Migration Skill
 `)).toBe(true);
     expect(content).toContain("migrate-docs --from <existing-docs> --system <system> --automatic");
+    expect(content).toContain("references/system-maps.md");
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory-migration/references/system-maps.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory-migration/references/system-maps.md"), "utf8")).toContain(
+      "<!-- agent-memory:generated-reference repo-memory-migration/system-maps.md -->"
+    );
   });
 
   test("installs a skill to an exact requested path", async () => {

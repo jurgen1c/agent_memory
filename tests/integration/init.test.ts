@@ -26,6 +26,10 @@ describe("init command", () => {
       "bin/memory",
       "AGENTS.md",
       ".codex/skills/repo-memory/SKILL.md",
+      ".codex/skills/repo-memory/references/claims.md",
+      ".codex/skills/repo-memory/references/recipes.md",
+      ".codex/skills/repo-memory/references/graphs-and-indexes.md",
+      ".codex/skills/repo-memory/references/coverage-and-validation.md",
       "docs/agent-memory/AGENT_SKILL.md"
     ]) {
       expect(fs.existsSync(path.join(repoRoot, relativePath))).toBe(true);
