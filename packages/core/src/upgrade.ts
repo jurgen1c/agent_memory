@@ -34,6 +34,7 @@ export interface UpgradeResult {
 }
 
 type ConfigSchema = true | { [key: string]: ConfigSchema };
+type DeprecatedAliasWarningMode = "applied" | "planned" | "deferred";
 
 const CONFIG_SCHEMA: ConfigSchema = {
   version: true,
@@ -89,9 +90,11 @@ export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
   const configPath = path.join(repo.root, "agent-memory.config.yaml");
   const rawConfig = fs.readFileSync(configPath, "utf8");
   const parsedConfig = parseYaml(rawConfig);
-  const config = applyDeprecatedConfigAliases(structuredClone(loaded.config), parsedConfig, warnings);
-  preserveLegacySingleAgentSelection(repo.root, config, warnings);
   const unknownConfigPaths = collectUnknownConfigPaths(parsedConfig);
+  const configRewriteBlocked = unknownConfigPaths.length > 0 && !options.force;
+  const aliasWarningMode: DeprecatedAliasWarningMode = configRewriteBlocked ? "deferred" : options.write ? "applied" : "planned";
+  const config = applyDeprecatedConfigAliases(structuredClone(loaded.config), parsedConfig, warnings, aliasWarningMode);
+  preserveLegacySingleAgentSelection(repo.root, config, warnings);
 
   for (const unknownPath of unknownConfigPaths) {
     warnings.push(
@@ -337,7 +340,8 @@ function upgradeCodexSkillReferences(
 function applyDeprecatedConfigAliases(
   config: AgentMemoryConfig,
   parsedConfig: unknown,
-  warnings: string[]
+  warnings: string[],
+  warningMode: DeprecatedAliasWarningMode
 ): AgentMemoryConfig {
   if (!isRecord(parsedConfig)) {
     return config;
@@ -362,8 +366,20 @@ function applyDeprecatedConfigAliases(
   }
 
   config.context.include_inferred_edges_by_default = deprecatedValue;
-  warnings.push("Deprecated config field context.include_inferred_edges was migrated to context.include_inferred_edges_by_default.");
+  warnings.push(deprecatedAliasMigrationWarning(warningMode));
   return config;
+}
+
+function deprecatedAliasMigrationWarning(mode: DeprecatedAliasWarningMode): string {
+  if (mode === "applied") {
+    return "Deprecated config field context.include_inferred_edges was migrated to context.include_inferred_edges_by_default.";
+  }
+
+  if (mode === "planned") {
+    return "Deprecated config field context.include_inferred_edges would be migrated to context.include_inferred_edges_by_default.";
+  }
+
+  return "Deprecated config field context.include_inferred_edges migration to context.include_inferred_edges_by_default was deferred because unknown config fields require manual review.";
 }
 
 function collectUnknownConfigPaths(value: unknown): string[] {

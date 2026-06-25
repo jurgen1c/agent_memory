@@ -98,6 +98,10 @@ context:
   include_inferred_edges: true
 `);
 
+    const dryRun = await dispatch(["upgrade"], { cwd: repoRoot });
+    expect(dryRun.exitCode).toBe(0);
+    expect(dryRun.stdout).toContain("Deprecated config field context.include_inferred_edges would be migrated");
+
     const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
     const configText = fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8");
     const loaded = loadConfig({ repoRoot });
@@ -107,6 +111,26 @@ context:
     expect(loaded.config.context.include_inferred_edges_by_default).toBe(true);
     expect(configText).toContain("include_inferred_edges_by_default: true");
     expect(configText).not.toContain("include_inferred_edges: true");
+  });
+
+  test("defers deprecated alias migration warnings when unknown fields block config rewrite", async () => {
+    const repoRoot = makeRepo(`
+version: 1
+custom_setting: true
+context:
+  include_inferred_edges: true
+`);
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+    const configText = fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Unknown config field custom_setting");
+    expect(result.stdout).toContain("Deprecated config field context.include_inferred_edges migration to context.include_inferred_edges_by_default was deferred");
+    expect(result.stdout).not.toContain("Deprecated config field context.include_inferred_edges was migrated");
+    expect(configText).toContain("custom_setting: true");
+    expect(configText).toContain("include_inferred_edges: true");
+    expect(configText).not.toContain("include_inferred_edges_by_default: true");
   });
 
   test("warns and keeps explicit replacement when deprecated config aliases are redundant", async () => {
