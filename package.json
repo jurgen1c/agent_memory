@@ -1,6 +1,6 @@
 {
   "name": "@jurgen1c/agent-memory-cli",
-  "version": "0.1.1",
+  "version": "0.1.0",
   "description": "Repository-local agent memory CLI based on atomic claims and generated indexes.",
   "license": "MIT",
   "keywords": [
