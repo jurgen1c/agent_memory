@@ -325,6 +325,8 @@ Required arguments:
 | `--from <path-to-docs>` | File or directory to scan for existing docs. The command reads `.md`, `.markdown`, `.mdx`, and `.txt` files. |
 | `--system <system>` | Memory system namespace for generated claim IDs and paths, such as `auth`, `billing`, or `search`. Use lowercase letters, numbers, and underscores only. |
 
+A system is the durable memory namespace for the claims being created. It is usually the subsystem or domain the docs describe, not the source folder name unless that folder is already meaningful. For broad canonical docs, `--system docs` or `--system platform` may be appropriate; for focused docs, use a subsystem like `auth`, `billing`, or `search`. The value becomes part of generated IDs and paths, such as `docs.migrated_canonical` and `docs/agent-memory/claims/docs/`.
+
 Optional flags:
 
 | Flag | Meaning |
@@ -337,6 +339,12 @@ Plan migration first. Plan mode does not write files:
 
 ```bash
 bin/memory migrate-docs --from docs/legacy --system auth
+```
+
+For canonical repository docs, a docs namespace is often a good first pass:
+
+```bash
+bin/memory migrate-docs --from docs/canonical --system docs --automatic
 ```
 
 The plan lists each source doc, suggested claim ID, and target path. For example, `docs/legacy/oauth.md` under `--system auth` may plan a draft like:

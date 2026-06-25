@@ -1,5 +1,11 @@
 import { AgentMemoryError } from "../../../core/src/errors";
-import { migrateDocs, type MigratedDocPlan, type MigrateDocsResult, type MigrationMode } from "../../../core/src/migration";
+import {
+  migrateDocs,
+  missingMigrationSystemError,
+  type MigratedDocPlan,
+  type MigrateDocsResult,
+  type MigrationMode
+} from "../../../core/src/migration";
 import type { ExitCode } from "../../../core/src/types";
 
 export interface MigrateDocsCommandContext {
@@ -27,7 +33,7 @@ export function runMigrateDocsCommand(args: string[], context: MigrateDocsComman
   }
 
   if (!options.system) {
-    throw new AgentMemoryError("migrate-docs requires --system.");
+    throw missingMigrationSystemError(options.fromPath);
   }
 
   const result = migrateDocs({

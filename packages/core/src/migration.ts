@@ -41,7 +41,7 @@ export function migrateDocs(options: MigrateDocsOptions): MigrateDocsResult {
   }
 
   if (!options.system) {
-    throw new AgentMemoryError("migrate-docs requires --system.");
+    throw missingMigrationSystemError(options.fromPath);
   }
 
   const loaded = loadConfig({ cwd: options.cwd });
@@ -78,6 +78,19 @@ export function migrateDocs(options: MigrateDocsOptions): MigrateDocsResult {
     docs,
     warnings: docs.length === 0 ? [`No migratable docs found under ${displayPath(repoRoot, sourceRoot)}.`] : []
   };
+}
+
+export function missingMigrationSystemError(fromPath?: string): AgentMemoryError {
+  const exampleFrom = fromPath || "docs/legacy";
+
+  return new AgentMemoryError("migrate-docs requires --system <system>.", {
+    details: [
+      "A system is the lowercase memory namespace or subsystem assigned to generated claims, such as auth, billing, docs, platform, or search.",
+      "It is used in claim IDs and paths, for example docs.migrated_canonical and docs/agent-memory/claims/docs/.",
+      `Example: agent-memory migrate-docs --from ${exampleFrom} --system docs --automatic`,
+      "If the source docs cover multiple subsystems, run migrate-docs separately for each source folder with the matching --system value."
+    ]
+  });
 }
 
 function resolveSourceRoot(repoRoot: string, fromPath: string): string {

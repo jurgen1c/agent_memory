@@ -140,7 +140,9 @@ describe("migrate-docs command", () => {
     );
 
     expect(missingSystem).toBe(1);
-    expect(stderr).toContain("migrate-docs requires --system");
+    expect(stderr).toContain("migrate-docs requires --system <system>");
+    expect(stderr).toContain("A system is the lowercase memory namespace");
+    expect(stderr).toContain("agent-memory migrate-docs --from docs --system docs --automatic");
 
     stderr = "";
     const unknownOption = await runCli(

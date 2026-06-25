@@ -226,9 +226,13 @@ const TOPICS: HelpTopic[] = [
     ],
     examples: [
       "agent-memory migrate-docs --from docs/legacy --system auth",
+      "agent-memory migrate-docs --from docs/canonical --system docs",
       "agent-memory migrate-docs --from docs/legacy --system auth --automatic"
     ],
-    agentNotes: ["Automatic mode creates current, low-confidence drafts; agents must review and split them into precise atomic claims."],
+    agentNotes: [
+      "The required --system value is the lowercase memory namespace for generated claim IDs and paths, such as auth, docs, billing, or platform.",
+      "Automatic mode creates current, low-confidence drafts; agents must review and split them into precise atomic claims."
+    ],
     phase: "Phase 10"
   },
   {
