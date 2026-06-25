@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { buildGraph } from "../../packages/web/src/App";
 
+type GraphClaim = Parameters<typeof buildGraph>[0][number];
+type GraphRelation = Parameters<typeof buildGraph>[1][number];
+
 describe("graph layout", () => {
   test("separates claims in the same system into distinct rows", () => {
     const claims = [
@@ -70,17 +73,30 @@ describe("graph layout", () => {
   });
 });
 
-function claim(id: string, system: string, title: string) {
+function claim(id: string, system: string, title: string): GraphClaim {
   return {
     id,
+    type: "fact",
     system,
-    title,
     status: "current",
-    severity: "normal"
-  } as never;
+    confidence: "high",
+    severity: "normal",
+    title,
+    claim: title,
+    sourcePath: `docs/agent-memory/claims/${system}/${id.replaceAll(".", "_")}.md`,
+    sourceFiles: [],
+    relatedFiles: [],
+    symbols: [],
+    routes: [],
+    tags: [],
+    verification: [],
+    body: "",
+    raw: {},
+    reviewPriority: 0
+  };
 }
 
-function relation(id: string, source: string, target: string, bidirectional: boolean) {
+function relation(id: string, source: string, target: string, bidirectional: boolean): GraphRelation {
   return {
     id,
     source,
@@ -89,5 +105,5 @@ function relation(id: string, source: string, target: string, bidirectional: boo
     strength: 60,
     origin: "explicit",
     bidirectional
-  } as never;
+  };
 }
