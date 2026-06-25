@@ -18,6 +18,7 @@ import { runSystemCommand } from "./commands/system";
 import { runSyncCommand } from "./commands/sync";
 import { runTemplatesCommand } from "./commands/templates";
 import { runUiCommand } from "./commands/ui";
+import { runUpgradeCommand } from "./commands/upgrade";
 import { runValidateCommand } from "./commands/validate";
 
 export interface CliStreams {
@@ -197,6 +198,17 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
     }
 
     return runSyncCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "upgrade") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("upgrade")
+      };
+    }
+
+    return runUpgradeCommand(rest, { cwd: context.cwd });
   }
 
   if (command === "install-hooks") {

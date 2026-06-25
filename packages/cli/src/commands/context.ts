@@ -15,10 +15,10 @@ interface ContextCommandOptions {
   task?: string;
   changedFiles: string[];
   gitDiff: boolean;
-  budget: ContextBudget;
-  depth: number;
+  budget?: ContextBudget;
+  depth?: number;
   json: boolean;
-  includeInferred: boolean;
+  includeInferred?: boolean;
 }
 
 export async function runContextCommand(args: string[], context: ContextCommandContext = {}): Promise<ContextCommandResult> {
@@ -43,10 +43,7 @@ function parseContextArgs(args: string[]): ContextCommandOptions {
   const options: ContextCommandOptions = {
     changedFiles: [],
     gitDiff: false,
-    budget: "medium",
-    depth: 1,
-    json: false,
-    includeInferred: false
+    json: false
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -64,6 +61,11 @@ function parseContextArgs(args: string[]): ContextCommandOptions {
 
     if (arg === "--include-inferred") {
       options.includeInferred = true;
+      continue;
+    }
+
+    if (arg === "--no-include-inferred") {
+      options.includeInferred = false;
       continue;
     }
 

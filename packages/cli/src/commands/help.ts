@@ -28,11 +28,12 @@ const TOPICS: HelpTopic[] = [
       "agent-memory init --yes --package-manager bun",
       "agent-memory init --yes --agent codex",
       "agent-memory init --yes --agent generic",
+      "agent-memory init --yes --agent codex --skill-location .agents",
       "agent-memory init --yes --install-hooks",
       "agent-memory init --yes --force"
     ],
-    examples: ["agent-memory init --yes --agent codex", "agent-memory init --package-manager bun"],
-    agentNotes: ["Safe to run repeatedly. Existing files are skipped unless --force is passed; AGENTS.md keeps local content and refreshes only the managed agent-memory section."],
+    examples: ["agent-memory init --yes --agent codex", "agent-memory init --yes --agent codex --skill-location .agents", "agent-memory init --package-manager bun"],
+    agentNotes: ["Safe to run repeatedly. Existing files are skipped unless --force is passed; AGENTS.md keeps local content and refreshes only the managed agent-memory section. Use --skill-location with exactly one --agent target."],
     phase: "Phase 2"
   },
   {
@@ -131,6 +132,7 @@ const TOPICS: HelpTopic[] = [
       "agent-memory context --task \"fix auth\" --budget small|medium|full",
       "agent-memory context --task \"fix auth\" --depth 2",
       "agent-memory context --task \"fix auth\" --include-inferred",
+      "agent-memory context --task \"fix auth\" --no-include-inferred",
       "agent-memory context --task \"fix auth\" --json"
     ],
     examples: ['agent-memory context --changed-files src/auth.js', "agent-memory context --git-diff"],
@@ -165,6 +167,19 @@ const TOPICS: HelpTopic[] = [
     examples: ["agent-memory sync", "bin/memory sync"],
     agentNotes: ["Use sync after pull, checkout, rebase, merge, or before agent work."],
     phase: "Phase 8"
+  },
+  {
+    name: "upgrade",
+    purpose: "Refresh generated repository support files while preserving local settings.",
+    usage: [
+      "agent-memory upgrade",
+      "agent-memory upgrade --write",
+      "agent-memory upgrade --write --force",
+      "agent-memory upgrade --json"
+    ],
+    examples: ["agent-memory upgrade", "agent-memory upgrade --write"],
+    agentNotes: ["Dry-run by default. Preserves config values, refreshes managed AGENTS.md and skill files, and warns before dropping unknown config fields."],
+    phase: "Maintenance"
   },
   {
     name: "install-hooks",
@@ -261,6 +276,7 @@ export function renderHelp(topicName?: string): string {
     "  coverage             Check watched-file memory coverage.",
     "  doctor               Check compiled database health.",
     "  sync                 Compile, validate, and doctor memory.",
+    "  upgrade              Refresh generated support files for a newer agent-memory version.",
     "  install-hooks        Install non-blocking git sync hooks.",
     "  ui                   Serve the local memory review UI.",
     "  install-skill        Install agent memory instructions.",

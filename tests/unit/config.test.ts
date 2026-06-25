@@ -55,6 +55,16 @@ context:
 
     expect(() => loadConfig({ repoRoot })).toThrow(ConfigError);
   });
+
+  test("rejects invalid context depth defaults", () => {
+    const repoRoot = makeTempRepo(`
+version: 1
+context:
+  default_depth: 11
+`);
+
+    expect(() => loadConfig({ repoRoot })).toThrow(ConfigError);
+  });
 });
 
 function makeTempRepo(config: string): string {

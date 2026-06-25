@@ -69,6 +69,7 @@ Init options:
 | `--package-manager bun` | Generate `bin/memory` with a `bunx agent-memory` fallback. |
 | `--agent codex` | Install only the Codex repo-memory skill. Repeat `--agent` to install multiple targets. |
 | `--agent generic` | Install only the generic agent instruction file. |
+| `--skill-location .agents` | Install the selected agent skill under `.agents/skills/repo-memory/SKILL.md` and write that path to config. Requires exactly one `--agent`. |
 | `--install-hooks` | Install non-blocking git hooks that run `bin/memory sync` after checkout, merge, or rewrite. |
 | `--force` | Overwrite existing scaffold files and hooks where supported. |
 
@@ -123,6 +124,7 @@ Use `agent-memory help <command>` for full usage and examples.
 | `coverage` | Check whether changed watched files have related memory updates or waivers. |
 | `doctor` | Check whether the compiled database exists, is fresh, and is compatible. |
 | `sync` | Compile, validate, and doctor memory in one command. |
+| `upgrade` | Refresh generated config comments, managed `AGENTS.md` guidance, and agent skill files after package upgrades. |
 | `install-hooks` | Install non-blocking git hooks that run `bin/memory sync`. |
 | `ui` | Serve a local browser UI for inspecting and reviewing repository memory. |
 | `install-skill` | Install repository memory instructions under `.codex`, `.agents`, `.claude`, or a custom path. |
@@ -133,7 +135,7 @@ Command usage cheat sheet:
 
 | Command | Required input | Useful flags |
 | --- | --- | --- |
-| `init` | None; use `--yes` for non-interactive setup. | `--package-manager npm`, `--package-manager bun`, `--agent codex`, `--agent generic`, `--install-hooks`, `--force` |
+| `init` | None; use `--yes` for non-interactive setup. | `--package-manager npm`, `--package-manager bun`, `--agent codex`, `--agent generic`, `--skill-location <dir>`, `--install-hooks`, `--force` |
 | `templates list` | None. | None. |
 | `templates show` | Template name, such as `claim:fact`. | None. |
 | `templates copy` | Template name and `--to <path>`. | `--force` |
@@ -143,10 +145,11 @@ Command usage cheat sheet:
 | `query` | Search text. | `--system`, `--status`, `--limit`, `--include-stale`, `--json` |
 | `show` | Claim ID. | `--include-related`, `--depth <n>`, `--json` |
 | `system` | System ID, such as `auth`. | `--json` |
-| `context` | One of `--task`, `--changed-files`, or `--git-diff`. | `--budget small`, `--budget medium`, `--budget full`, `--depth <n>`, `--include-inferred`, `--json` |
+| `context` | One of `--task`, `--changed-files`, or `--git-diff`. | `--budget small`, `--budget medium`, `--budget full`, `--depth <n>`, `--include-inferred`, `--no-include-inferred`, `--json` |
 | `coverage` | `--changed-files` or `--git-diff`. | `--base <ref>` with `--git-diff`, `--json` |
 | `doctor` | None. | `--json` |
 | `sync` | None. | `--json` |
+| `upgrade` | None. Dry-run by default. | `--write`, `--force`, `--json` |
 | `install-hooks` | None. | `--force`, `--json` |
 | `ui` | None. | `--host <host>`, `--port <port>`, `--json` |
 | `install-skill` | `--agent codex` or `--agent generic`. | `--kind repo`, `--kind migration`, `--location <dir>`, `--path <file>`, `--force`, `--json` |
@@ -160,10 +163,12 @@ bin/memory query "student oauth tenant" --system auth
 bin/memory show auth.student_oauth.uid_is_tenant_scoped --include-related
 bin/memory system auth --json
 bin/memory ui --port 0
+bin/memory init --yes --agent codex --skill-location .agents
 bin/memory install-skill --agent codex --location .codex
 bin/memory install-skill --agent codex --kind migration
 bin/memory migrate-docs --from docs/legacy --system auth
 bin/memory migrate-docs --from docs/legacy --system auth --automatic
+bin/memory upgrade --write
 bin/memory agent-manifest --json
 ```
 
