@@ -30,7 +30,7 @@ This repository is a JavaScript/TypeScript package built phase by phase from
 
 ## Test Coverage Expectations
 
-Every branch should add or update tests before it is considered complete.
+Every phase should add or update tests before it is considered complete.
 
 Cover at least:
 
