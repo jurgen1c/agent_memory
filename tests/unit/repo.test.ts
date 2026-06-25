@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { findRepoRoot, isPathInside } from "../../packages/core/src/repo";
+import { findRepoRoot, isPathInside, resolveRepoOutputPath } from "../../packages/core/src/repo";
 
 describe("findRepoRoot", () => {
   test("uses cwd with a warning outside git repositories", () => {
@@ -35,5 +35,14 @@ describe("findRepoRoot", () => {
     expect(isPathInside(repoRoot, repoRoot)).toBe(true);
     expect(isPathInside(repoRoot, path.join(repoRoot, "docs/file.md"))).toBe(true);
     expect(isPathInside(repoRoot, path.resolve(repoRoot, "../outside.md"))).toBe(false);
+  });
+
+  test("rejects relative output paths through symlinked directories outside the repo", () => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-repo-"));
+    const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-outside-"));
+    fs.symlinkSync(outsideRoot, path.join(repoRoot, "external"), "dir");
+
+    expect(() => resolveRepoOutputPath(repoRoot, "external/output.md")).toThrow("escapes repository root through a symlink");
+    expect(resolveRepoOutputPath(repoRoot, path.join(outsideRoot, "output.md"))).toBe(path.join(outsideRoot, "output.md"));
   });
 });
