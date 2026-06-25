@@ -23,7 +23,7 @@ The generated cache lives at `.agent-memory/memory.sqlite` by default and should
 Install the package in a repository that should own its memory:
 
 ```bash
-npm install --save-dev agent-memory-cli
+npm install --save-dev @jurgen1c/agent-memory-cli
 ```
 
 Initialize memory files, a `bin/memory` wrapper, and agent instructions:
@@ -35,14 +35,14 @@ npx agent-memory init --yes --package-manager npm --agent codex --install-hooks
 For Bun-based applications:
 
 ```bash
-bun add --dev agent-memory-cli
-bunx agent-memory-cli init --yes --package-manager bun --agent codex --install-hooks
+bun add --dev @jurgen1c/agent-memory-cli
+bunx --bun @jurgen1c/agent-memory-cli init --yes --package-manager bun --agent codex --install-hooks
 ```
 
 For a global CLI install:
 
 ```bash
-npm install -g agent-memory-cli
+npm install -g @jurgen1c/agent-memory-cli
 agent-memory --help
 ```
 
@@ -326,4 +326,10 @@ npm pack --dry-run
 
 Publishing is handled by the GitHub release workflow and should only happen from semver releases, not normal pushes. Use `npm version patch`, `npm version minor`, or `npm version major` to update `package.json` and create the matching `vX.Y.Z` tag. Push the commit and tag, then publish a GitHub Release for that tag.
 
-The workflow verifies that the release tag matches the package version, then tests, builds, dry-runs the package, and runs `npm publish --provenance`. Configure npm Trusted Publishing for the `agent-memory-cli` package so the workflow can publish without an `NPM_TOKEN` secret.
+The first manual publish for the scoped package must use public access:
+
+```bash
+npm publish --access public
+```
+
+The workflow verifies that the release tag matches the package version, then tests, builds, dry-runs the package, and runs `npm publish --provenance --access public`. Configure npm Trusted Publishing for the `@jurgen1c/agent-memory-cli` package so the workflow can publish without an `NPM_TOKEN` secret.
