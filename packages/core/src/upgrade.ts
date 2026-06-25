@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig, renderConfigTemplate } from "./config";
-import { AgentMemoryError } from "./errors";
 import { buildAgentsMemoryContent } from "./init";
 import { findRepoRoot, resolveInsideRepo } from "./repo";
 import { commandPrefixForRepo, renderAgentSkill, type AgentTarget } from "./skills";

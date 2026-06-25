@@ -38,6 +38,10 @@ export function initRepository(options: InitOptions): InitResult {
   const agents = options.agents.length > 0 ? options.agents : (["codex", "generic"] satisfies AgentTarget[]);
   const config = defaultConfig();
 
+  if (options.skillLocation && agents.length !== 1) {
+    throw new AgentMemoryError("skillLocation requires exactly one agent target.");
+  }
+
   if (options.skillLocation) {
     for (const agent of agents) {
       config.agent_skills[agent].path = skillPathForLocation(agent, options.skillLocation);

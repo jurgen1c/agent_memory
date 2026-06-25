@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadConfig } from "../../packages/core/src/config";
+import { defaultConfig, loadConfig, renderConfigTemplate } from "../../packages/core/src/config";
 import { ConfigError } from "../../packages/core/src/errors";
 
 describe("loadConfig", () => {
@@ -64,6 +64,23 @@ context:
 `);
 
     expect(() => loadConfig({ repoRoot })).toThrow(ConfigError);
+  });
+
+  test("renders YAML-reserved string values as round-trippable strings", () => {
+    const config = defaultConfig();
+    config.memory_root = "true";
+    config.database_path = "123";
+    config.claims = ["null"];
+    config.git.hooks = ["~"];
+    config.agent_skills.codex.path = "false";
+    const repoRoot = makeTempRepo(renderConfigTemplate(config));
+    const loaded = loadConfig({ repoRoot });
+
+    expect(loaded.config.memory_root).toBe("true");
+    expect(loaded.config.database_path).toBe("123");
+    expect(loaded.config.claims).toEqual(["null"]);
+    expect(loaded.config.git.hooks).toEqual(["~"]);
+    expect(loaded.config.agent_skills.codex.path).toBe("false");
   });
 });
 

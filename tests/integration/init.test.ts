@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { dispatch } from "../../packages/cli/src/router";
 import { loadConfig } from "../../packages/core/src/config";
+import { initRepository } from "../../packages/core/src/init";
 
 describe("init command", () => {
   test("scaffolds an empty repository idempotently", async () => {
@@ -276,6 +277,22 @@ Keep this footer too.
     await expect(
       dispatch(["init", "--yes", "--agent", "codex", "--agent", "generic", "--skill-location", ".agents"], { cwd: repoRoot })
     ).rejects.toThrow("--skill-location requires exactly one --agent target");
+  });
+
+  test("core init rejects custom skill locations with multiple agent targets", () => {
+    const repoRoot = makeGitRepo();
+
+    expect(() =>
+      initRepository({
+        cwd: repoRoot,
+        yes: true,
+        force: false,
+        packageManager: "npm",
+        agents: ["codex", "generic"],
+        installHooks: false,
+        skillLocation: ".agents"
+      })
+    ).toThrow("skillLocation requires exactly one agent target");
   });
 });
 

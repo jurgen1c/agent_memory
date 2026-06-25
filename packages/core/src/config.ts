@@ -347,11 +347,15 @@ function renderStringList(values: string[], indent: number): string {
 }
 
 function yamlScalar(value: string): string {
-  if (/^[A-Za-z0-9_./*@{}-]+$/.test(value)) {
+  if (/^[A-Za-z0-9_./*@{}-]+$/.test(value) && !isYamlReservedScalar(value)) {
     return value;
   }
 
   return JSON.stringify(value);
+}
+
+function isYamlReservedScalar(value: string): boolean {
+  return value === "true" || value === "false" || value === "null" || value === "~" || /^-?\d+$/.test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
