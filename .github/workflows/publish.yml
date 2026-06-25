@@ -34,5 +34,3 @@ jobs:
       - run: bun run build
       - run: npm pack --dry-run
       - run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
