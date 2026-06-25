@@ -21,5 +21,6 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run audit
       - run: bun run lint
+      - run: bun run typecheck
       - run: bun test
       - run: bun run build

@@ -26,6 +26,8 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/node": "^26.0.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",
@@ -49,6 +51,7 @@
   "scripts": {
     "build": "bun run build:web && bun build packages/cli/src/index.ts --target=node --outfile=dist/agent-memory.js",
     "build:web": "bun run --cwd packages/web build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/web/tsconfig.json",
     "audit": "bun audit --audit-level moderate",
     "lint": "eslint .",
     "test": "bun test",

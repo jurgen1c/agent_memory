@@ -4,6 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dispatch } from "../../packages/cli/src/router";
+import { loadConfig } from "../../packages/core/src/config";
+import { initRepository } from "../../packages/core/src/init";
 
 describe("init command", () => {
   test("scaffolds an empty repository idempotently", async () => {
@@ -24,12 +26,20 @@ describe("init command", () => {
       "bin/memory",
       "AGENTS.md",
       ".codex/skills/repo-memory/SKILL.md",
+      ".codex/skills/repo-memory/references/claims.md",
+      ".codex/skills/repo-memory/references/recipes.md",
+      ".codex/skills/repo-memory/references/graphs-and-indexes.md",
+      ".codex/skills/repo-memory/references/coverage-and-validation.md",
       "docs/agent-memory/AGENT_SKILL.md"
     ]) {
       expect(fs.existsSync(path.join(repoRoot, relativePath))).toBe(true);
     }
 
     expect(fs.readFileSync(path.join(repoRoot, ".gitignore"), "utf8")).toContain(".agent-memory/");
+    const config = fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8");
+    expect(config).toContain("# Canonical memory source directory.");
+    expect(config).toContain("# Defaults for agent-memory context when command flags are omitted.");
+    expect(loadConfig({ repoRoot }).config.context.default_budget).toBe("medium");
     const agents = fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8");
     expect(agents).toContain("<!-- agent-memory:start -->");
     expect(agents).toContain("## Agent Memory Knowledge Base");
@@ -244,8 +254,110 @@ Keep this footer too.
     const repoRoot = makeGitRepo();
     await dispatch(["init", "--yes", "--agent", "generic"], { cwd: repoRoot });
 
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(config.agent_skills.codex.enabled).toBe(false);
+    expect(config.agent_skills.generic.enabled).toBe(true);
     expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/AGENT_SKILL.md"))).toBe(true);
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"))).toBe(false);
+  });
+
+  test("does not create codex references when init skips an existing skill", async () => {
+    const repoRoot = makeGitRepo();
+    const skillPath = path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md");
+    const referencesPath = path.join(repoRoot, ".codex/skills/repo-memory/references");
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, "# Handwritten Codex Skill\n");
+
+    const result = await dispatch(["init", "--yes", "--agent", "codex"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("skipped");
+    expect(fs.readFileSync(skillPath, "utf8")).toBe("# Handwritten Codex Skill\n");
+    expect(fs.existsSync(referencesPath)).toBe(false);
+  });
+
+  test("installs a selected agent skill under a custom location", async () => {
+    const repoRoot = makeGitRepo();
+    const result = await dispatch(["init", "--yes", "--agent", "codex", "--skill-location", ".agents"], { cwd: repoRoot });
+    const skillPath = path.join(repoRoot, ".agents/skills/repo-memory/SKILL.md");
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(result.exitCode).toBe(0);
+    expect(fs.existsSync(skillPath)).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"))).toBe(false);
+    expect(config.agent_skills.codex.path).toBe(".agents/skills/repo-memory/SKILL.md");
+    expect(fs.readFileSync(skillPath, "utf8")).toContain("Canonical memory lives in:");
+  });
+
+  test("writes selected agent skills to absolute custom locations", async () => {
+    const repoRoot = makeGitRepo();
+    const skillRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-init-skill-location-"));
+    const result = await dispatch(["init", "--yes", "--agent", "codex", "--skill-location", skillRoot], { cwd: repoRoot });
+    const skillPath = path.join(skillRoot, "skills/repo-memory/SKILL.md");
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(result.exitCode).toBe(0);
+    expect(config.agent_skills.codex.path).toBe(skillPath);
+    expect(fs.existsSync(skillPath)).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"))).toBe(false);
+    expect(fs.existsSync(path.join(skillRoot, "skills/repo-memory/references/claims.md"))).toBe(true);
+  });
+
+  test("rejects relative custom skill locations that escape the repository", async () => {
+    const repoRoot = makeGitRepo();
+    const outsideRelativePath = `../${path.basename(repoRoot)}-outside-agent-skill`;
+    const outsidePath = path.resolve(repoRoot, outsideRelativePath);
+
+    await expect(dispatch(["init", "--yes", "--agent", "codex", "--skill-location", outsideRelativePath], { cwd: repoRoot })).rejects.toThrow(
+      "Relative output path escapes repository root"
+    );
+
+    expect(fs.existsSync(path.join(repoRoot, "agent-memory.config.yaml"))).toBe(false);
+    expect(fs.existsSync(outsidePath)).toBe(false);
+  });
+
+  test("does not install disabled agent targets during upgrade", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes", "--agent", "codex"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+
+    const upgraded = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(upgraded.exitCode).toBe(0);
+    expect(config.agent_skills.codex.enabled).toBe(true);
+    expect(config.agent_skills.generic.enabled).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"))).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/AGENT_SKILL.md"))).toBe(false);
+  });
+
+  test("requires an explicit single agent when init uses a custom skill location", async () => {
+    const repoRoot = makeGitRepo();
+
+    await expect(dispatch(["init", "--yes", "--skill-location", ".agents"], { cwd: repoRoot })).rejects.toThrow(
+      "--skill-location requires exactly one --agent target"
+    );
+
+    await expect(
+      dispatch(["init", "--yes", "--agent", "codex", "--agent", "generic", "--skill-location", ".agents"], { cwd: repoRoot })
+    ).rejects.toThrow("--skill-location requires exactly one --agent target");
+  });
+
+  test("core init rejects custom skill locations with multiple agent targets", () => {
+    const repoRoot = makeGitRepo();
+
+    expect(() =>
+      initRepository({
+        cwd: repoRoot,
+        yes: true,
+        force: false,
+        packageManager: "npm",
+        agents: ["codex", "generic"],
+        installHooks: false,
+        skillLocation: ".agents"
+      })
+    ).toThrow("skillLocation requires exactly one agent target");
   });
 });
 

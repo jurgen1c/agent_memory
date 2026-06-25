@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dispatch, runCli } from "../../packages/cli/src/router";
+import { classifyDocs } from "../../packages/core/src/migration";
 
 describe("migrate-docs command", () => {
   test("plans memory drafts from existing docs without writing files", async () => {
@@ -69,6 +70,134 @@ describe("migrate-docs command", () => {
     expect(result.exitCode).toBe(0);
     expect(parsed.mode).toBe("plan");
     expect(parsed.docs[0].suggestedId).toBe("auth.migrated_student_oauth_legacy_behavior");
+  });
+
+  test("classifies broad docs into a deterministic system map", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    fs.mkdirSync(path.join(repoRoot, "docs/agent-memory/claims/search"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "docs/agent-memory/claims/search/.gitkeep"), "");
+    fs.mkdirSync(path.join(repoRoot, "docs/canonical/auth"), { recursive: true });
+    fs.mkdirSync(path.join(repoRoot, "docs/canonical/null"), { recursive: true });
+    fs.mkdirSync(path.join(repoRoot, "docs/canonical/reference"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "docs/canonical/auth/oauth.md"), "# OAuth Behavior\n\nTenant auth notes.\n");
+    fs.writeFileSync(path.join(repoRoot, "docs/canonical/null/value.md"), "# 1.2\n\nNumeric-looking title.\n");
+    fs.writeFileSync(path.join(repoRoot, "docs/canonical/reference/search.md"), "# Search Ranking\n\nSearch notes.\n");
+    fs.writeFileSync(path.join(repoRoot, "docs/canonical/overview.md"), "# General Overview\n\nGeneral notes.\n");
+
+    const result = await dispatch(["migrate-docs", "--from", "docs/canonical", "--classify"], { cwd: repoRoot });
+    const mapPath = path.join(repoRoot, ".agent-memory/migrations/docs-canonical.yaml");
+    const systemMap = fs.readFileSync(mapPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Agent Memory docs migration system map created.");
+    expect(result.stdout).toContain("Status: created");
+    expect(result.stdout).toContain("System map: .agent-memory/migrations/docs-canonical.yaml");
+    expect(systemMap).toContain("source_root: docs/canonical");
+    expect(systemMap).toContain("source: docs/canonical/auth/oauth.md");
+    expect(systemMap).toContain("system: auth");
+    expect(systemMap).toContain("source: docs/canonical/null/value.md");
+    expect(systemMap).toContain('system: "null"');
+    expect(systemMap).toContain('title: "1.2"');
+    expect(systemMap).toContain("source: docs/canonical/reference/search.md");
+    expect(systemMap).toContain("system: search");
+    expect(systemMap).toContain("source: docs/canonical/overview.md");
+    expect(systemMap).toContain("confidence: low");
+    expect(systemMap).toContain("No subsystem match; defaulted to docs");
+  });
+
+  test("does not overwrite reviewed system maps unless forced", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    fs.mkdirSync(path.join(repoRoot, "docs/canonical/auth"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "docs/canonical/auth/oauth.md"), "# OAuth Behavior\n\nTenant auth notes.\n");
+
+    const first = await dispatch(["migrate-docs", "--from", "docs/canonical", "--classify"], { cwd: repoRoot });
+    expect(first.exitCode).toBe(0);
+
+    const mapPath = path.join(repoRoot, ".agent-memory/migrations/docs-canonical.yaml");
+    fs.writeFileSync(mapPath, `${fs.readFileSync(mapPath, "utf8")}\n# reviewed edit\n`);
+
+    const skipped = await dispatch(["migrate-docs", "--from", "docs/canonical", "--classify"], { cwd: repoRoot });
+    expect(skipped.exitCode).toBe(0);
+    expect(skipped.stdout).toContain("Agent Memory docs migration system map skipped.");
+    expect(skipped.stdout).toContain("Status: skipped");
+    expect(skipped.stdout).toContain("leaving reviewed map unchanged");
+    expect(fs.readFileSync(mapPath, "utf8")).toContain("# reviewed edit");
+
+    const forced = await dispatch(["migrate-docs", "--from", "docs/canonical", "--classify", "--force"], { cwd: repoRoot });
+    expect(forced.exitCode).toBe(0);
+    expect(forced.stdout).toContain("Agent Memory docs migration system map overwritten.");
+    expect(forced.stdout).toContain("Status: overwritten");
+    expect(fs.readFileSync(mapPath, "utf8")).not.toContain("# reviewed edit");
+  });
+
+  test("rejects classify output paths that escape the repository", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    fs.mkdirSync(path.join(repoRoot, "docs/canonical/auth"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "docs/canonical/auth/oauth.md"), "# OAuth Behavior\n\nTenant auth notes.\n");
+    const outsideRelativePath = `../${path.basename(repoRoot)}-outside-map.yaml`;
+    const outsidePath = path.resolve(repoRoot, outsideRelativePath);
+
+    expect(() => classifyDocs({ cwd: repoRoot, fromPath: "docs/canonical", outputPath: outsideRelativePath })).toThrow(
+      "Relative output path escapes repository root"
+    );
+    expect(fs.existsSync(outsidePath)).toBe(false);
+  });
+
+  test("plans and automatically migrates docs from a reviewed system map", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    fs.mkdirSync(path.join(repoRoot, "docs/canonical/auth"), { recursive: true });
+    fs.mkdirSync(path.join(repoRoot, "docs/canonical/billing"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "docs/canonical/auth/oauth.md"), "# OAuth Behavior\n\nTenant auth notes.\n");
+    fs.writeFileSync(path.join(repoRoot, "docs/canonical/billing/invoices.md"), "# Invoice Behavior\n\nBilling notes.\n");
+    const mapPath = path.join(repoRoot, ".agent-memory/migrations/docs-canonical.yaml");
+    fs.mkdirSync(path.dirname(mapPath), { recursive: true });
+    fs.writeFileSync(
+      mapPath,
+      `version: 1
+source_root: docs/canonical
+mappings:
+  - source: docs/canonical/auth/oauth.md
+    system: auth
+    title: OAuth behavior
+    confidence: high
+    reason: Reviewed auth docs
+  - source: docs/canonical/billing/invoices.md
+    system: billing
+    title: Invoice behavior
+    confidence: high
+    reason: Reviewed billing docs
+`
+    );
+
+    const plan = await dispatch(["migrate-docs", "--system-map", ".agent-memory/migrations/docs-canonical.yaml"], { cwd: repoRoot });
+    expect(plan.exitCode).toBe(0);
+    expect(plan.stdout).toContain("System map: .agent-memory/migrations/docs-canonical.yaml");
+    expect(plan.stdout).toContain("docs/agent-memory/claims/auth/migrated_oauth_behavior.md");
+    expect(plan.stdout).toContain("docs/agent-memory/claims/billing/migrated_invoice_behavior.md");
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/auth/migrated_oauth_behavior.md"))).toBe(false);
+
+    const automatic = await dispatch(
+      ["migrate-docs", "--system-map", ".agent-memory/migrations/docs-canonical.yaml", "--automatic"],
+      { cwd: repoRoot }
+    );
+    expect(automatic.exitCode).toBe(0);
+    expect(fs.readFileSync(path.join(repoRoot, "docs/agent-memory/claims/auth/migrated_oauth_behavior.md"), "utf8")).toContain(
+      "id: auth.migrated_oauth_behavior"
+    );
+    expect(fs.readFileSync(path.join(repoRoot, "docs/agent-memory/claims/billing/migrated_invoice_behavior.md"), "utf8")).toContain(
+      "id: billing.migrated_invoice_behavior"
+    );
+
+    const validate = await dispatch(["validate"], { cwd: repoRoot });
+    expect(validate.exitCode).toBe(0);
   });
 
   test("warns when no migratable docs are found", async () => {
@@ -140,7 +269,9 @@ describe("migrate-docs command", () => {
     );
 
     expect(missingSystem).toBe(1);
-    expect(stderr).toContain("migrate-docs requires --system");
+    expect(stderr).toContain("migrate-docs requires --system <system>");
+    expect(stderr).toContain("A system is the lowercase memory namespace");
+    expect(stderr).toContain("agent-memory migrate-docs --from docs --system docs --automatic");
 
     stderr = "";
     const unknownOption = await runCli(
@@ -199,6 +330,32 @@ describe("migrate-docs command", () => {
 
     expect(externalAutomatic).toBe(1);
     expect(stderr).toContain("Automatic migration requires --from to point inside the repository");
+
+    const mapPath = path.join(repoRoot, ".agent-memory/migrations/external.yaml");
+    fs.mkdirSync(path.dirname(mapPath), { recursive: true });
+    fs.writeFileSync(
+      mapPath,
+      `version: 1
+source_root: ${JSON.stringify(externalRoot)}
+mappings:
+  - source: ${JSON.stringify(path.join(externalRoot, "external.md"))}
+    system: auth
+    title: External Doc
+    confidence: high
+    reason: External test fixture
+`
+    );
+    stderr = "";
+    const externalMapAutomatic = await runCli(
+      ["migrate-docs", "--system-map", ".agent-memory/migrations/external.yaml", "--automatic"],
+      quietStreams((chunk) => {
+        stderr += chunk;
+      }),
+      { cwd: repoRoot }
+    );
+
+    expect(externalMapAutomatic).toBe(1);
+    expect(stderr).toContain("Automatic migration requires system-map sources to point inside the repository");
   });
 });
 

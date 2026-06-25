@@ -85,6 +85,12 @@ export function buildAgentCommands(commandPrefix: string): AgentCommandDescripti
       purpose: "Check whether the compiled database is present, fresh, and compatible.",
       whenToUse: "Run when retrieval fails or after repository state changes.",
       examples: [`${commandPrefix} doctor`]
+    },
+    {
+      name: "upgrade",
+      purpose: "Refresh generated config comments, managed AGENTS.md guidance, and agent skill files.",
+      whenToUse: "Run after upgrading the agent-memory package version in a repository.",
+      examples: [`${commandPrefix} upgrade`, `${commandPrefix} upgrade --write`]
     }
   ];
 }

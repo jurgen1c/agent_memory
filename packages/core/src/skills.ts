@@ -3,7 +3,7 @@ import path from "node:path";
 import { buildAgentCommands } from "./agent_commands";
 import { loadConfig } from "./config";
 import { AgentMemoryError } from "./errors";
-import { resolveInsideRepo } from "./repo";
+import { resolveRepoOutputPath } from "./repo";
 import type { AgentMemoryConfig, RepoInfo } from "./types";
 import { PACKAGE_VERSION } from "./version";
 
@@ -11,11 +11,27 @@ export type AgentTarget = "codex" | "generic";
 export type AgentSkillKind = "repo" | "migration";
 
 export const DEFAULT_CODEX_SKILL_LOCATION = ".codex";
+export const GENERATED_SKILL_MARKER_PREFIX = "<!-- agent-memory:generated-skill";
 
 export interface SkillInstallAction {
   path: string;
   status: "created" | "skipped" | "overwritten";
   detail?: string;
+}
+
+export interface SkillReferenceWriteAction {
+  path: string;
+  status: "created" | "skipped" | "overwritten";
+  detail?: string;
+}
+
+export interface SkillReferenceWriteActionAccumulator {
+  push(...actions: SkillReferenceWriteAction[]): number;
+}
+
+export interface SkillReferenceFile {
+  path: string;
+  content: string;
 }
 
 export interface InstallAgentSkillOptions {
@@ -58,7 +74,7 @@ export function installAgentSkill(options: InstallAgentSkillOptions): SkillInsta
       : kind === "repo"
         ? skillConfig.path
         : skillPathForLocation(options.agent, defaultSkillLocation(options.agent), kind));
-  const absolutePath = resolveInsideRepo(repo.root, targetPath);
+  const absolutePath = resolveRepoOutputPath(repo.root, targetPath);
   const displayPath = displayRepoPath(repo.root, absolutePath);
   const commandPrefix = commandPrefixForRepo(repo.root);
 
@@ -66,13 +82,17 @@ export function installAgentSkill(options: InstallAgentSkillOptions): SkillInsta
     warnings.push(`Agent skill ${options.agent} is disabled in config; installing because it was explicitly requested.`);
   }
 
-  writeFile(
+  const skillAction = writeFile(
     absolutePath,
     displayPath,
     renderAgentSkill({ agent: options.agent, kind, config: loaded.config, commandPrefix }),
     Boolean(options.force),
     actions
   );
+
+  if (options.agent === "codex" && skillAction.status !== "skipped") {
+    writeCodexSkillReferences(repo.root, absolutePath, kind, Boolean(options.force), actions);
+  }
 
   return {
     repo,
@@ -94,12 +114,25 @@ export function renderAgentSkill(options: RenderAgentSkillOptions): string {
   const memoryRoot = trimTrailingSlash(options.config.memory_root);
   const databasePath = options.config.database_path;
   const commands = buildAgentCommands(options.commandPrefix);
+  const referenceLinks =
+    options.agent === "codex"
+      ? `
+For deeper task guidance, read:
 
-  return `${renderCodexSkillFrontmatter(options.agent, "repo")}# ${title}
+- \`references/claims.md\`
+- \`references/recipes.md\`
+- \`references/graphs-and-indexes.md\`
+- \`references/coverage-and-validation.md\`
+`
+      : "";
+
+  return `${renderCodexSkillFrontmatter(options.agent, "repo")}${generatedSkillHeader("repo-memory")}
+# ${title}
 
 Use this skill whenever working in this repository.
 
 This repository uses \`agent-memory\`, a local memory system based on atomic claims, graph relationships, recipes, indexes, and waivers.
+${referenceLinks}
 
 Canonical memory lives in:
 
@@ -196,12 +229,24 @@ If memory conflicts with code, trust code and update or deprecate memory.
 function renderMigrationSkill(options: RenderAgentSkillOptions): string {
   const title = options.agent === "codex" ? "Repo Memory Migration Skill" : "Repository Memory Migration Instructions";
   const memoryRoot = trimTrailingSlash(options.config.memory_root);
+  const referenceLinks =
+    options.agent === "codex"
+      ? `
+For deeper migration guidance, read:
 
-  return `${renderCodexSkillFrontmatter(options.agent, "migration")}# ${title}
+- \`references/migration-workflow.md\`
+- \`references/system-maps.md\`
+- \`references/reviewing-drafts.md\`
+`
+      : "";
+
+  return `${renderCodexSkillFrontmatter(options.agent, "migration")}${generatedSkillHeader("repo-memory-migration")}
+# ${title}
 
 Use this skill when migrating existing repository documentation into \`agent-memory\`.
 
 The goal is to convert legacy docs into atomic, reviewable memory that matches this tool's expected files:
+${referenceLinks}
 
 ${renderMemoryPatterns(memoryRoot, "claims", options.config.claims)}
 ${renderMemoryPatterns(memoryRoot, "graphs", options.config.graphs)}
@@ -218,10 +263,18 @@ Start with a scan:
 ${options.commandPrefix} migrate-docs --from <existing-docs> --system <system>
 \`\`\`
 
+For broad folders that may cover several subsystems, classify first and review the system map:
+
+\`\`\`bash
+${options.commandPrefix} migrate-docs --from <existing-docs> --classify
+${options.commandPrefix} migrate-docs --system-map .agent-memory/migrations/<source>.yaml
+\`\`\`
+
 For automatic starter drafts, opt in explicitly:
 
 \`\`\`bash
 ${options.commandPrefix} migrate-docs --from <existing-docs> --system <system> --automatic
+${options.commandPrefix} migrate-docs --system-map .agent-memory/migrations/<source>.yaml --automatic
 \`\`\`
 
 Automatic migration creates \`current\`, low-confidence claim drafts. Treat them as starting points that still need review and verification.
@@ -283,17 +336,66 @@ export function defaultSkillLocation(agent: AgentTarget): string {
   return agent === "codex" ? DEFAULT_CODEX_SKILL_LOCATION : "docs/agent-memory";
 }
 
-function writeFile(absolutePath: string, displayPath: string, content: string, force: boolean, actions: SkillInstallAction[]): void {
+export function codexSkillReferenceFiles(kind: AgentSkillKind): SkillReferenceFile[] {
+  if (kind === "migration") {
+    return [
+      { path: "references/migration-workflow.md", content: migrationWorkflowReference() },
+      { path: "references/system-maps.md", content: systemMapsReference() },
+      { path: "references/reviewing-drafts.md", content: reviewingDraftsReference() }
+    ];
+  }
+
+  return [
+    { path: "references/claims.md", content: claimsReference() },
+    { path: "references/recipes.md", content: recipesReference() },
+    { path: "references/graphs-and-indexes.md", content: graphsAndIndexesReference() },
+    { path: "references/coverage-and-validation.md", content: coverageAndValidationReference() }
+  ];
+}
+
+export function isGeneratedSkillReferenceFile(content: string): boolean {
+  return content.includes("<!-- agent-memory:generated-reference");
+}
+
+export function isGeneratedAgentSkillFile(content: string): boolean {
+  return content.includes(GENERATED_SKILL_MARKER_PREFIX);
+}
+
+export function writeCodexSkillReferences(
+  repoRoot: string,
+  absoluteSkillPath: string,
+  kind: AgentSkillKind,
+  force: boolean,
+  actions: SkillReferenceWriteActionAccumulator
+): void {
+  const skillDir = path.dirname(absoluteSkillPath);
+
+  for (const reference of codexSkillReferenceFiles(kind)) {
+    const absolutePath = path.join(skillDir, reference.path);
+    writeFile(absolutePath, displayRepoPath(repoRoot, absolutePath), reference.content, force, actions);
+  }
+}
+
+function writeFile(
+  absolutePath: string,
+  displayPath: string,
+  content: string,
+  force: boolean,
+  actions: SkillReferenceWriteActionAccumulator
+): SkillInstallAction {
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
   const existedBefore = fs.existsSync(absolutePath);
 
   if (existedBefore && !force) {
-    actions.push({ path: displayPath, status: "skipped", detail: "already exists" });
-    return;
+    const action: SkillInstallAction = { path: displayPath, status: "skipped", detail: "already exists" };
+    actions.push(action);
+    return action;
   }
 
   fs.writeFileSync(absolutePath, content);
-  actions.push({ path: displayPath, status: existedBefore ? "overwritten" : "created" });
+  const action: SkillInstallAction = { path: displayPath, status: existedBefore ? "overwritten" : "created" };
+  actions.push(action);
+  return action;
 }
 
 function displayRepoPath(repoRoot: string, absolutePath: string): string {
@@ -339,5 +441,129 @@ version: ${PACKAGE_VERSION}
 user-invocable: false
 ---
 
+`;
+}
+
+function generatedReferenceHeader(name: string): string {
+  return `<!-- agent-memory:generated-reference ${name} -->`;
+}
+
+function generatedSkillHeader(name: string): string {
+  return `${GENERATED_SKILL_MARKER_PREFIX} ${name} -->`;
+}
+
+function claimsReference(): string {
+  return `${generatedReferenceHeader("repo-memory/claims.md")}
+# Claims
+
+Claims are the durable unit of repository memory. Create one Markdown file per atomic behavior, rule, decision, risk, or workflow fact.
+
+Use \`templates show claim:fact\` or another claim template before creating files. Keep IDs stable, scoped by system, and aligned with the file path under \`claims/<system>/\`.
+
+Good claims:
+
+- state one thing that can be verified
+- name source files, routes, symbols, or tests when known
+- include concrete verification steps
+- use low confidence until checked against code
+
+Avoid broad summaries. Split a document that describes several behaviors into several claims.
+`;
+}
+
+function recipesReference(): string {
+  return `${generatedReferenceHeader("repo-memory/recipes.md")}
+# Recipes
+
+Recipes capture repeatable workflows for implementation, debugging, release, review, or operations.
+
+Create recipes when a task has reusable steps that future agents should follow. Keep one workflow per recipe and link related claims by ID instead of copying claim text.
+
+Prefer recipes for procedures and claims for facts. If a recipe depends on a constraint, represent that constraint as a claim and connect it through graph relationships.
+`;
+}
+
+function graphsAndIndexesReference(): string {
+  return `${generatedReferenceHeader("repo-memory/graphs-and-indexes.md")}
+# Graphs And Indexes
+
+Graph files connect claim IDs with relationships such as \`requires\`, \`constrains\`, \`explains\`, \`conflicts_with\`, \`replaces\`, \`verifies\`, and \`same_area\`.
+
+Indexes make memory discoverable by watched files, default queries, tags, and claim globs. Add or update indexes when source ownership, routes, jobs, models, or important search terms change.
+
+Do not duplicate graph relationships inside every claim. Keep relationships in graph YAML and use indexes for retrieval hints.
+`;
+}
+
+function coverageAndValidationReference(): string {
+  return `${generatedReferenceHeader("repo-memory/coverage-and-validation.md")}
+# Coverage And Validation
+
+Run \`validate\` before finishing memory changes. Run \`compile\` and \`doctor\` when retrieval behavior or generated SQLite freshness matters.
+
+Use \`coverage --git-diff\` for non-trivial code changes. If watched files changed without memory updates, either update the relevant claim, index, recipe, or graph, or add a time-boxed waiver with a clear reason.
+
+Generated files under \`.agent-memory/\` are cache data and must not be committed.
+`;
+}
+
+function migrationWorkflowReference(): string {
+  return `${generatedReferenceHeader("repo-memory-migration/migration-workflow.md")}
+# Migration Workflow
+
+Use focused single-system migration when the source folder clearly belongs to one subsystem:
+
+\`\`\`bash
+agent-memory migrate-docs --from docs/auth --system auth
+agent-memory migrate-docs --from docs/auth --system auth --automatic
+\`\`\`
+
+For broad folders, classify first:
+
+\`\`\`bash
+agent-memory migrate-docs --from docs/canonical --classify
+\`\`\`
+
+Review the generated map before automatic writes. If one source document spans multiple systems, split it manually or rerun focused migrations against narrower source paths.
+`;
+}
+
+function systemMapsReference(): string {
+  return `${generatedReferenceHeader("repo-memory-migration/system-maps.md")}
+# System Maps
+
+A system map assigns each source document to the memory system used for draft claim IDs and target paths.
+
+\`\`\`yaml
+version: 1
+source_root: docs/canonical
+mappings:
+  - source: docs/canonical/oauth.md
+    system: auth
+    title: OAuth behavior
+    confidence: medium
+    reason: Path/title matched auth system
+\`\`\`
+
+Treat low-confidence \`docs\` assignments as prompts for review. Edit \`system\`, \`title\`, and \`reason\` before running \`migrate-docs --system-map <file> --automatic\`.
+`;
+}
+
+function reviewingDraftsReference(): string {
+  return `${generatedReferenceHeader("repo-memory-migration/reviewing-drafts.md")}
+# Reviewing Drafts
+
+Automatic migration writes low-confidence current drafts. They are placeholders, not finished memory.
+
+For each draft:
+
+- compare the claim against source docs and code
+- split broad prose into atomic claims
+- keep source document paths in \`source_files\`
+- add source files, symbols, routes, tags, and verification steps
+- connect related claims through graph files
+- run \`validate\`, \`compile\`, and \`doctor\`
+
+If migrated docs disagree with code, trust code and update or deprecate the migrated memory.
 `;
 }

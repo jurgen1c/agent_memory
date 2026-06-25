@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { defaultConfig } from "./config";
+import { defaultConfig, renderConfigTemplate } from "./config";
 import { AgentMemoryError } from "./errors";
 import { installMemoryHooks } from "./hooks";
-import { findRepoRoot } from "./repo";
-import { parseAgentTarget, renderAgentSkill, type AgentTarget } from "./skills";
+import { findRepoRoot, resolveRepoOutputPath } from "./repo";
+import { parseAgentTarget, renderAgentSkill, skillPathForLocation, writeCodexSkillReferences, type AgentTarget } from "./skills";
 import type { RepoInfo } from "./types";
 
 export type PackageManager = "npm" | "bun";
@@ -16,6 +16,7 @@ export interface InitOptions {
   packageManager: PackageManager;
   agents: AgentTarget[];
   installHooks: boolean;
+  skillLocation?: string;
 }
 
 export interface InitAction {
@@ -35,8 +36,26 @@ export function initRepository(options: InitOptions): InitResult {
   const actions: InitAction[] = [];
   const warnings = [...repo.warnings];
   const agents = options.agents.length > 0 ? options.agents : (["codex", "generic"] satisfies AgentTarget[]);
+  const config = defaultConfig();
 
-  writeFile(repo.root, "agent-memory.config.yaml", configTemplate(), options.force, actions);
+  if (options.skillLocation && agents.length !== 1) {
+    throw new AgentMemoryError("skillLocation requires exactly one agent target.");
+  }
+
+  if (options.agents.length > 0) {
+    for (const agent of ["codex", "generic"] satisfies AgentTarget[]) {
+      config.agent_skills[agent].enabled = agents.includes(agent);
+    }
+  }
+
+  if (options.skillLocation) {
+    for (const agent of agents) {
+      config.agent_skills[agent].path = skillPathForLocation(agent, options.skillLocation);
+      resolveRepoOutputPath(repo.root, config.agent_skills[agent].path);
+    }
+  }
+
+  writeFile(repo.root, "agent-memory.config.yaml", renderConfigTemplate(config), options.force, actions);
   writeFile(repo.root, "docs/agent-memory/README.md", memoryReadmeTemplate(), options.force, actions);
   ensureAgentsMemorySection(repo.root, actions);
 
@@ -54,20 +73,23 @@ export function initRepository(options: InitOptions): InitResult {
   ensureGitignoreEntry(repo.root, ".agent-memory/", actions);
 
   if (agents.includes("codex")) {
-    writeFile(
+    const skillAction = writeFile(
       repo.root,
-      ".codex/skills/repo-memory/SKILL.md",
-      renderAgentSkill({ agent: "codex", config: defaultConfig(), commandPrefix: "bin/memory" }),
+      config.agent_skills.codex.path,
+      renderAgentSkill({ agent: "codex", config, commandPrefix: "bin/memory" }),
       options.force,
       actions
     );
+    if (skillAction.status !== "skipped") {
+      writeCodexSkillReferences(repo.root, resolveOutputPath(repo.root, config.agent_skills.codex.path), "repo", options.force, actions);
+    }
   }
 
   if (agents.includes("generic")) {
     writeFile(
       repo.root,
-      "docs/agent-memory/AGENT_SKILL.md",
-      renderAgentSkill({ agent: "generic", config: defaultConfig(), commandPrefix: "bin/memory" }),
+      config.agent_skills.generic.path,
+      renderAgentSkill({ agent: "generic", config, commandPrefix: "bin/memory" }),
       options.force,
       actions
     );
@@ -86,27 +108,40 @@ export function initRepository(options: InitOptions): InitResult {
   };
 }
 
-function writeFile(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): void {
-  const absolutePath = path.join(repoRoot, relativePath);
+function writeFile(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): InitAction {
+  const absolutePath = resolveOutputPath(repoRoot, relativePath);
+  const displayPath = displayOutputPath(repoRoot, absolutePath);
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
   const existedBefore = fs.existsSync(absolutePath);
 
   if (existedBefore && !force) {
-    actions.push({ path: relativePath, status: "skipped", detail: "already exists" });
-    return;
+    const action: InitAction = { path: displayPath, status: "skipped", detail: "already exists" };
+    actions.push(action);
+    return action;
   }
 
   fs.writeFileSync(absolutePath, content);
-  actions.push({ path: relativePath, status: existedBefore && force ? "overwritten" : "created" });
+  const action: InitAction = { path: displayPath, status: existedBefore && force ? "overwritten" : "created" };
+  actions.push(action);
+  return action;
 }
 
 function writeExecutable(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): void {
   writeFile(repoRoot, relativePath, content, force, actions);
-  const absolutePath = path.join(repoRoot, relativePath);
+  const absolutePath = resolveOutputPath(repoRoot, relativePath);
 
   if (fs.existsSync(absolutePath)) {
     fs.chmodSync(absolutePath, 0o755);
   }
+}
+
+function resolveOutputPath(repoRoot: string, targetPath: string): string {
+  return resolveRepoOutputPath(repoRoot, targetPath);
+}
+
+function displayOutputPath(repoRoot: string, absolutePath: string): string {
+  const relativePath = path.relative(repoRoot, absolutePath);
+  return relativePath.startsWith("..") || path.isAbsolute(relativePath) ? absolutePath : relativePath;
 }
 
 function ensureGitignoreEntry(repoRoot: string, entry: string, actions: InitAction[]): void {
@@ -126,15 +161,24 @@ function ensureGitignoreEntry(repoRoot: string, entry: string, actions: InitActi
   actions.push({ path: relativePath, status: existing.length > 0 ? "updated" : "created", detail: `added ${entry}` });
 }
 
-function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): void {
+export function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): void {
   const relativePath = "AGENTS.md";
   const absolutePath = path.join(repoRoot, relativePath);
   const existing = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : "";
+  const update = buildAgentsMemoryContent(existing);
+
+  if (update.status !== "skipped") {
+    fs.writeFileSync(absolutePath, update.content);
+  }
+
+  actions.push({ path: relativePath, status: update.status, detail: update.detail });
+}
+
+export function buildAgentsMemoryContent(existing: string): { content: string; status: "created" | "skipped" | "updated"; detail: string } {
   const section = agentsMemorySection();
 
   if (existing.includes(section)) {
-    actions.push({ path: relativePath, status: "skipped", detail: "agent-memory section already present" });
-    return;
+    return { content: existing, status: "skipped", detail: "agent-memory section already present" };
   }
 
   const startMarker = "<!-- agent-memory:start -->";
@@ -146,17 +190,13 @@ function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): voi
     const before = trimTrailingNewlines(existing.slice(0, start.lineStart));
     const after = trimLeadingNewlines(existing.slice(end.lineEnd));
     const updated = [before, section, after].filter((part) => part.length > 0).join("\n\n");
-    fs.writeFileSync(absolutePath, `${updated}\n`);
-    actions.push({ path: relativePath, status: "updated", detail: "refreshed agent-memory section" });
-    return;
+    return { content: `${updated}\n`, status: "updated", detail: "refreshed agent-memory section" };
   }
 
   if (start) {
     const before = trimTrailingNewlines(existing.slice(0, start.lineStart));
     const updated = [before, section].filter((part) => part.length > 0).join("\n\n");
-    fs.writeFileSync(absolutePath, `${updated}\n`);
-    actions.push({ path: relativePath, status: "updated", detail: "repaired agent-memory section" });
-    return;
+    return { content: `${updated}\n`, status: "updated", detail: "repaired agent-memory section" };
   }
 
   if (end) {
@@ -164,20 +204,15 @@ function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): voi
     const after = trimLeadingNewlines(existing.slice(end.lineEnd));
     const cleaned = [before, after].filter((part) => part.length > 0).join("\n\n");
     const separator = cleaned.length > 0 ? "\n\n" : "";
-    fs.writeFileSync(absolutePath, `${cleaned}${separator}${section}\n`);
-    actions.push({ path: relativePath, status: "updated", detail: "repaired agent-memory section" });
-    return;
+    return { content: `${cleaned}${separator}${section}\n`, status: "updated", detail: "repaired agent-memory section" };
   }
 
   if (existing.length === 0) {
-    fs.writeFileSync(absolutePath, `# Agent Instructions\n\n${section}\n`);
-    actions.push({ path: relativePath, status: "created", detail: "added agent-memory section" });
-    return;
+    return { content: `# Agent Instructions\n\n${section}\n`, status: "created", detail: "added agent-memory section" };
   }
 
   const separator = existing.endsWith("\n") ? "\n" : "\n\n";
-  fs.writeFileSync(absolutePath, `${existing}${separator}${section}\n`);
-  actions.push({ path: relativePath, status: "updated", detail: "appended agent-memory section" });
+  return { content: `${existing}${separator}${section}\n`, status: "updated", detail: "appended agent-memory section" };
 }
 
 function trimTrailingNewlines(value: string): string {
@@ -211,55 +246,6 @@ function findStandaloneMarker(content: string, marker: string, fromIndex = 0): {
   }
 
   return null;
-}
-
-function configTemplate(): string {
-  return `version: 1
-memory_root: docs/agent-memory
-database_path: .agent-memory/memory.sqlite
-
-claims:
-  - claims/**/*.md
-
-graphs:
-  - graph/**/*.yaml
-
-indexes:
-  - indexes/**/*.yaml
-
-recipes:
-  - recipes/**/*.yaml
-
-waivers:
-  - waivers/**/*.yaml
-
-agent_skills:
-  codex:
-    enabled: true
-    path: .codex/skills/repo-memory/SKILL.md
-  generic:
-    enabled: true
-    path: docs/agent-memory/AGENT_SKILL.md
-
-git:
-  install_hooks: true
-  hooks:
-    - post-merge
-    - post-checkout
-    - post-rewrite
-
-validation:
-  require_source_files: true
-  require_verification: true
-  reject_multi_claim_documents: true
-  require_unique_titles_within_system: true
-  require_claim_file_matches_id: false
-
-context:
-  default_budget: medium
-  default_depth: 1
-  include_inferred_edges_by_default: false
-`;
 }
 
 function memoryReadmeTemplate(): string {

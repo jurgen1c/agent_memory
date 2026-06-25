@@ -83,6 +83,63 @@ export function defaultConfig(): AgentMemoryConfig {
   return structuredClone(DEFAULT_CONFIG);
 }
 
+export function renderConfigTemplate(config: AgentMemoryConfig = defaultConfig()): string {
+  return `# Config schema version. Leave this at 1 unless agent-memory documents an upgrade.
+version: ${config.version}
+
+# Canonical memory source directory. The file patterns below are relative to this path.
+memory_root: ${renderYamlScalar(config.memory_root)}
+
+# Generated SQLite cache. Keep this under an ignored directory and do not commit it.
+database_path: ${renderYamlScalar(config.database_path)}
+
+# Claim Markdown files. Use this to split or relocate atomic claim documents.
+${renderStringArrayField("claims", config.claims)}
+
+# Relationship graph YAML files. Use these to connect claims across systems.
+${renderStringArrayField("graphs", config.graphs)}
+
+# Index YAML files. Use these to map watched source files to relevant memory.
+${renderStringArrayField("indexes", config.indexes)}
+
+# Recipe YAML files. Use these for repeatable workflows agents should follow.
+${renderStringArrayField("recipes", config.recipes)}
+
+# Coverage waiver YAML files. Use these for intentional memory coverage exceptions.
+${renderStringArrayField("waivers", config.waivers)}
+
+# Agent instruction output paths. Disable an agent or change where its skill file is installed.
+agent_skills:
+  codex:
+    enabled: ${config.agent_skills.codex.enabled}
+    path: ${renderYamlScalar(config.agent_skills.codex.path)}
+  generic:
+    enabled: ${config.agent_skills.generic.enabled}
+    path: ${renderYamlScalar(config.agent_skills.generic.path)}
+
+# Git hook settings. install-hooks reads this list when creating non-blocking sync hooks.
+git:
+  install_hooks: ${config.git.install_hooks}
+${renderStringArrayField("hooks", config.git.hooks, 2)}
+
+# Validation rules for canonical memory. Loosen only when migrating existing docs.
+validation:
+  require_source_files: ${config.validation.require_source_files}
+  require_verification: ${config.validation.require_verification}
+  reject_multi_claim_documents: ${config.validation.reject_multi_claim_documents}
+  require_unique_titles_within_system: ${config.validation.require_unique_titles_within_system}
+  require_claim_file_matches_id: ${config.validation.require_claim_file_matches_id}
+  max_claim_frontmatter_length: ${config.validation.max_claim_frontmatter_length}
+  max_claim_section_length: ${config.validation.max_claim_section_length}
+
+# Defaults for agent-memory context when command flags are omitted.
+context:
+  default_budget: ${config.context.default_budget}
+  default_depth: ${config.context.default_depth}
+  include_inferred_edges_by_default: ${config.context.include_inferred_edges_by_default}
+`;
+}
+
 function resolveRepo(options: LoadConfigOptions): RepoInfo {
   if (options.repoRoot) {
     return {
@@ -183,14 +240,19 @@ function readValidation(root: Record<string, unknown>) {
 function readContext(root: Record<string, unknown>) {
   const value = readRecord(root, "context", {});
   const defaultBudget = readString(value, "default_budget", DEFAULT_CONFIG.context.default_budget);
+  const defaultDepth = readNumber(value, "default_depth", DEFAULT_CONFIG.context.default_depth);
 
   if (!["small", "medium", "full"].includes(defaultBudget)) {
     throw new ConfigError(`Invalid context.default_budget value: ${defaultBudget}`);
   }
 
+  if (!Number.isInteger(defaultDepth) || defaultDepth < 0 || defaultDepth > 10) {
+    throw new ConfigError(`Invalid context.default_depth value: ${defaultDepth}. Expected an integer between 0 and 10.`);
+  }
+
   return {
     default_budget: defaultBudget as "small" | "medium" | "full",
-    default_depth: readNumber(value, "default_depth", DEFAULT_CONFIG.context.default_depth),
+    default_depth: defaultDepth,
     include_inferred_edges_by_default: readBoolean(
       value,
       "include_inferred_edges_by_default",
@@ -267,6 +329,45 @@ function readStringArray(root: Record<string, unknown>, key: string, fallback: s
   }
 
   return [...value];
+}
+
+function renderStringArrayField(key: string, values: string[], indent = 0): string {
+  const prefix = " ".repeat(indent);
+
+  if (values.length === 0) {
+    return `${prefix}${key}: []`;
+  }
+
+  return `${prefix}${key}:\n${renderStringList(values, indent + 2)}`;
+}
+
+function renderStringList(values: string[], indent: number): string {
+  const prefix = " ".repeat(indent);
+  return values.map((value) => `${prefix}- ${renderYamlScalar(value)}`).join("\n");
+}
+
+export function renderYamlScalar(value: string): string {
+  if (/^[A-Za-z0-9_./*@{}-]+$/.test(value) && !isYamlReservedScalar(value) && !startsWithYamlIndicator(value)) {
+    return value;
+  }
+
+  return JSON.stringify(value);
+}
+
+function isYamlReservedScalar(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return (
+    normalized === "true" ||
+    normalized === "false" ||
+    normalized === "null" ||
+    normalized === "~" ||
+    /^[+-]?(?:\d[\d_]*|\d[\d_]*\.[\d_]*|\.[\d_]+)(?:[eE][+-]?\d[\d_]*)?$/.test(value) ||
+    /^[+-]?\d[\d_]*[eE][+-]?\d[\d_]*$/.test(value)
+  );
+}
+
+function startsWithYamlIndicator(value: string): boolean {
+  return /^[!#&*,:>?@`[\]{}|%-]/.test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

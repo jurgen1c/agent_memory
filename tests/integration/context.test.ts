@@ -92,6 +92,53 @@ describe("context command", () => {
     expect(parsed.verificationSteps).toContain("bun test");
   });
 
+  test("uses configured context defaults when command flags are omitted", async () => {
+    const cwd = await compiledMockAppWithConfig((config) =>
+      config.replace("default_budget: medium", "default_budget: small").replace("default_depth: 1", "default_depth: 0")
+    );
+
+    const result = await dispatch(["context", "--task", "student oauth", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.budget).toBe("small");
+    expect(parsed.depth).toBe(0);
+    expect(parsed.relatedClaims).toEqual([]);
+  });
+
+  test("uses configured inferred-edge default when command flag is omitted", async () => {
+    const cwd = await compiledMockAppWithConfig((config) =>
+      config.replace("include_inferred_edges_by_default: false", "include_inferred_edges_by_default: true")
+    );
+
+    const result = await dispatch(["context", "--task", "student oauth tenant", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.relatedClaims.some((related: { relation: { origin: string } }) => related.relation.origin === "inferred")).toBe(true);
+  });
+
+  test("lets context command flags override configured defaults", async () => {
+    const cwd = await compiledMockAppWithConfig((config) =>
+      config
+        .replace("default_budget: medium", "default_budget: small")
+        .replace("default_depth: 1", "default_depth: 0")
+        .replace("include_inferred_edges_by_default: false", "include_inferred_edges_by_default: true")
+    );
+
+    const result = await dispatch(
+      ["context", "--task", "student oauth tenant", "--budget", "full", "--depth", "1", "--no-include-inferred", "--json"],
+      { cwd }
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.budget).toBe("full");
+    expect(parsed.depth).toBe(1);
+    expect(parsed.relatedClaims.length).toBeGreaterThan(0);
+    expect(parsed.relatedClaims.some((related: { relation: { origin: string } }) => related.relation.origin === "inferred")).toBe(false);
+  });
+
   test("surfaces directly matched stale claims with warnings", async () => {
     const cwd = copyFixture(mockApp);
     const claimPath = path.join(cwd, "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md");
@@ -137,6 +184,15 @@ describe("context command", () => {
 
 async function compiledMockApp(): Promise<string> {
   const cwd = copyFixture(mockApp);
+  const compile = await dispatch(["compile"], { cwd });
+  expect(compile.exitCode).toBe(0);
+  return cwd;
+}
+
+async function compiledMockAppWithConfig(updateConfig: (config: string) => string): Promise<string> {
+  const cwd = copyFixture(mockApp);
+  const configPath = path.join(cwd, "agent-memory.config.yaml");
+  fs.writeFileSync(configPath, updateConfig(fs.readFileSync(configPath, "utf8")));
   const compile = await dispatch(["compile"], { cwd });
   expect(compile.exitCode).toBe(0);
   return cwd;

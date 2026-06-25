@@ -13,9 +13,9 @@ export interface BuildContextOptions {
   task?: string;
   changedFiles?: string[];
   gitDiff?: boolean;
-  budget: ContextBudget;
-  depth: number;
-  includeInferred: boolean;
+  budget?: ContextBudget;
+  depth?: number;
+  includeInferred?: boolean;
 }
 
 export interface AgentContext {
@@ -75,6 +75,11 @@ interface OpenDatabase {
   database: SqliteDatabase;
   databasePath: string;
   repoRoot: string;
+  contextDefaults: {
+    default_budget: ContextBudget;
+    default_depth: number;
+    include_inferred_edges_by_default: boolean;
+  };
 }
 
 const ACTIVE_STATUSES = ["current", "proposed", "needs_review", "experimental", "needs_verification"];
@@ -87,6 +92,9 @@ const BUDGET_LIMITS: Record<ContextBudget, { matched: number; related: number; r
 
 export async function buildContext(options: BuildContextOptions): Promise<AgentContext> {
   const opened = await openConfiguredDatabase(options.cwd);
+  const budget = options.budget ?? opened.contextDefaults.default_budget;
+  const depth = options.depth ?? opened.contextDefaults.default_depth;
+  const includeInferred = options.includeInferred ?? opened.contextDefaults.include_inferred_edges_by_default;
   const changedFiles = normalizeChangedFiles(options.changedFiles ?? [], opened.repoRoot);
 
   if (options.gitDiff) {
@@ -96,14 +104,14 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
   const uniqueChangedFiles = Array.from(new Set(changedFiles));
 
   try {
-    const limits = BUDGET_LIMITS[options.budget];
+    const limits = BUDGET_LIMITS[budget];
     const matched = rankClaims(opened.database, {
       task: options.task,
       changedFiles: uniqueChangedFiles,
       limit: limits.matched
     });
     const criticalRules = criticalRulesForClaims(opened.database, matched).slice(0, limits.matched);
-    const related = relatedClaims(opened.database, matched, options.depth, options.includeInferred).slice(0, limits.related);
+    const related = relatedClaims(opened.database, matched, depth, includeInferred).slice(0, limits.related);
     const recipes = relatedRecipes(opened.database, matched, uniqueChangedFiles).slice(0, limits.recipes);
     const claimsById = new Map([...criticalRules, ...matched, ...related.map((item) => item.claim)].map((claim) => [claim.id, claim]));
     const warnings = warningLines([...claimsById.values()]);
@@ -112,8 +120,8 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
       databasePath: opened.databasePath,
       task: options.task,
       changedFiles: uniqueChangedFiles,
-      budget: options.budget,
-      depth: options.depth,
+      budget,
+      depth,
       criticalRules,
       matchedClaims: matched,
       relatedClaims: related,
@@ -142,7 +150,8 @@ async function openConfiguredDatabase(cwd?: string): Promise<OpenDatabase> {
   return {
     database: await openSqliteDatabase(databasePath),
     databasePath,
-    repoRoot: loaded.repo.root
+    repoRoot: loaded.repo.root,
+    contextDefaults: loaded.config.context
   };
 }
 

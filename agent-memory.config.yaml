@@ -1,0 +1,61 @@
+# Config schema version. Leave this at 1 unless agent-memory documents an upgrade.
+version: 1
+
+# Canonical memory source directory. The file patterns below are relative to this path.
+memory_root: docs/agent-memory
+
+# Generated SQLite cache. Keep this under an ignored directory and do not commit it.
+database_path: .agent-memory/memory.sqlite
+
+# Claim Markdown files. Use this to split or relocate atomic claim documents.
+claims:
+  - claims/**/*.md
+
+# Relationship graph YAML files. Use these to connect claims across systems.
+graphs:
+  - graph/**/*.yaml
+
+# Index YAML files. Use these to map watched source files to relevant memory.
+indexes:
+  - indexes/**/*.yaml
+
+# Recipe YAML files. Use these for repeatable workflows agents should follow.
+recipes:
+  - recipes/**/*.yaml
+
+# Coverage waiver YAML files. Use these for intentional memory coverage exceptions.
+waivers:
+  - waivers/**/*.yaml
+
+# Agent instruction output paths. Disable an agent or change where its skill file is installed.
+agent_skills:
+  codex:
+    enabled: true
+    path: .codex/skills/repo-memory/SKILL.md
+  generic:
+    enabled: true
+    path: docs/agent-memory/AGENT_SKILL.md
+
+# Git hook settings. install-hooks reads this list when creating non-blocking sync hooks.
+git:
+  install_hooks: true
+  hooks:
+    - post-merge
+    - post-checkout
+    - post-rewrite
+
+# Validation rules for canonical memory. Loosen only when migrating existing docs.
+validation:
+  require_source_files: true
+  require_verification: true
+  reject_multi_claim_documents: true
+  require_unique_titles_within_system: true
+  require_claim_file_matches_id: false
+  max_claim_frontmatter_length: 900
+  max_claim_section_length: 1200
+
+# Defaults for agent-memory context when command flags are omitted.
+context:
+  default_budget: medium
+  default_depth: 1
+  include_inferred_edges_by_default: false

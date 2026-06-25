@@ -839,7 +839,7 @@ export function buildGraph(
     markerEnd: { type: MarkerType.ArrowClosed },
     style: { stroke: originColor(relation.origin), strokeWidth: Math.max(1, Math.round(relation.strength / 35)) },
     labelStyle: { fill: "#334155", fontSize: 11 },
-    data: relation
+    data: { ...relation }
   }));
 
   return { nodes, edges };

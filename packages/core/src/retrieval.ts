@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config";
 import { NotFoundError } from "./errors";
-import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
+import { openSqliteDatabase, type SqliteDatabase, type SqliteValue } from "./sqlite";
 
 export interface ClaimRecord {
   id: string;
@@ -102,7 +102,7 @@ export async function queryClaims(options: QueryOptions): Promise<QueryResult> {
   try {
     const matchQuery = toFtsQuery(options.query);
     const filters = buildClaimFilters(options);
-    const params: unknown[] = [matchQuery, ...filters.params, options.limit];
+    const params: SqliteValue[] = [matchQuery, ...filters.params, options.limit];
     const rows = database.all<QueryRow>(
       `SELECT c.id, c.title, c.claim, c.system, c.status, c.severity, c.source_path, bm25(claims_fts) AS rank_score
        FROM claims_fts
@@ -282,9 +282,9 @@ function relatedClaims(database: SqliteDatabase, id: string, depth: number): Rel
   return related;
 }
 
-function buildClaimFilters(options: Pick<QueryOptions, "system" | "status" | "includeStale">): { where: string; params: unknown[] } {
+function buildClaimFilters(options: Pick<QueryOptions, "system" | "status" | "includeStale">): { where: string; params: SqliteValue[] } {
   const clauses: string[] = [];
-  const params: unknown[] = [];
+  const params: SqliteValue[] = [];
 
   if (options.system) {
     clauses.push("c.system = ?");

@@ -24,6 +24,7 @@ function parseInitArgs(args: string[], cwd?: string): InitOptions {
   let force = false;
   let packageManager: PackageManager = "npm";
   let installHooks = false;
+  let skillLocation: string | undefined;
   const agents: AgentTarget[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -45,13 +46,7 @@ function parseInitArgs(args: string[], cwd?: string): InitOptions {
     }
 
     if (arg === "--package-manager") {
-      const value = args[index + 1];
-
-      if (!value) {
-        throw new AgentMemoryError("--package-manager requires a value.");
-      }
-
-      packageManager = parseInitPackageManager(value);
+      packageManager = parseInitPackageManager(readValue(args, index, "--package-manager"));
       index += 1;
       continue;
     }
@@ -62,13 +57,7 @@ function parseInitArgs(args: string[], cwd?: string): InitOptions {
     }
 
     if (arg === "--agent") {
-      const value = args[index + 1];
-
-      if (!value) {
-        throw new AgentMemoryError("--agent requires a value.");
-      }
-
-      agents.push(parseInitAgent(value));
+      agents.push(parseInitAgent(readValue(args, index, "--agent")));
       index += 1;
       continue;
     }
@@ -78,8 +67,32 @@ function parseInitArgs(args: string[], cwd?: string): InitOptions {
       continue;
     }
 
+    if (arg === "--skill-location" || arg === "--location") {
+      skillLocation = readValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--skill-location=")) {
+      skillLocation = readInlineValue(arg, "--skill-location");
+      continue;
+    }
+
+    if (arg.startsWith("--location=")) {
+      skillLocation = readInlineValue(arg, "--location");
+      continue;
+    }
+
     throw new AgentMemoryError(`Unknown init option: ${arg}`, {
       details: ["Run `agent-memory help init` for usage."]
+    });
+  }
+
+  const uniqueAgents = Array.from(new Set(agents));
+
+  if (skillLocation !== undefined && uniqueAgents.length !== 1) {
+    throw new AgentMemoryError("--skill-location requires exactly one --agent target.", {
+      details: ["Example: agent-memory init --yes --agent codex --skill-location .agents"]
     });
   }
 
@@ -88,9 +101,30 @@ function parseInitArgs(args: string[], cwd?: string): InitOptions {
     yes,
     force,
     packageManager,
-    agents: Array.from(new Set(agents)),
-    installHooks
+    agents: uniqueAgents,
+    installHooks,
+    skillLocation
   };
+}
+
+function readValue(args: string[], index: number, option: string): string {
+  const value = args[index + 1];
+
+  if (!value) {
+    throw new AgentMemoryError(`${option} requires a value.`);
+  }
+
+  return value;
+}
+
+function readInlineValue(arg: string, option: string): string {
+  const value = arg.slice(`${option}=`.length);
+
+  if (!value) {
+    throw new AgentMemoryError(`${option} requires a value.`);
+  }
+
+  return value;
 }
 
 function renderInitResult(result: InitResult): string {

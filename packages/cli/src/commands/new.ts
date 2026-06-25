@@ -191,17 +191,7 @@ async function completeNewClaimArgs(parsed: ParsedNewClaimArgs): Promise<{
     }
   }
 
-  const missing = [
-    parsed.type ? null : "--type",
-    parsed.system ? null : "--system",
-    parsed.title ? null : "--title"
-  ].filter((value): value is string => value !== null);
-
-  if (missing.length > 0) {
-    throw new AgentMemoryError(`Missing required new claim options: ${missing.join(", ")}`, {
-      details: ["Use --interactive or pass --type, --system, and --title."]
-    });
-  }
+  assertCompleteNewClaimArgs(parsed);
 
   return {
     type: parsed.type,
@@ -214,6 +204,22 @@ async function completeNewClaimArgs(parsed: ParsedNewClaimArgs): Promise<{
     severity: parsed.severity,
     force: parsed.force
   };
+}
+
+function assertCompleteNewClaimArgs(
+  parsed: ParsedNewClaimArgs
+): asserts parsed is ParsedNewClaimArgs & { type: ClaimType; system: string; title: string } {
+  const missing = [
+    parsed.type ? null : "--type",
+    parsed.system ? null : "--system",
+    parsed.title ? null : "--title"
+  ].filter((value): value is string => value !== null);
+
+  if (missing.length > 0) {
+    throw new AgentMemoryError(`Missing required new claim options: ${missing.join(", ")}`, {
+      details: ["Use --interactive or pass --type, --system, and --title."]
+    });
+  }
 }
 
 function parseClaimType(value: string): ClaimType {

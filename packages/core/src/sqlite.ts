@@ -1,8 +1,10 @@
+export type SqliteValue = string | number | bigint | boolean | null | Uint8Array;
+
 export interface SqliteDatabase {
   exec(sql: string): void;
-  run(sql: string, params?: unknown[]): void;
-  all<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[];
-  get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | null;
+  run(sql: string, params?: SqliteValue[]): void;
+  all<T = Record<string, unknown>>(sql: string, params?: SqliteValue[]): T[];
+  get<T = Record<string, unknown>>(sql: string, params?: SqliteValue[]): T | null;
   close(): void;
 }
 
@@ -22,13 +24,13 @@ async function openBunSqliteDatabase(databasePath: string): Promise<SqliteDataba
     exec(sql: string): void {
       database.exec(sql);
     },
-    run(sql: string, params: unknown[] = []): void {
+    run(sql: string, params: SqliteValue[] = []): void {
       database.query(sql).run(...params);
     },
-    all<T>(sql: string, params: unknown[] = []): T[] {
+    all<T>(sql: string, params: SqliteValue[] = []): T[] {
       return database.query(sql).all(...params) as T[];
     },
-    get<T>(sql: string, params: unknown[] = []): T | null {
+    get<T>(sql: string, params: SqliteValue[] = []): T | null {
       return (database.query(sql).get(...params) as T | null) ?? null;
     },
     close(): void {
@@ -42,9 +44,9 @@ async function openNodeSqliteDatabase(databasePath: string): Promise<SqliteDatab
   const DatabaseSync = sqlite.DatabaseSync as new (path: string) => {
     exec(sql: string): void;
     prepare(sql: string): {
-      run(...params: unknown[]): void;
-      all(...params: unknown[]): unknown[];
-      get(...params: unknown[]): unknown;
+      run(...params: SqliteValue[]): void;
+      all(...params: SqliteValue[]): unknown[];
+      get(...params: SqliteValue[]): unknown;
     };
     close(): void;
   };
@@ -54,13 +56,13 @@ async function openNodeSqliteDatabase(databasePath: string): Promise<SqliteDatab
     exec(sql: string): void {
       database.exec(sql);
     },
-    run(sql: string, params: unknown[] = []): void {
+    run(sql: string, params: SqliteValue[] = []): void {
       database.prepare(sql).run(...params);
     },
-    all<T>(sql: string, params: unknown[] = []): T[] {
+    all<T>(sql: string, params: SqliteValue[] = []): T[] {
       return database.prepare(sql).all(...params) as T[];
     },
-    get<T>(sql: string, params: unknown[] = []): T | null {
+    get<T>(sql: string, params: SqliteValue[] = []): T | null {
       return (database.prepare(sql).get(...params) as T | null) ?? null;
     },
     close(): void {

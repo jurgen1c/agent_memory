@@ -28,11 +28,12 @@ const TOPICS: HelpTopic[] = [
       "agent-memory init --yes --package-manager bun",
       "agent-memory init --yes --agent codex",
       "agent-memory init --yes --agent generic",
+      "agent-memory init --yes --agent codex --skill-location .agents",
       "agent-memory init --yes --install-hooks",
       "agent-memory init --yes --force"
     ],
-    examples: ["agent-memory init --yes --agent codex", "agent-memory init --package-manager bun"],
-    agentNotes: ["Safe to run repeatedly. Existing files are skipped unless --force is passed; AGENTS.md keeps local content and refreshes only the managed agent-memory section."],
+    examples: ["agent-memory init --yes --agent codex", "agent-memory init --yes --agent codex --skill-location .agents", "agent-memory init --package-manager bun"],
+    agentNotes: ["Safe to run repeatedly. Existing files are skipped unless --force is passed; AGENTS.md keeps local content and refreshes only the managed agent-memory section. Use --skill-location with exactly one --agent target."],
     phase: "Phase 2"
   },
   {
@@ -131,6 +132,7 @@ const TOPICS: HelpTopic[] = [
       "agent-memory context --task \"fix auth\" --budget small|medium|full",
       "agent-memory context --task \"fix auth\" --depth 2",
       "agent-memory context --task \"fix auth\" --include-inferred",
+      "agent-memory context --task \"fix auth\" --no-include-inferred",
       "agent-memory context --task \"fix auth\" --json"
     ],
     examples: ['agent-memory context --changed-files src/auth.js', "agent-memory context --git-diff"],
@@ -165,6 +167,19 @@ const TOPICS: HelpTopic[] = [
     examples: ["agent-memory sync", "bin/memory sync"],
     agentNotes: ["Use sync after pull, checkout, rebase, merge, or before agent work."],
     phase: "Phase 8"
+  },
+  {
+    name: "upgrade",
+    purpose: "Refresh generated repository support files while preserving local settings.",
+    usage: [
+      "agent-memory upgrade",
+      "agent-memory upgrade --write",
+      "agent-memory upgrade --write --force",
+      "agent-memory upgrade --json"
+    ],
+    examples: ["agent-memory upgrade", "agent-memory upgrade --write"],
+    agentNotes: ["Dry-run by default. Preserves config values, refreshes managed AGENTS.md and skill files, and warns before dropping unknown config fields."],
+    phase: "Maintenance"
   },
   {
     name: "install-hooks",
@@ -204,16 +219,27 @@ const TOPICS: HelpTopic[] = [
     name: "migrate-docs",
     purpose: "Plan or create current memory drafts from existing repository docs.",
     usage: [
+      "agent-memory migrate-docs --from docs/canonical --classify",
+      "agent-memory migrate-docs --from docs/canonical --classify --force",
+      "agent-memory migrate-docs --system-map .agent-memory/migrations/docs-canonical.yaml",
+      "agent-memory migrate-docs --system-map .agent-memory/migrations/docs-canonical.yaml --automatic",
       "agent-memory migrate-docs --from docs/legacy --system auth",
       "agent-memory migrate-docs --from docs/legacy --system auth --automatic",
       "agent-memory migrate-docs --from docs/legacy --system auth --automatic --force",
       "agent-memory migrate-docs --from docs/legacy --system auth --json"
     ],
     examples: [
+      "agent-memory migrate-docs --from docs/canonical --classify",
+      "agent-memory migrate-docs --system-map .agent-memory/migrations/docs-canonical.yaml --automatic",
       "agent-memory migrate-docs --from docs/legacy --system auth",
       "agent-memory migrate-docs --from docs/legacy --system auth --automatic"
     ],
-    agentNotes: ["Automatic mode creates current, low-confidence drafts; agents must review and split them into precise atomic claims."],
+    agentNotes: [
+      "For broad folders, first run --classify, review or edit the generated system map, then run --system-map with --automatic.",
+      "Rerunning --classify skips an existing system map unless --force is passed.",
+      "The --system value is still required for focused single-system migrations; it is the lowercase memory namespace for generated claim IDs and paths.",
+      "Automatic mode creates current, low-confidence drafts; agents must review and split them into precise atomic claims."
+    ],
     phase: "Phase 10"
   },
   {
@@ -261,6 +287,7 @@ export function renderHelp(topicName?: string): string {
     "  coverage             Check watched-file memory coverage.",
     "  doctor               Check compiled database health.",
     "  sync                 Compile, validate, and doctor memory.",
+    "  upgrade              Refresh generated support files for a newer agent-memory version.",
     "  install-hooks        Install non-blocking git sync hooks.",
     "  ui                   Serve the local memory review UI.",
     "  install-skill        Install agent memory instructions.",

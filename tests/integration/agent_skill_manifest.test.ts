@@ -25,6 +25,7 @@ version: ${PACKAGE_VERSION}
 user-invocable: false
 ---
 
+<!-- agent-memory:generated-skill repo-memory -->
 # Repo Memory Skill
 `)).toBe(true);
     expect(content).toContain("bin/memory sync");
@@ -32,6 +33,11 @@ user-invocable: false
     expect(content).toContain("templates show claim:fact");
     expect(content).toContain("Relationship Graphs");
     expect(content).toContain("Do not edit or commit the SQLite database");
+    expect(content).toContain("references/claims.md");
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"), "utf8")).toContain(
+      "<!-- agent-memory:generated-reference repo-memory/claims.md -->"
+    );
   });
 
   test("installs the generic skill to a configured custom path", async () => {
@@ -47,6 +53,7 @@ user-invocable: false
     expect(result.stdout).toContain("docs/custom/AGENT_MEMORY.md");
     expect(fs.existsSync(skillPath)).toBe(true);
     expect(fs.readFileSync(skillPath, "utf8")).toContain("bin/memory context --git-diff");
+    expect(fs.readFileSync(skillPath, "utf8")).not.toContain("references/claims.md");
   });
 
   test("installs the codex skill under a custom location", async () => {
@@ -97,9 +104,15 @@ version: ${PACKAGE_VERSION}
 user-invocable: false
 ---
 
+<!-- agent-memory:generated-skill repo-memory-migration -->
 # Repo Memory Migration Skill
 `)).toBe(true);
     expect(content).toContain("migrate-docs --from <existing-docs> --system <system> --automatic");
+    expect(content).toContain("references/system-maps.md");
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory-migration/references/system-maps.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory-migration/references/system-maps.md"), "utf8")).toContain(
+      "<!-- agent-memory:generated-reference repo-memory-migration/system-maps.md -->"
+    );
   });
 
   test("installs a skill to an exact requested path", async () => {
@@ -132,6 +145,37 @@ user-invocable: false
     expect(overwritten.exitCode).toBe(0);
     expect(overwritten.stdout).toContain("overwritten");
     expect(fs.readFileSync(skillPath, "utf8")).toContain("Repository Memory Instructions");
+  });
+
+  test("does not create codex references when the main skill is skipped", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes", "--agent", "generic"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    const skillPath = path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md");
+    const referencesPath = path.join(repoRoot, ".codex/skills/repo-memory/references");
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, "# Handwritten Codex Skill\n");
+
+    const skipped = await dispatch(["install-skill", "--agent", "codex"], { cwd: repoRoot });
+
+    expect(skipped.exitCode).toBe(0);
+    expect(skipped.stdout).toContain("skipped");
+    expect(fs.readFileSync(skillPath, "utf8")).toBe("# Handwritten Codex Skill\n");
+    expect(fs.existsSync(referencesPath)).toBe(false);
+  });
+
+  test("rejects relative install paths that escape the repository", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes", "--agent", "generic"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    const outsideRelativePath = `../${path.basename(repoRoot)}-outside-skill.md`;
+    const outsidePath = path.resolve(repoRoot, outsideRelativePath);
+
+    await expect(dispatch(["install-skill", "--agent", "codex", "--path", outsideRelativePath], { cwd: repoRoot })).rejects.toThrow(
+      "Relative output path escapes repository root"
+    );
+
+    expect(fs.existsSync(outsidePath)).toBe(false);
   });
 
   test("reports invalid install-skill options", async () => {

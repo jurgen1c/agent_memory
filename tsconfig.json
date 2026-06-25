@@ -6,10 +6,9 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": []
+    "types": ["node", "bun"]
   },
   "include": [
-    "packages/**/*.ts",
-    "tests/**/*.ts"
+    "packages/**/*.ts"
   ]
 }
