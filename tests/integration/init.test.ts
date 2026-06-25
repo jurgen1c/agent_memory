@@ -254,6 +254,10 @@ Keep this footer too.
     const repoRoot = makeGitRepo();
     await dispatch(["init", "--yes", "--agent", "generic"], { cwd: repoRoot });
 
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(config.agent_skills.codex.enabled).toBe(false);
+    expect(config.agent_skills.generic.enabled).toBe(true);
     expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/AGENT_SKILL.md"))).toBe(true);
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"))).toBe(false);
   });
@@ -269,6 +273,35 @@ Keep this footer too.
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"))).toBe(false);
     expect(config.agent_skills.codex.path).toBe(".agents/skills/repo-memory/SKILL.md");
     expect(fs.readFileSync(skillPath, "utf8")).toContain("Canonical memory lives in:");
+  });
+
+  test("writes selected agent skills to absolute custom locations", async () => {
+    const repoRoot = makeGitRepo();
+    const skillRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-init-skill-location-"));
+    const result = await dispatch(["init", "--yes", "--agent", "codex", "--skill-location", skillRoot], { cwd: repoRoot });
+    const skillPath = path.join(skillRoot, "skills/repo-memory/SKILL.md");
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(result.exitCode).toBe(0);
+    expect(config.agent_skills.codex.path).toBe(skillPath);
+    expect(fs.existsSync(skillPath)).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, skillPath))).toBe(false);
+    expect(fs.existsSync(path.join(skillRoot, "skills/repo-memory/references/claims.md"))).toBe(true);
+  });
+
+  test("does not install disabled agent targets during upgrade", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes", "--agent", "codex"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+
+    const upgraded = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(upgraded.exitCode).toBe(0);
+    expect(config.agent_skills.codex.enabled).toBe(true);
+    expect(config.agent_skills.generic.enabled).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"))).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/AGENT_SKILL.md"))).toBe(false);
   });
 
   test("requires an explicit single agent when init uses a custom skill location", async () => {

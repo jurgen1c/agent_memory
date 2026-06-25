@@ -220,6 +220,7 @@ const TOPICS: HelpTopic[] = [
     purpose: "Plan or create current memory drafts from existing repository docs.",
     usage: [
       "agent-memory migrate-docs --from docs/canonical --classify",
+      "agent-memory migrate-docs --from docs/canonical --classify --force",
       "agent-memory migrate-docs --system-map .agent-memory/migrations/docs-canonical.yaml",
       "agent-memory migrate-docs --system-map .agent-memory/migrations/docs-canonical.yaml --automatic",
       "agent-memory migrate-docs --from docs/legacy --system auth",
@@ -235,6 +236,7 @@ const TOPICS: HelpTopic[] = [
     ],
     agentNotes: [
       "For broad folders, first run --classify, review or edit the generated system map, then run --system-map with --automatic.",
+      "Rerunning --classify skips an existing system map unless --force is passed.",
       "The --system value is still required for focused single-system migrations; it is the lowercase memory namespace for generated claim IDs and paths.",
       "Automatic mode creates current, low-confidence drafts; agents must review and split them into precise atomic claims."
     ],

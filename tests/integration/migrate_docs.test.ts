@@ -88,6 +88,7 @@ describe("migrate-docs command", () => {
     const systemMap = fs.readFileSync(mapPath, "utf8");
 
     expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Status: created");
     expect(result.stdout).toContain("System map: .agent-memory/migrations/docs-canonical.yaml");
     expect(systemMap).toContain("source_root: docs/canonical");
     expect(systemMap).toContain("source: docs/canonical/auth/oauth.md");
@@ -97,6 +98,31 @@ describe("migrate-docs command", () => {
     expect(systemMap).toContain("source: docs/canonical/overview.md");
     expect(systemMap).toContain("confidence: low");
     expect(systemMap).toContain("No subsystem match; defaulted to docs");
+  });
+
+  test("does not overwrite reviewed system maps unless forced", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    fs.mkdirSync(path.join(repoRoot, "docs/canonical/auth"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "docs/canonical/auth/oauth.md"), "# OAuth Behavior\n\nTenant auth notes.\n");
+
+    const first = await dispatch(["migrate-docs", "--from", "docs/canonical", "--classify"], { cwd: repoRoot });
+    expect(first.exitCode).toBe(0);
+
+    const mapPath = path.join(repoRoot, ".agent-memory/migrations/docs-canonical.yaml");
+    fs.writeFileSync(mapPath, `${fs.readFileSync(mapPath, "utf8")}\n# reviewed edit\n`);
+
+    const skipped = await dispatch(["migrate-docs", "--from", "docs/canonical", "--classify"], { cwd: repoRoot });
+    expect(skipped.exitCode).toBe(0);
+    expect(skipped.stdout).toContain("Status: skipped");
+    expect(skipped.stdout).toContain("leaving reviewed map unchanged");
+    expect(fs.readFileSync(mapPath, "utf8")).toContain("# reviewed edit");
+
+    const forced = await dispatch(["migrate-docs", "--from", "docs/canonical", "--classify", "--force"], { cwd: repoRoot });
+    expect(forced.exitCode).toBe(0);
+    expect(forced.stdout).toContain("Status: overwritten");
+    expect(fs.readFileSync(mapPath, "utf8")).not.toContain("# reviewed edit");
   });
 
   test("plans and automatically migrates docs from a reviewed system map", async () => {

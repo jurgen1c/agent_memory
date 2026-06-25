@@ -54,6 +54,7 @@ export interface ClassifyDocsOptions {
   cwd?: string;
   fromPath: string;
   outputPath?: string;
+  force?: boolean;
 }
 
 export interface ClassifyDocsResult {
@@ -61,6 +62,7 @@ export interface ClassifyDocsResult {
   memoryRoot: string;
   sourceRoot: string;
   systemMapPath: string;
+  status: "created" | "skipped" | "overwritten";
   mappings: ClassifiedDocMapping[];
   warnings: string[];
 }
@@ -185,24 +187,31 @@ export function classifyDocs(options: ClassifyDocsOptions): ClassifyDocsResult {
   const outputPath = options.outputPath ?? defaultOutputPath;
   const absoluteOutputPath = path.isAbsolute(outputPath) ? path.normalize(outputPath) : path.resolve(repoRoot, outputPath);
   const systemMapPath = displayPath(repoRoot, absoluteOutputPath);
+  const existedBefore = fs.existsSync(absoluteOutputPath);
+  const warnings = docs.length === 0 ? [`No migratable docs found under ${displayPath(repoRoot, sourceRoot)}.`] : [];
 
-  fs.mkdirSync(path.dirname(absoluteOutputPath), { recursive: true });
-  fs.writeFileSync(
-    absoluteOutputPath,
-    renderSystemMap({
-      version: 1,
-      source_root: displayPath(repoRoot, sourceRoot),
-      mappings
-    })
-  );
+  if (existedBefore && !options.force) {
+    warnings.push(`System map already exists; leaving reviewed map unchanged: ${systemMapPath}`);
+  } else {
+    fs.mkdirSync(path.dirname(absoluteOutputPath), { recursive: true });
+    fs.writeFileSync(
+      absoluteOutputPath,
+      renderSystemMap({
+        version: 1,
+        source_root: displayPath(repoRoot, sourceRoot),
+        mappings
+      })
+    );
+  }
 
   return {
     repoRoot,
     memoryRoot: toPosix(path.relative(repoRoot, memoryRoot)),
     sourceRoot: displayPath(repoRoot, sourceRoot),
     systemMapPath,
+    status: existedBefore ? (options.force ? "overwritten" : "skipped") : "created",
     mappings,
-    warnings: docs.length === 0 ? [`No migratable docs found under ${displayPath(repoRoot, sourceRoot)}.`] : []
+    warnings
   };
 }
 

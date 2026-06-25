@@ -42,6 +42,12 @@ export function initRepository(options: InitOptions): InitResult {
     throw new AgentMemoryError("skillLocation requires exactly one agent target.");
   }
 
+  if (options.agents.length > 0) {
+    for (const agent of ["codex", "generic"] satisfies AgentTarget[]) {
+      config.agent_skills[agent].enabled = agents.includes(agent);
+    }
+  }
+
   if (options.skillLocation) {
     for (const agent of agents) {
       config.agent_skills[agent].path = skillPathForLocation(agent, options.skillLocation);
@@ -73,7 +79,7 @@ export function initRepository(options: InitOptions): InitResult {
       options.force,
       actions
     );
-    writeCodexSkillReferences(repo.root, path.join(repo.root, config.agent_skills.codex.path), "repo", options.force, actions);
+    writeCodexSkillReferences(repo.root, resolveOutputPath(repo.root, config.agent_skills.codex.path), "repo", options.force, actions);
   }
 
   if (agents.includes("generic")) {
@@ -100,26 +106,36 @@ export function initRepository(options: InitOptions): InitResult {
 }
 
 function writeFile(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): void {
-  const absolutePath = path.join(repoRoot, relativePath);
+  const absolutePath = resolveOutputPath(repoRoot, relativePath);
+  const displayPath = displayOutputPath(repoRoot, absolutePath);
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
   const existedBefore = fs.existsSync(absolutePath);
 
   if (existedBefore && !force) {
-    actions.push({ path: relativePath, status: "skipped", detail: "already exists" });
+    actions.push({ path: displayPath, status: "skipped", detail: "already exists" });
     return;
   }
 
   fs.writeFileSync(absolutePath, content);
-  actions.push({ path: relativePath, status: existedBefore && force ? "overwritten" : "created" });
+  actions.push({ path: displayPath, status: existedBefore && force ? "overwritten" : "created" });
 }
 
 function writeExecutable(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): void {
   writeFile(repoRoot, relativePath, content, force, actions);
-  const absolutePath = path.join(repoRoot, relativePath);
+  const absolutePath = resolveOutputPath(repoRoot, relativePath);
 
   if (fs.existsSync(absolutePath)) {
     fs.chmodSync(absolutePath, 0o755);
   }
+}
+
+function resolveOutputPath(repoRoot: string, targetPath: string): string {
+  return path.isAbsolute(targetPath) ? path.normalize(targetPath) : path.join(repoRoot, targetPath);
+}
+
+function displayOutputPath(repoRoot: string, absolutePath: string): string {
+  const relativePath = path.relative(repoRoot, absolutePath);
+  return relativePath.startsWith("..") || path.isAbsolute(relativePath) ? absolutePath : relativePath;
 }
 
 function ensureGitignoreEntry(repoRoot: string, entry: string, actions: InitAction[]): void {

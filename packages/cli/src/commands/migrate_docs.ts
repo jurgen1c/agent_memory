@@ -38,13 +38,13 @@ export function runMigrateDocsCommand(args: string[], context: MigrateDocsComman
       throw new AgentMemoryError("migrate-docs requires --from.");
     }
 
-    if (options.system || options.systemMapPath || options.mode === "automatic" || options.force) {
-      throw new AgentMemoryError("migrate-docs --classify accepts --from and --json only.", {
+    if (options.system || options.systemMapPath || options.mode === "automatic") {
+      throw new AgentMemoryError("migrate-docs --classify accepts --from, --force, and --json only.", {
         details: ["Run `agent-memory migrate-docs --from docs/canonical --classify`, then review the generated system map."]
       });
     }
 
-    const result = classifyDocs({ cwd: context.cwd, fromPath: options.fromPath });
+    const result = classifyDocs({ cwd: context.cwd, fromPath: options.fromPath, force: options.force });
 
     return {
       exitCode: 0,
@@ -215,6 +215,7 @@ function renderClassifyDocsResult(result: ClassifyDocsResult): string {
     "",
     `Source: ${result.sourceRoot}`,
     `System map: ${result.systemMapPath}`,
+    `Status: ${result.status}`,
     `Docs: ${result.mappings.length}`,
     `Low confidence: ${lowConfidence}`
   ];

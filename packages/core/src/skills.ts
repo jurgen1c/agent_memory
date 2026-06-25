@@ -103,19 +103,24 @@ export function renderAgentSkill(options: RenderAgentSkillOptions): string {
   const memoryRoot = trimTrailingSlash(options.config.memory_root);
   const databasePath = options.config.database_path;
   const commands = buildAgentCommands(options.commandPrefix);
-
-  return `${renderCodexSkillFrontmatter(options.agent, "repo")}# ${title}
-
-Use this skill whenever working in this repository.
-
-This repository uses \`agent-memory\`, a local memory system based on atomic claims, graph relationships, recipes, indexes, and waivers.
-
+  const referenceLinks =
+    options.agent === "codex"
+      ? `
 For deeper task guidance, read:
 
 - \`references/claims.md\`
 - \`references/recipes.md\`
 - \`references/graphs-and-indexes.md\`
 - \`references/coverage-and-validation.md\`
+`
+      : "";
+
+  return `${renderCodexSkillFrontmatter(options.agent, "repo")}# ${title}
+
+Use this skill whenever working in this repository.
+
+This repository uses \`agent-memory\`, a local memory system based on atomic claims, graph relationships, recipes, indexes, and waivers.
+${referenceLinks}
 
 Canonical memory lives in:
 
@@ -212,18 +217,23 @@ If memory conflicts with code, trust code and update or deprecate memory.
 function renderMigrationSkill(options: RenderAgentSkillOptions): string {
   const title = options.agent === "codex" ? "Repo Memory Migration Skill" : "Repository Memory Migration Instructions";
   const memoryRoot = trimTrailingSlash(options.config.memory_root);
+  const referenceLinks =
+    options.agent === "codex"
+      ? `
+For deeper migration guidance, read:
+
+- \`references/migration-workflow.md\`
+- \`references/system-maps.md\`
+- \`references/reviewing-drafts.md\`
+`
+      : "";
 
   return `${renderCodexSkillFrontmatter(options.agent, "migration")}# ${title}
 
 Use this skill when migrating existing repository documentation into \`agent-memory\`.
 
 The goal is to convert legacy docs into atomic, reviewable memory that matches this tool's expected files:
-
-For deeper migration guidance, read:
-
-- \`references/migration-workflow.md\`
-- \`references/system-maps.md\`
-- \`references/reviewing-drafts.md\`
+${referenceLinks}
 
 ${renderMemoryPatterns(memoryRoot, "claims", options.config.claims)}
 ${renderMemoryPatterns(memoryRoot, "graphs", options.config.graphs)}

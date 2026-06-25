@@ -52,6 +52,7 @@ user-invocable: false
     expect(result.stdout).toContain("docs/custom/AGENT_MEMORY.md");
     expect(fs.existsSync(skillPath)).toBe(true);
     expect(fs.readFileSync(skillPath, "utf8")).toContain("bin/memory context --git-diff");
+    expect(fs.readFileSync(skillPath, "utf8")).not.toContain("references/claims.md");
   });
 
   test("installs the codex skill under a custom location", async () => {
