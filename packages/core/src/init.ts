@@ -143,8 +143,8 @@ function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): voi
   const end = findStandaloneMarker(existing, endMarker, start ? start.lineEnd : 0);
 
   if (start && end) {
-    const before = existing.slice(0, start.lineStart).trimEnd();
-    const after = existing.slice(end.lineEnd).trimStart();
+    const before = trimTrailingNewlines(existing.slice(0, start.lineStart));
+    const after = trimLeadingNewlines(existing.slice(end.lineEnd));
     const updated = [before, section, after].filter((part) => part.length > 0).join("\n\n");
     fs.writeFileSync(absolutePath, `${updated}\n`);
     actions.push({ path: relativePath, status: "updated", detail: "refreshed agent-memory section" });
@@ -152,7 +152,7 @@ function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): voi
   }
 
   if (start) {
-    const before = existing.slice(0, start.lineStart).trimEnd();
+    const before = trimTrailingNewlines(existing.slice(0, start.lineStart));
     const updated = [before, section].filter((part) => part.length > 0).join("\n\n");
     fs.writeFileSync(absolutePath, `${updated}\n`);
     actions.push({ path: relativePath, status: "updated", detail: "repaired agent-memory section" });
@@ -160,8 +160,8 @@ function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): voi
   }
 
   if (end) {
-    const before = existing.slice(0, end.lineStart).trimEnd();
-    const after = existing.slice(end.lineEnd).trimStart();
+    const before = trimTrailingNewlines(existing.slice(0, end.lineStart));
+    const after = trimLeadingNewlines(existing.slice(end.lineEnd));
     const cleaned = [before, after].filter((part) => part.length > 0).join("\n\n");
     const separator = cleaned.length > 0 ? "\n\n" : "";
     fs.writeFileSync(absolutePath, `${cleaned}${separator}${section}\n`);
@@ -178,6 +178,14 @@ function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): voi
   const separator = existing.endsWith("\n") ? "\n" : "\n\n";
   fs.writeFileSync(absolutePath, `${existing}${separator}${section}\n`);
   actions.push({ path: relativePath, status: "updated", detail: "appended agent-memory section" });
+}
+
+function trimTrailingNewlines(value: string): string {
+  return value.replace(/[\r\n]+$/, "");
+}
+
+function trimLeadingNewlines(value: string): string {
+  return value.replace(/^[\r\n]+/, "");
 }
 
 function findStandaloneMarker(content: string, marker: string, fromIndex = 0): { lineStart: number; lineEnd: number } | null {

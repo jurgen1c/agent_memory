@@ -75,6 +75,32 @@ Keep this footer too.
     expect(agents).not.toContain("## Old Agent Memory Section");
   });
 
+  test("preserves user whitespace around refreshed AGENTS sections", async () => {
+    const repoRoot = makeGitRepo();
+    const agentsPath = path.join(repoRoot, "AGENTS.md");
+    fs.writeFileSync(
+      agentsPath,
+      `# Agent Instructions
+
+Keep project-specific guidance.${"   "}
+
+<!-- agent-memory:start -->
+## Old Agent Memory Section
+<!-- agent-memory:end -->
+
+    Keep this indented footer too.
+`
+    );
+
+    const result = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const agents = fs.readFileSync(agentsPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("refreshed agent-memory section");
+    expect(agents).toContain("Keep project-specific guidance.   \n\n<!-- agent-memory:start -->");
+    expect(agents).toContain("<!-- agent-memory:end -->\n\n    Keep this indented footer too.");
+  });
+
   test("pairs AGENTS markers after the managed start marker", async () => {
     const repoRoot = makeGitRepo();
     const agentsPath = path.join(repoRoot, "AGENTS.md");
