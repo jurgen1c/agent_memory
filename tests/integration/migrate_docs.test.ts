@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dispatch, runCli } from "../../packages/cli/src/router";
+import { classifyDocs } from "../../packages/core/src/migration";
 
 describe("migrate-docs command", () => {
   test("plans memory drafts from existing docs without writing files", async () => {
@@ -126,6 +127,21 @@ describe("migrate-docs command", () => {
     expect(forced.stdout).toContain("Agent Memory docs migration system map overwritten.");
     expect(forced.stdout).toContain("Status: overwritten");
     expect(fs.readFileSync(mapPath, "utf8")).not.toContain("# reviewed edit");
+  });
+
+  test("rejects classify output paths that escape the repository", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    fs.mkdirSync(path.join(repoRoot, "docs/canonical/auth"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "docs/canonical/auth/oauth.md"), "# OAuth Behavior\n\nTenant auth notes.\n");
+    const outsideRelativePath = `../${path.basename(repoRoot)}-outside-map.yaml`;
+    const outsidePath = path.resolve(repoRoot, outsideRelativePath);
+
+    expect(() => classifyDocs({ cwd: repoRoot, fromPath: "docs/canonical", outputPath: outsideRelativePath })).toThrow(
+      "Relative output path escapes repository root"
+    );
+    expect(fs.existsSync(outsidePath)).toBe(false);
   });
 
   test("plans and automatically migrates docs from a reviewed system map", async () => {
@@ -309,6 +325,32 @@ mappings:
 
     expect(externalAutomatic).toBe(1);
     expect(stderr).toContain("Automatic migration requires --from to point inside the repository");
+
+    const mapPath = path.join(repoRoot, ".agent-memory/migrations/external.yaml");
+    fs.mkdirSync(path.dirname(mapPath), { recursive: true });
+    fs.writeFileSync(
+      mapPath,
+      `version: 1
+source_root: ${JSON.stringify(externalRoot)}
+mappings:
+  - source: ${JSON.stringify(path.join(externalRoot, "external.md"))}
+    system: auth
+    title: External Doc
+    confidence: high
+    reason: External test fixture
+`
+    );
+    stderr = "";
+    const externalMapAutomatic = await runCli(
+      ["migrate-docs", "--system-map", ".agent-memory/migrations/external.yaml", "--automatic"],
+      quietStreams((chunk) => {
+        stderr += chunk;
+      }),
+      { cwd: repoRoot }
+    );
+
+    expect(externalMapAutomatic).toBe(1);
+    expect(stderr).toContain("Automatic migration requires system-map sources to point inside the repository");
   });
 });
 

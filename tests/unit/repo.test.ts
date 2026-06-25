@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { findRepoRoot } from "../../packages/core/src/repo";
+import { findRepoRoot, isPathInside } from "../../packages/core/src/repo";
 
 describe("findRepoRoot", () => {
   test("uses cwd with a warning outside git repositories", () => {
@@ -27,5 +27,13 @@ describe("findRepoRoot", () => {
     expect(result.root).toBe(repoRoot);
     expect(result.detectedBy).toBe("git");
     expect(result.warnings).toEqual([]);
+  });
+
+  test("checks whether resolved paths stay inside a parent path", () => {
+    const repoRoot = path.resolve(os.tmpdir(), "agent-memory-repo");
+
+    expect(isPathInside(repoRoot, repoRoot)).toBe(true);
+    expect(isPathInside(repoRoot, path.join(repoRoot, "docs/file.md"))).toBe(true);
+    expect(isPathInside(repoRoot, path.resolve(repoRoot, "../outside.md"))).toBe(false);
   });
 });

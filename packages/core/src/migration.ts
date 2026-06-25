@@ -3,6 +3,7 @@ import path from "node:path";
 import { loadConfig } from "./config";
 import { AgentMemoryError } from "./errors";
 import { toPosix } from "./files";
+import { isPathInside, resolveRepoOutputPath } from "./repo";
 import { parseYaml } from "./yaml";
 
 export type MigrationMode = "plan" | "automatic";
@@ -141,7 +142,7 @@ export function migrateDocs(options: MigrateDocsOptions): MigrateDocsResult {
     throw new AgentMemoryError(`Migration source does not exist: ${sourceRoot}`);
   }
 
-  if (mode === "automatic" && path.relative(repoRoot, sourceRoot).startsWith("..")) {
+  if (mode === "automatic" && !isPathInside(repoRoot, sourceRoot)) {
     throw new AgentMemoryError("Automatic migration requires --from to point inside the repository.", {
       details: ["Use plan mode for external docs, then copy source docs into the repo before automatic migration."]
     });
@@ -185,7 +186,7 @@ export function classifyDocs(options: ClassifyDocsOptions): ClassifyDocsResult {
   const mappings = docs.map((docPath) => classifyOneDoc(repoRoot, sourceRoot, docPath, existingSystems));
   const defaultOutputPath = path.join(".agent-memory", "migrations", `${sourceSlugForMap(displayPath(repoRoot, sourceRoot))}.yaml`);
   const outputPath = options.outputPath ?? defaultOutputPath;
-  const absoluteOutputPath = path.isAbsolute(outputPath) ? path.normalize(outputPath) : path.resolve(repoRoot, outputPath);
+  const absoluteOutputPath = resolveRepoOutputPath(repoRoot, outputPath);
   const systemMapPath = displayPath(repoRoot, absoluteOutputPath);
   const existedBefore = fs.existsSync(absoluteOutputPath);
   const warnings = docs.length === 0 ? [`No migratable docs found under ${displayPath(repoRoot, sourceRoot)}.`] : [];
@@ -236,7 +237,7 @@ export function migrateDocsFromSystemMap(options: MigrateDocsSystemMapOptions): 
   if (mode === "automatic") {
     for (const mapping of systemMap.mappings) {
       const absoluteSource = resolveSourceRoot(repoRoot, mapping.source);
-      if (path.relative(repoRoot, absoluteSource).startsWith("..")) {
+      if (!isPathInside(repoRoot, absoluteSource)) {
         throw new AgentMemoryError("Automatic migration requires system-map sources to point inside the repository.", {
           details: [`Move or copy external source before migrating automatically: ${mapping.source}`]
         });

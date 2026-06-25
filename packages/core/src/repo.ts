@@ -55,7 +55,7 @@ export function resolveRepoOutputPath(repoRoot: string, targetPath: string): str
   return resolved;
 }
 
-function isPathInside(parentPath: string, childPath: string): boolean {
+export function isPathInside(parentPath: string, childPath: string): boolean {
   const relativePath = path.relative(path.resolve(parentPath), path.resolve(childPath));
   return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
 }
