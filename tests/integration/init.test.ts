@@ -75,6 +75,62 @@ Keep this footer too.
     expect(agents).not.toContain("## Old Agent Memory Section");
   });
 
+  test("repairs an AGENTS section with an unmatched start marker", async () => {
+    const repoRoot = makeGitRepo();
+    const agentsPath = path.join(repoRoot, "AGENTS.md");
+    fs.writeFileSync(
+      agentsPath,
+      `# Agent Instructions
+
+Keep project-specific guidance.
+
+<!-- agent-memory:start -->
+## Old Agent Memory Section
+This section is missing its end marker.
+`
+    );
+
+    const result = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const agents = fs.readFileSync(agentsPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("repaired agent-memory section");
+    expect(agents).toContain("Keep project-specific guidance.");
+    expect(agents).toContain("## Agent Memory Knowledge Base");
+    expect(agents).toContain("<!-- agent-memory:end -->");
+    expect(agents).not.toContain("## Old Agent Memory Section");
+    expect(agents).not.toContain("This section is missing its end marker.");
+  });
+
+  test("repairs an AGENTS section with an unmatched end marker", async () => {
+    const repoRoot = makeGitRepo();
+    const agentsPath = path.join(repoRoot, "AGENTS.md");
+    fs.writeFileSync(
+      agentsPath,
+      `# Agent Instructions
+
+Keep project-specific guidance.
+
+## Old Agent Memory Section
+<!-- agent-memory:end -->
+
+Keep this footer too.
+`
+    );
+
+    const result = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const agents = fs.readFileSync(agentsPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("repaired agent-memory section");
+    expect(agents).toContain("Keep project-specific guidance.");
+    expect(agents).toContain("Keep this footer too.");
+    expect(agents).toContain("## Agent Memory Knowledge Base");
+    expect(agents).toContain("<!-- agent-memory:start -->");
+    expect(agents).toContain("<!-- agent-memory:end -->");
+    expect(agents.match(/<!-- agent-memory:end -->/g)).toHaveLength(1);
+  });
+
   test("creates a wrapper that can execute the built CLI through AGENT_MEMORY_CLI", async () => {
     const repoRoot = makeGitRepo();
     await dispatch(["init", "--yes", "--package-manager", "bun"], { cwd: repoRoot });

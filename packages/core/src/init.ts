@@ -151,6 +151,24 @@ function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): voi
     return;
   }
 
+  if (startIndex >= 0) {
+    const before = existing.slice(0, startIndex).trimEnd();
+    const updated = [before, section].filter((part) => part.length > 0).join("\n\n");
+    fs.writeFileSync(absolutePath, `${updated}\n`);
+    actions.push({ path: relativePath, status: "updated", detail: "repaired agent-memory section" });
+    return;
+  }
+
+  if (endIndex >= 0) {
+    const before = existing.slice(0, endIndex).trimEnd();
+    const after = existing.slice(endIndex + endMarker.length).trimStart();
+    const cleaned = [before, after].filter((part) => part.length > 0).join("\n\n");
+    const separator = cleaned.length > 0 ? "\n\n" : "";
+    fs.writeFileSync(absolutePath, `${cleaned}${separator}${section}\n`);
+    actions.push({ path: relativePath, status: "updated", detail: "repaired agent-memory section" });
+    return;
+  }
+
   if (existing.length === 0) {
     fs.writeFileSync(absolutePath, `# Agent Instructions\n\n${section}\n`);
     actions.push({ path: relativePath, status: "created", detail: "added agent-memory section" });

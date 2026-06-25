@@ -21,6 +21,7 @@ jobs:
         with:
           node-version: 25
           registry-url: https://registry.npmjs.org
+      - run: bun install --frozen-lockfile
       - name: Verify release tag matches package version
         run: |
           package_version="$(node -p "require('./package.json').version")"
