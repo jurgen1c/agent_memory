@@ -140,7 +140,7 @@ function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): voi
   const startMarker = "<!-- agent-memory:start -->";
   const endMarker = "<!-- agent-memory:end -->";
   const startIndex = existing.indexOf(startMarker);
-  const endIndex = existing.indexOf(endMarker);
+  const endIndex = startIndex >= 0 ? existing.indexOf(endMarker, startIndex + startMarker.length) : existing.indexOf(endMarker);
 
   if (startIndex >= 0 && endIndex > startIndex) {
     const before = existing.slice(0, startIndex).trimEnd();

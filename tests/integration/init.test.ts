@@ -75,6 +75,34 @@ Keep this footer too.
     expect(agents).not.toContain("## Old Agent Memory Section");
   });
 
+  test("pairs AGENTS markers after the managed start marker", async () => {
+    const repoRoot = makeGitRepo();
+    const agentsPath = path.join(repoRoot, "AGENTS.md");
+    fs.writeFileSync(
+      agentsPath,
+      `# Agent Instructions
+
+Document a literal <!-- agent-memory:end --> marker before the managed section.
+
+<!-- agent-memory:start -->
+## Old Agent Memory Section
+<!-- agent-memory:end -->
+
+Keep this footer too.
+`
+    );
+
+    const result = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const agents = fs.readFileSync(agentsPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("refreshed agent-memory section");
+    expect(agents).toContain("Document a literal <!-- agent-memory:end --> marker before the managed section.");
+    expect(agents).toContain("Keep this footer too.");
+    expect(agents).toContain("## Agent Memory Knowledge Base");
+    expect(agents).not.toContain("## Old Agent Memory Section");
+  });
+
   test("repairs an AGENTS section with an unmatched start marker", async () => {
     const repoRoot = makeGitRepo();
     const agentsPath = path.join(repoRoot, "AGENTS.md");
