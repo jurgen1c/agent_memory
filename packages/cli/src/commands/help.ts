@@ -21,7 +21,7 @@ const TOPICS: HelpTopic[] = [
   },
   {
     name: "init",
-    purpose: "Scaffold memory files and agent instructions in a consuming repository.",
+    purpose: "Scaffold repo-owned memory files, a bin/memory wrapper, and agent instructions.",
     usage: [
       "agent-memory init --yes",
       "agent-memory init --yes --package-manager npm",
@@ -33,7 +33,7 @@ const TOPICS: HelpTopic[] = [
       "agent-memory init --yes --force"
     ],
     examples: ["agent-memory init --yes --agent codex", "agent-memory init --yes --agent codex --skill-location .agents", "agent-memory init --package-manager bun"],
-    agentNotes: ["Safe to run repeatedly. Existing files are skipped unless --force is passed; AGENTS.md keeps local content and refreshes only the managed agent-memory section. Use --skill-location with exactly one --agent target."],
+    agentNotes: ["Safe to run repeatedly. Existing files are skipped unless --force is passed; AGENTS.md keeps local content and refreshes only the managed agent-memory section. Use --skill-location with exactly one --agent target. The generated database and cache remain repo-local under .agent-memory/ by default."],
     phase: "Phase 2"
   },
   {
@@ -41,7 +41,7 @@ const TOPICS: HelpTopic[] = [
     purpose: "Compile canonical Markdown and YAML memory into repo-local SQLite.",
     usage: ["agent-memory compile", "agent-memory compile --db .agent-memory/memory.sqlite", "agent-memory compile --json", "agent-memory compile --verbose"],
     examples: ["agent-memory compile --json", "agent-memory compile --db .agent-memory/memory.sqlite"],
-    agentNotes: ["SQLite is generated cache and should not be committed."],
+    agentNotes: ["SQLite is generated cache and should not be committed. Relative database paths resolve against the detected repo root."],
     phase: "Phase 5"
   },
   {
@@ -69,7 +69,7 @@ const TOPICS: HelpTopic[] = [
       'agent-memory query "student oauth tenant" --json'
     ],
     examples: ['agent-memory query "oauth" --system auth', 'agent-memory query "oauth" --json'],
-    agentNotes: ["Requires a compiled SQLite database. Prefer query over manually scanning memory files."],
+    agentNotes: ["Requires this repository's compiled SQLite database. Prefer query over manually scanning memory files."],
     phase: "Phase 6"
   },
   {
@@ -136,7 +136,7 @@ const TOPICS: HelpTopic[] = [
       "agent-memory context --task \"fix auth\" --json"
     ],
     examples: ['agent-memory context --changed-files src/auth.js', "agent-memory context --git-diff"],
-    agentNotes: ["Requires a compiled SQLite database. Run this before editing code in a memory-enabled repo."],
+    agentNotes: ["Requires this repository's compiled SQLite database. Run this before editing code in a memory-enabled repo."],
     phase: "Phase 7"
   },
   {
@@ -165,7 +165,7 @@ const TOPICS: HelpTopic[] = [
     purpose: "Refresh the memory database and run validation and health checks.",
     usage: ["agent-memory sync", "agent-memory sync --json"],
     examples: ["agent-memory sync", "bin/memory sync"],
-    agentNotes: ["Use sync after pull, checkout, rebase, merge, or before agent work."],
+    agentNotes: ["Use sync after pull, checkout, rebase, merge, or before agent work. It writes the current repository's generated database, not global state."],
     phase: "Phase 8"
   },
   {
@@ -178,7 +178,7 @@ const TOPICS: HelpTopic[] = [
       "agent-memory upgrade --json"
     ],
     examples: ["agent-memory upgrade", "agent-memory upgrade --write"],
-    agentNotes: ["Dry-run by default. Preserves config values, refreshes managed AGENTS.md and skill files, and warns before dropping unknown config fields."],
+    agentNotes: ["Dry-run by default. Preserves config values, refreshes managed AGENTS.md and skill files, and warns before dropping unknown config fields. When bin/memory exists, use it for the write step."],
     phase: "Maintenance"
   },
   {
@@ -269,6 +269,7 @@ export function renderHelp(topicName?: string): string {
     `${PACKAGE_NAME} ${PACKAGE_VERSION}`,
     "",
     "Repository-local agent memory based on atomic claims, graph relationships, recipes, and generated indexes.",
+    "The CLI can be installed globally, but commands operate on the current repository and do not use global memory state.",
     "",
     "Usage:",
     "  agent-memory <command> [options]",
@@ -279,14 +280,14 @@ export function renderHelp(topicName?: string): string {
     "  templates            List, show, and copy built-in templates.",
     "  new claim            Create a claim from a built-in template.",
     "  validate             Validate canonical memory files.",
-    "  compile              Build the repo-local SQLite memory cache.",
+    "  compile              Build the current repository's SQLite memory cache.",
     "  query                Search compiled claims.",
     "  show                 Show one compiled claim.",
     "  system               Summarize compiled memory for one system.",
     "  context              Build agent-ready task or file context.",
     "  coverage             Check watched-file memory coverage.",
     "  doctor               Check compiled database health.",
-    "  sync                 Compile, validate, and doctor memory.",
+    "  sync                 Compile, validate, and doctor the current repository's memory.",
     "  upgrade              Refresh generated support files for a newer agent-memory version.",
     "  install-hooks        Install non-blocking git sync hooks.",
     "  ui                   Serve the local memory review UI.",
@@ -304,7 +305,7 @@ export function renderHelp(topicName?: string): string {
     "  agent-memory --version",
     "",
     "Agent Notes:",
-    "  Canonical memory will live in docs/agent-memory; generated SQLite will live in .agent-memory/.",
+    "  Canonical memory lives in docs/agent-memory; generated SQLite lives in the current repo's .agent-memory/ by default.",
     "  Do not treat SQLite as source of truth.",
     "  Use command help instead of inventing file formats."
   ].join("\n");

@@ -237,6 +237,29 @@ Keep this footer too.
     expect(result.stdout).toContain("agent-memory");
   });
 
+  test("creates a wrapper that delegates to a global agent-memory on PATH", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes", "--package-manager", "npm"], { cwd: repoRoot });
+
+    const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-global-bin-"));
+    const fakeCli = path.join(fakeBin, "agent-memory");
+    fs.writeFileSync(fakeCli, "#!/usr/bin/env bash\nprintf 'fake global agent-memory: %s\\n' \"$*\"\n");
+    fs.chmodSync(fakeCli, 0o755);
+
+    const result = spawnSync("bash", ["bin/memory", "help"], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        AGENT_MEMORY_CLI: "",
+        PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`
+      },
+      encoding: "utf8"
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("fake global agent-memory: help\n");
+  });
+
   test("can install non-blocking git hooks during init", async () => {
     const repoRoot = makeGitRepo();
     const result = await dispatch(["init", "--yes", "--install-hooks"], { cwd: repoRoot });

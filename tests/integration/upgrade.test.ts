@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -21,6 +22,34 @@ describe("upgrade command", () => {
     expect(result.stdout).toContain("would_update");
     expect(fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8")).toBe(originalConfig);
     expect(fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")).toBe(originalAgents);
+    expect(result.stdout).toContain("agent-memory upgrade --write");
+  });
+
+  test("dry-run next step uses bin/memory when the wrapper exists", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    fs.mkdirSync(path.join(repoRoot, "bin"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "bin/memory"), "#!/usr/bin/env bash\n");
+
+    const result = await dispatch(["upgrade"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("bin/memory upgrade --write");
+    expect(result.stdout).not.toContain("agent-memory upgrade --write");
+  });
+
+  test("dry-run next step uses a cwd-relative wrapper path from subdirectories", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const subdir = path.join(repoRoot, "packages/app");
+    fs.mkdirSync(path.join(repoRoot, "bin"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "bin/memory"), "#!/usr/bin/env bash\n");
+    fs.mkdirSync(subdir, { recursive: true });
+    expect(spawnSync("git", ["init"], { cwd: repoRoot, encoding: "utf8" }).status).toBe(0);
+
+    const result = await dispatch(["upgrade"], { cwd: subdir });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("../../bin/memory upgrade --write");
+    expect(result.stdout).not.toContain("\n  bin/memory upgrade --write");
   });
 
   test("writes commented config defaults and refreshes managed support files", async () => {

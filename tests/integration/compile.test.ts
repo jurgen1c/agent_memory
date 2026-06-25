@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -76,6 +77,34 @@ describe("compile command", () => {
     expect(secondCounts).toEqual(firstCounts);
   });
 
+  test("syncs default databases separately for different repositories", async () => {
+    const firstRepo = makeGitRepo();
+    const secondRepo = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: firstRepo });
+    await dispatch(["init", "--yes"], { cwd: secondRepo });
+
+    const first = await dispatch(["sync", "--json"], { cwd: firstRepo });
+    const second = await dispatch(["sync", "--json"], { cwd: secondRepo });
+    const firstParsed = JSON.parse(first.stdout);
+    const secondParsed = JSON.parse(second.stdout);
+    const firstDatabasePath = path.join(firstRepo, ".agent-memory/memory.sqlite");
+    const secondDatabasePath = path.join(secondRepo, ".agent-memory/memory.sqlite");
+
+    expect(first.exitCode).toBe(0);
+    expect(second.exitCode).toBe(0);
+    expect(firstParsed.compile.databasePath).toBe(firstDatabasePath);
+    expect(secondParsed.compile.databasePath).toBe(secondDatabasePath);
+    expect(firstDatabasePath).not.toBe(secondDatabasePath);
+    expect(fs.existsSync(firstDatabasePath)).toBe(true);
+    expect(fs.existsSync(secondDatabasePath)).toBe(true);
+
+    const firstMetadata = readMetadata(firstDatabasePath, "database_path");
+    const secondMetadata = readMetadata(secondDatabasePath, "database_path");
+
+    expect(firstMetadata).toBe(firstDatabasePath);
+    expect(secondMetadata).toBe(secondDatabasePath);
+  });
+
   test("refuses to compile invalid memory", async () => {
     const cwd = copyFixture(invalidFixture);
     let stderr = "";
@@ -105,6 +134,13 @@ function copyFixture(source: string): string {
   return target;
 }
 
+function makeGitRepo(): string {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-compile-repo-"));
+  const init = spawnSync("git", ["init"], { cwd: repoRoot, encoding: "utf8" });
+  expect(init.status).toBe(0);
+  return repoRoot;
+}
+
 function count(database: Database, table: string): number {
   return (database.query(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count;
 }
@@ -121,6 +157,16 @@ function readCounts(databasePath: string): Record<string, number> {
       recipe_claims: count(database, "recipe_claims"),
       claims_fts: count(database, "claims_fts")
     };
+  } finally {
+    database.close();
+  }
+}
+
+function readMetadata(databasePath: string, key: string): string {
+  const database = new Database(databasePath, { readonly: true });
+
+  try {
+    return (database.query("SELECT value FROM compile_metadata WHERE key = ?").get(key) as { value: string }).value;
   } finally {
     database.close();
   }

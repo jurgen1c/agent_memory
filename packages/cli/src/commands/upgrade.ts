@@ -1,4 +1,6 @@
+import path from "node:path";
 import { AgentMemoryError } from "../../../core/src/errors";
+import { commandPrefixForRepo } from "../../../core/src/skills";
 import { upgradeRepository, type UpgradeResult } from "../../../core/src/upgrade";
 import type { ExitCode } from "../../../core/src/types";
 
@@ -27,7 +29,7 @@ export function runUpgradeCommand(args: string[], context: UpgradeCommandContext
 
   return {
     exitCode: 0,
-    stdout: options.json ? JSON.stringify(result, null, 2) : renderUpgradeResult(result)
+    stdout: options.json ? JSON.stringify(result, null, 2) : renderUpgradeResult(result, context.cwd)
   };
 }
 
@@ -67,7 +69,7 @@ function parseUpgradeArgs(args: string[]): UpgradeCommandOptions {
   return options;
 }
 
-function renderUpgradeResult(result: UpgradeResult): string {
+function renderUpgradeResult(result: UpgradeResult, cwd = process.cwd()): string {
   const lines = [
     result.write ? "Agent Memory upgrade applied." : "Agent Memory upgrade dry run.",
     "",
@@ -92,8 +94,19 @@ function renderUpgradeResult(result: UpgradeResult): string {
 
   if (!result.write) {
     lines.push("", "Next:");
-    lines.push("  agent-memory upgrade --write");
+    lines.push(`  ${upgradeWriteCommand(result.repo.root, cwd)} upgrade --write`);
   }
 
   return lines.join("\n");
+}
+
+function upgradeWriteCommand(repoRoot: string, cwd: string): string {
+  const commandPrefix = commandPrefixForRepo(repoRoot);
+
+  if (commandPrefix !== "bin/memory") {
+    return commandPrefix;
+  }
+
+  const relativeWrapperPath = path.relative(path.resolve(cwd), path.join(repoRoot, "bin/memory"));
+  return relativeWrapperPath.length > 0 ? relativeWrapperPath : commandPrefix;
 }
