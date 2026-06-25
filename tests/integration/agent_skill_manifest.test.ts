@@ -25,6 +25,7 @@ version: ${PACKAGE_VERSION}
 user-invocable: false
 ---
 
+<!-- agent-memory:generated-skill repo-memory -->
 # Repo Memory Skill
 `)).toBe(true);
     expect(content).toContain("bin/memory sync");
@@ -103,6 +104,7 @@ version: ${PACKAGE_VERSION}
 user-invocable: false
 ---
 
+<!-- agent-memory:generated-skill repo-memory-migration -->
 # Repo Memory Migration Skill
 `)).toBe(true);
     expect(content).toContain("migrate-docs --from <existing-docs> --system <system> --automatic");

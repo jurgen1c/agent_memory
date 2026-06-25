@@ -11,6 +11,7 @@ export type AgentTarget = "codex" | "generic";
 export type AgentSkillKind = "repo" | "migration";
 
 export const DEFAULT_CODEX_SKILL_LOCATION = ".codex";
+export const GENERATED_SKILL_MARKER_PREFIX = "<!-- agent-memory:generated-skill";
 
 export interface SkillInstallAction {
   path: string;
@@ -121,7 +122,8 @@ For deeper task guidance, read:
 `
       : "";
 
-  return `${renderCodexSkillFrontmatter(options.agent, "repo")}# ${title}
+  return `${renderCodexSkillFrontmatter(options.agent, "repo")}${generatedSkillHeader("repo-memory")}
+# ${title}
 
 Use this skill whenever working in this repository.
 
@@ -234,7 +236,8 @@ For deeper migration guidance, read:
 `
       : "";
 
-  return `${renderCodexSkillFrontmatter(options.agent, "migration")}# ${title}
+  return `${renderCodexSkillFrontmatter(options.agent, "migration")}${generatedSkillHeader("repo-memory-migration")}
+# ${title}
 
 Use this skill when migrating existing repository documentation into \`agent-memory\`.
 
@@ -350,6 +353,10 @@ export function isGeneratedSkillReferenceFile(content: string): boolean {
   return content.includes("<!-- agent-memory:generated-reference");
 }
 
+export function isGeneratedAgentSkillFile(content: string): boolean {
+  return content.includes(GENERATED_SKILL_MARKER_PREFIX);
+}
+
 export function writeCodexSkillReferences(
   repoRoot: string,
   absoluteSkillPath: string,
@@ -435,6 +442,10 @@ user-invocable: false
 
 function generatedReferenceHeader(name: string): string {
   return `<!-- agent-memory:generated-reference ${name} -->`;
+}
+
+function generatedSkillHeader(name: string): string {
+  return `${GENERATED_SKILL_MARKER_PREFIX} ${name} -->`;
 }
 
 function claimsReference(): string {

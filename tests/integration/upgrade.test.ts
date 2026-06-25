@@ -266,6 +266,27 @@ validation:
     expect(fs.readFileSync(skillPath, "utf8")).toContain("This repository uses `agent-memory`");
   });
 
+  test("does not treat unmarked skill-like content as generated", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const skillPath = path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md");
+    const customSkill = `# Custom Repo Memory Skill
+
+This repository uses \`agent-memory\`, but this file is hand-maintained.
+
+## Available Commands
+
+- custom
+`;
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, customSkill);
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("does not look generated");
+    expect(fs.readFileSync(skillPath, "utf8")).toBe(customSkill);
+  });
+
   test("refreshes generated skill references and skips custom references unless forced", async () => {
     const repoRoot = makeRepo(oldConfig());
     const skillPath = path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md");
@@ -382,7 +403,8 @@ Keep local instructions.
 }
 
 function oldGeneratedSkill(): string {
-  return `# Repo Memory Skill
+  return `<!-- agent-memory:generated-skill repo-memory -->
+# Repo Memory Skill
 
 This repository uses \`agent-memory\`.
 

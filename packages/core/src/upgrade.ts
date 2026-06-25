@@ -6,6 +6,7 @@ import { findRepoRoot, resolveRepoOutputPath } from "./repo";
 import {
   codexSkillReferenceFiles,
   commandPrefixForRepo,
+  isGeneratedAgentSkillFile,
   isGeneratedSkillReferenceFile,
   renderAgentSkill,
   type AgentTarget
@@ -409,7 +410,7 @@ function collectUnknownPaths(value: unknown, schema: ConfigSchema, prefix = ""):
 }
 
 function isGeneratedSkillFile(content: string): boolean {
-  return content.includes("This repository uses `agent-memory`") && content.includes("## Available Commands");
+  return isGeneratedAgentSkillFile(content);
 }
 
 function normalizeTrailingNewline(value: string): string {

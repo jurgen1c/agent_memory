@@ -300,7 +300,7 @@ Keep this footer too.
     expect(result.exitCode).toBe(0);
     expect(config.agent_skills.codex.path).toBe(skillPath);
     expect(fs.existsSync(skillPath)).toBe(true);
-    expect(fs.existsSync(path.join(repoRoot, skillPath))).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"))).toBe(false);
     expect(fs.existsSync(path.join(skillRoot, "skills/repo-memory/references/claims.md"))).toBe(true);
   });
 
