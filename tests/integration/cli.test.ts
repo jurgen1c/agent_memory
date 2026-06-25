@@ -15,6 +15,19 @@ describe("CLI", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Build task-ready memory context");
+    expect(result.stdout).toContain("--include-inferred");
+  });
+
+  test("documents implemented command flags in help output", async () => {
+    const init = await dispatch(["help", "init"]);
+    const query = await dispatch(["help", "query"]);
+    const templates = await dispatch(["help", "templates"]);
+    const installHooks = await dispatch(["help", "install-hooks"]);
+
+    expect(init.stdout).toContain("agent-memory init --yes --force");
+    expect(query.stdout).toContain("--include-stale");
+    expect(templates.stdout).toContain("templates copy claim:fact --to /tmp/fact.md --force");
+    expect(installHooks.stdout).toContain("agent-memory install-hooks --json");
   });
 
   test("renders inline help for every command", async () => {

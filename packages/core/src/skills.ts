@@ -5,6 +5,7 @@ import { loadConfig } from "./config";
 import { AgentMemoryError } from "./errors";
 import { resolveInsideRepo } from "./repo";
 import type { AgentMemoryConfig, RepoInfo } from "./types";
+import { PACKAGE_VERSION } from "./version";
 
 export type AgentTarget = "codex" | "generic";
 export type AgentSkillKind = "repo" | "migration";
@@ -94,7 +95,7 @@ export function renderAgentSkill(options: RenderAgentSkillOptions): string {
   const databasePath = options.config.database_path;
   const commands = buildAgentCommands(options.commandPrefix);
 
-  return `# ${title}
+  return `${renderCodexSkillFrontmatter(options.agent, "repo")}# ${title}
 
 Use this skill whenever working in this repository.
 
@@ -196,7 +197,7 @@ function renderMigrationSkill(options: RenderAgentSkillOptions): string {
   const title = options.agent === "codex" ? "Repo Memory Migration Skill" : "Repository Memory Migration Instructions";
   const memoryRoot = trimTrailingSlash(options.config.memory_root);
 
-  return `# ${title}
+  return `${renderCodexSkillFrontmatter(options.agent, "migration")}# ${title}
 
 Use this skill when migrating existing repository documentation into \`agent-memory\`.
 
@@ -311,4 +312,32 @@ function joinMemoryPath(memoryRoot: string, pattern: string): string {
 function renderMemoryPatterns(memoryRoot: string, label: string, patterns: string[]): string {
   const rendered = patterns.map((pattern) => `\`${joinMemoryPath(memoryRoot, pattern)}\``).join(", ");
   return `- ${label}: ${rendered}`;
+}
+
+function renderCodexSkillFrontmatter(agent: AgentTarget, kind: AgentSkillKind): string {
+  if (agent !== "codex") {
+    return "";
+  }
+
+  const metadata =
+    kind === "migration"
+      ? {
+          name: "repo-memory-migration",
+          description:
+            "Use this skill when migrating existing repository documentation into agent-memory atomic claims, indexes, recipes, and graph relationships."
+        }
+      : {
+          name: "repo-memory",
+          description:
+            "Use this skill whenever working in this repository to sync and retrieve agent-memory context before code changes and update durable claims when behavior or critical repository knowledge changes."
+        };
+
+  return `---
+name: ${metadata.name}
+description: ${metadata.description}
+version: ${PACKAGE_VERSION}
+user-invocable: false
+---
+
+`;
 }

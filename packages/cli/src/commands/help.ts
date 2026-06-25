@@ -28,7 +28,8 @@ const TOPICS: HelpTopic[] = [
       "agent-memory init --yes --package-manager bun",
       "agent-memory init --yes --agent codex",
       "agent-memory init --yes --agent generic",
-      "agent-memory init --yes --install-hooks"
+      "agent-memory init --yes --install-hooks",
+      "agent-memory init --yes --force"
     ],
     examples: ["agent-memory init --yes --agent codex", "agent-memory init --package-manager bun"],
     agentNotes: ["Safe to run repeatedly. Existing files are skipped unless --force is passed."],
@@ -58,7 +59,14 @@ const TOPICS: HelpTopic[] = [
   {
     name: "query",
     purpose: "Search compiled memory by text and metadata.",
-    usage: ['agent-memory query "student oauth tenant"'],
+    usage: [
+      'agent-memory query "student oauth tenant"',
+      'agent-memory query "student oauth tenant" --system auth',
+      'agent-memory query "student oauth tenant" --status current',
+      'agent-memory query "student oauth tenant" --limit 20',
+      'agent-memory query "student oauth tenant" --include-stale',
+      'agent-memory query "student oauth tenant" --json'
+    ],
     examples: ['agent-memory query "oauth" --system auth', 'agent-memory query "oauth" --json'],
     agentNotes: ["Requires a compiled SQLite database. Prefer query over manually scanning memory files."],
     phase: "Phase 6"
@@ -89,7 +97,8 @@ const TOPICS: HelpTopic[] = [
       "agent-memory templates list",
       "agent-memory templates show claim:fact",
       "agent-memory templates show claim:constraint",
-      "agent-memory templates copy claim:fact --to /tmp/fact.md"
+      "agent-memory templates copy claim:fact --to /tmp/fact.md",
+      "agent-memory templates copy claim:fact --to /tmp/fact.md --force"
     ],
     examples: ["agent-memory templates list", "agent-memory templates show claim:constraint"],
     agentNotes: ["Use templates before creating claims so the durable memory shape stays consistent."],
@@ -101,7 +110,9 @@ const TOPICS: HelpTopic[] = [
     usage: [
       "agent-memory new claim --type fact --system auth --title \"Student OAuth UID is tenant scoped\"",
       "agent-memory new claim --interactive",
-      "agent-memory new claim --type rule --system ci --severity critical"
+      "agent-memory new claim --type rule --system ci --severity critical",
+      "agent-memory new claim --type fact --system auth --title \"Student OAuth UID is tenant scoped\" --source-file src/auth.js",
+      "agent-memory new claim --type fact --system auth --title \"Student OAuth UID is tenant scoped\" --id auth.student_oauth.uid_is_tenant_scoped"
     ],
     examples: [
       "agent-memory new claim --type fact --system auth --title \"Student OAuth UID is tenant scoped\"",
@@ -119,6 +130,7 @@ const TOPICS: HelpTopic[] = [
       "agent-memory context --git-diff",
       "agent-memory context --task \"fix auth\" --budget small|medium|full",
       "agent-memory context --task \"fix auth\" --depth 2",
+      "agent-memory context --task \"fix auth\" --include-inferred",
       "agent-memory context --task \"fix auth\" --json"
     ],
     examples: ['agent-memory context --changed-files src/auth.js', "agent-memory context --git-diff"],
@@ -157,7 +169,7 @@ const TOPICS: HelpTopic[] = [
   {
     name: "install-hooks",
     purpose: "Install non-blocking git hooks that run bin/memory sync after repository state changes.",
-    usage: ["agent-memory install-hooks", "agent-memory install-hooks --force"],
+    usage: ["agent-memory install-hooks", "agent-memory install-hooks --force", "agent-memory install-hooks --json"],
     examples: ["agent-memory install-hooks", "agent-memory install-hooks --force"],
     agentNotes: ["Hooks warn but do not block git operations."],
     phase: "Phase 8"

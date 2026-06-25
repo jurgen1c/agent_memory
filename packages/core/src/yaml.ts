@@ -159,7 +159,7 @@ function splitKeyValue(line: ParsedLine): { key: string; value: string } {
   return { key, value };
 }
 
-function parseScalar(value: string, line: ParsedLine): YamlValue {
+function parseScalar(value: string, _line: ParsedLine): YamlValue {
   if (value === "null" || value === "~") {
     return null;
   }
