@@ -2,7 +2,7 @@
   "lockfileVersion": 1,
   "workspaces": {
     "": {
-      "name": "agent-memory",
+      "name": "@jurgen1c/agent-memory-cli",
       "dependencies": {
         "@xyflow/react": "^12.0.0",
         "react": "^19.0.0",
