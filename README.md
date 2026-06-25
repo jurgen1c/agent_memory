@@ -392,6 +392,8 @@ The script builds the package, copies `examples/mock-app` to `/tmp`, seeds one p
 
 ## Publishing and Versioning
 
+See [docs/releasing.md](docs/releasing.md) for the full release checklist.
+
 This package follows semantic versioning:
 
 - Major versions introduce incompatible CLI, config, schema, or memory format changes.
@@ -406,7 +408,7 @@ bun run build
 npm pack --dry-run
 ```
 
-Publishing is handled by the GitHub release workflow and should only happen from semver releases, not normal pushes. Use `npm version patch`, `npm version minor`, or `npm version major` to update `package.json` and create the matching `vX.Y.Z` tag. Push the commit and tag, then publish a GitHub Release for that tag.
+Publishing is handled by the GitHub release workflow and should only happen from semver releases, not normal pushes. Use `npm version patch`, `npm version minor`, or `npm version major` to update `package.json` and create the matching `vX.Y.Z` tag. Push the commit and tag, then publish a GitHub Release for that tag. Pushing a tag alone does not run the publish workflow.
 
 The first manual publish for the scoped package must use public access:
 
