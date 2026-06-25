@@ -2,6 +2,8 @@
 
 `agent-memory` is a repository-local CLI for maintaining durable, agent-readable memory from committed Markdown and YAML files. It gives coding agents a supported way to retrieve project context, update atomic claims, validate memory, and keep generated SQLite indexes out of source control.
 
+You may install the executable globally with `npm install -g @jurgen1c/agent-memory-cli`, but memory state is not global. Commands such as `init`, `sync`, `upgrade`, `query`, and `context` operate on the detected current repository. Relative `database_path` values resolve against that repo root, so the default generated database is `<repo>/.agent-memory/memory.sqlite`.
+
 The source of truth stays in the consuming repository:
 
 - `docs/agent-memory/claims/**/*.md`
@@ -43,8 +45,10 @@ For a global CLI install:
 
 ```bash
 npm install -g @jurgen1c/agent-memory-cli
-agent-memory --help
+agent-memory init --yes --package-manager npm --agent codex --install-hooks
 ```
+
+`init` still creates `bin/memory`. Use `bin/memory` inside initialized repositories so hooks, agent instructions, and human workflows have one stable repo-local command. The wrapper prefers `AGENT_MEMORY_CLI`, then a global `agent-memory` on `PATH`, then an `npx` or `bunx` fallback.
 
 ### What `init` Creates
 
