@@ -21,7 +21,7 @@ const TOPICS: HelpTopic[] = [
   },
   {
     name: "init",
-    purpose: "Scaffold memory files in a consuming repository.",
+    purpose: "Scaffold memory files and agent instructions in a consuming repository.",
     usage: [
       "agent-memory init --yes",
       "agent-memory init --yes --package-manager npm",
@@ -32,7 +32,7 @@ const TOPICS: HelpTopic[] = [
       "agent-memory init --yes --force"
     ],
     examples: ["agent-memory init --yes --agent codex", "agent-memory init --package-manager bun"],
-    agentNotes: ["Safe to run repeatedly. Existing files are skipped unless --force is passed."],
+    agentNotes: ["Safe to run repeatedly. Existing files are skipped unless --force is passed; AGENTS.md keeps local content and refreshes only the managed agent-memory section."],
     phase: "Phase 2"
   },
   {
@@ -249,7 +249,7 @@ export function renderHelp(topicName?: string): string {
     "",
     "Available now:",
     "  help                 Show command help.",
-    "  init                 Scaffold memory files in a consuming repository.",
+    "  init                 Scaffold memory files and agent instructions in a consuming repository.",
     "  templates            List, show, and copy built-in templates.",
     "  new claim            Create a claim from a built-in template.",
     "  validate             Validate canonical memory files.",

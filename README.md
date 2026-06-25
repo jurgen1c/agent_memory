@@ -26,7 +26,7 @@ Install the package in a repository that should own its memory:
 npm install --save-dev @jurgen1c/agent-memory-cli
 ```
 
-Initialize memory files, a `bin/memory` wrapper, and agent instructions:
+Initialize memory files, a `bin/memory` wrapper, `AGENTS.md` guidance, and agent instructions:
 
 ```bash
 npx agent-memory init --yes --package-manager npm --agent codex --install-hooks
@@ -45,6 +45,32 @@ For a global CLI install:
 npm install -g @jurgen1c/agent-memory-cli
 agent-memory --help
 ```
+
+### What `init` Creates
+
+`init` bootstraps a repository so agents have a stable memory contract and local commands:
+
+- `agent-memory.config.yaml`: memory paths, validation defaults, context defaults, and agent skill locations.
+- `docs/agent-memory/`: canonical memory root with `claims/`, `graph/`, `indexes/`, `recipes/`, and `waivers/`.
+- `bin/memory`: repository-local wrapper around the installed or globally available CLI.
+- `.gitignore`: adds `.agent-memory/` so generated SQLite stays out of commits.
+- `AGENTS.md`: creates or refreshes a managed Agent Memory section that points agents to the repo-memory skill, requires context lookup before non-trivial work, and requires memory updates when durable knowledge changes.
+- Agent instructions: installs Codex and generic instructions by default, unless `--agent` narrows the target.
+- Git hooks: installed only when `--install-hooks` is passed.
+
+`init` is safe to rerun. Existing scaffold files are skipped unless `--force` is passed. Existing `AGENTS.md` content is preserved; only the managed `agent-memory` section is appended or refreshed.
+
+Init options:
+
+| Option | Meaning |
+| --- | --- |
+| `--yes`, `-y` | Run as a non-interactive setup command. |
+| `--package-manager npm` | Generate `bin/memory` with an `npx agent-memory` fallback. |
+| `--package-manager bun` | Generate `bin/memory` with a `bunx agent-memory` fallback. |
+| `--agent codex` | Install only the Codex repo-memory skill. Repeat `--agent` to install multiple targets. |
+| `--agent generic` | Install only the generic agent instruction file. |
+| `--install-hooks` | Install non-blocking git hooks that run `bin/memory sync` after checkout, merge, or rewrite. |
+| `--force` | Overwrite existing scaffold files and hooks where supported. |
 
 Compile and check the repository memory:
 
@@ -84,7 +110,7 @@ Use `agent-memory help <command>` for full usage and examples.
 
 | Command | Purpose |
 | --- | --- |
-| `init` | Scaffold config, canonical memory folders, wrapper, gitignore entry, and optional agent skills/hooks. |
+| `init` | Scaffold config, canonical memory folders, wrapper, gitignore entry, `AGENTS.md` guidance, and optional agent skills/hooks. |
 | `templates list` | List built-in claim templates. |
 | `templates show claim:fact` | Print a built-in claim template. |
 | `new claim` | Create one atomic claim from a template. |

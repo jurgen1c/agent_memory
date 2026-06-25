@@ -38,6 +38,7 @@ export function initRepository(options: InitOptions): InitResult {
 
   writeFile(repo.root, "agent-memory.config.yaml", configTemplate(), options.force, actions);
   writeFile(repo.root, "docs/agent-memory/README.md", memoryReadmeTemplate(), options.force, actions);
+  ensureAgentsMemorySection(repo.root, actions);
 
   for (const gitkeepPath of [
     "docs/agent-memory/claims/.gitkeep",
@@ -125,6 +126,42 @@ function ensureGitignoreEntry(repoRoot: string, entry: string, actions: InitActi
   actions.push({ path: relativePath, status: existing.length > 0 ? "updated" : "created", detail: `added ${entry}` });
 }
 
+function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): void {
+  const relativePath = "AGENTS.md";
+  const absolutePath = path.join(repoRoot, relativePath);
+  const existing = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : "";
+  const section = agentsMemorySection();
+
+  if (existing.includes(section)) {
+    actions.push({ path: relativePath, status: "skipped", detail: "agent-memory section already present" });
+    return;
+  }
+
+  const startMarker = "<!-- agent-memory:start -->";
+  const endMarker = "<!-- agent-memory:end -->";
+  const startIndex = existing.indexOf(startMarker);
+  const endIndex = existing.indexOf(endMarker);
+
+  if (startIndex >= 0 && endIndex > startIndex) {
+    const before = existing.slice(0, startIndex).trimEnd();
+    const after = existing.slice(endIndex + endMarker.length).trimStart();
+    const updated = [before, section, after].filter((part) => part.length > 0).join("\n\n");
+    fs.writeFileSync(absolutePath, `${updated}\n`);
+    actions.push({ path: relativePath, status: "updated", detail: "refreshed agent-memory section" });
+    return;
+  }
+
+  if (existing.length === 0) {
+    fs.writeFileSync(absolutePath, `# Agent Instructions\n\n${section}\n`);
+    actions.push({ path: relativePath, status: "created", detail: "added agent-memory section" });
+    return;
+  }
+
+  const separator = existing.endsWith("\n") ? "\n" : "\n\n";
+  fs.writeFileSync(absolutePath, `${existing}${separator}${section}\n`);
+  actions.push({ path: relativePath, status: "updated", detail: "appended agent-memory section" });
+}
+
 function configTemplate(): string {
   return `version: 1
 memory_root: docs/agent-memory
@@ -188,6 +225,50 @@ Canonical memory lives in:
 
 Generated memory lives in \`.agent-memory/\` and should not be committed.
 `;
+}
+
+function agentsMemorySection(): string {
+  return `<!-- agent-memory:start -->
+## Agent Memory Knowledge Base
+
+Use the repo-memory skill or instruction file whenever it is available. This section is the repo-level fallback and requirement.
+
+Durable repository knowledge lives in \`docs/agent-memory/\` and must stay versioned and reviewable. Generated memory lives in \`.agent-memory/\` and must not be committed.
+
+Memory artifacts:
+
+- \`claims/\`: atomic behavior, rules, constraints, workflows, risks, decisions, and deprecations.
+- \`graph/\`: relationships between claim IDs, including dependencies, constraints, conflicts, and replacements.
+- \`indexes/\`: watched files, default queries, tags, and claim globs for discoverability.
+- \`recipes/\`: repeatable implementation, debugging, release, or review workflows.
+- \`waivers/\`: reviewed exceptions for memory coverage checks.
+
+### Agent-Memory-First Workflow
+
+Before non-trivial work:
+
+1. Run \`bin/memory sync\`.
+2. Run \`bin/memory context --task "<task>"\`.
+3. If files are known, run \`bin/memory context --changed-files <file1> <file2>\`.
+4. If working from a diff, run \`bin/memory context --git-diff\`.
+5. Use \`bin/memory query\`, \`bin/memory show\`, or \`bin/memory system\` for precise claims, graph links, recipes, or watched-file context.
+
+For non-trivial work, cite the relevant claim IDs, system IDs, and verification commands in plans or PR notes.
+
+After non-trivial work:
+
+1. Update memory in the same change when durable repository knowledge changed.
+2. Use \`bin/memory templates list\` and \`bin/memory templates show <template>\` before creating artifacts.
+3. Run \`bin/memory validate\` and \`bin/memory sync\` before finishing changes that touch memory.
+
+Update targets:
+
+- Claims for changed behavior, interfaces, system boundaries, auth rules, dependencies, risks, or decisions.
+- Graphs for changed triggers, handoffs, constraints, replacements, conflicts, or causal links.
+- Indexes for changed route/job/model discoverability, watched files, default queries, or tags.
+- Recipes for new or changed repeatable workflows.
+- Waivers for intentional coverage exceptions with a reason and expiration.
+<!-- agent-memory:end -->`;
 }
 
 function wrapperTemplate(packageManager: PackageManager): string {
