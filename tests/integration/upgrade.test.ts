@@ -265,6 +265,23 @@ validation:
     expect(fs.readFileSync(customReferencePath, "utf8")).toContain("<!-- agent-memory:generated-reference repo-memory/recipes.md -->");
   });
 
+  test("skips relative configured skill paths that escape the repository", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const outsideRelativePath = `../${path.basename(repoRoot)}-outside-skill/SKILL.md`;
+    const outsidePath = path.resolve(repoRoot, outsideRelativePath);
+    fs.writeFileSync(
+      path.join(repoRoot, "agent-memory.config.yaml"),
+      oldConfig().replace("path: .codex/skills/repo-memory/SKILL.md", `path: ${outsideRelativePath}`)
+    );
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(`Skill path ${outsideRelativePath} escapes the repository root`);
+    expect(result.stdout).toContain("relative path escapes repository root");
+    expect(fs.existsSync(outsidePath)).toBe(false);
+  });
+
   test("can refresh configured absolute skill paths", async () => {
     const skillRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-absolute-skill-"));
     const skillPath = path.join(skillRoot, "SKILL.md");

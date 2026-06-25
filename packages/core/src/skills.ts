@@ -3,7 +3,7 @@ import path from "node:path";
 import { buildAgentCommands } from "./agent_commands";
 import { loadConfig } from "./config";
 import { AgentMemoryError } from "./errors";
-import { resolveInsideRepo } from "./repo";
+import { resolveRepoOutputPath } from "./repo";
 import type { AgentMemoryConfig, RepoInfo } from "./types";
 import { PACKAGE_VERSION } from "./version";
 
@@ -63,7 +63,7 @@ export function installAgentSkill(options: InstallAgentSkillOptions): SkillInsta
       : kind === "repo"
         ? skillConfig.path
         : skillPathForLocation(options.agent, defaultSkillLocation(options.agent), kind));
-  const absolutePath = resolveInsideRepo(repo.root, targetPath);
+  const absolutePath = resolveRepoOutputPath(repo.root, targetPath);
   const displayPath = displayRepoPath(repo.root, absolutePath);
   const commandPrefix = commandPrefixForRepo(repo.root);
 

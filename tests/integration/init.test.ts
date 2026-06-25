@@ -304,6 +304,19 @@ Keep this footer too.
     expect(fs.existsSync(path.join(skillRoot, "skills/repo-memory/references/claims.md"))).toBe(true);
   });
 
+  test("rejects relative custom skill locations that escape the repository", async () => {
+    const repoRoot = makeGitRepo();
+    const outsideRelativePath = `../${path.basename(repoRoot)}-outside-agent-skill`;
+    const outsidePath = path.resolve(repoRoot, outsideRelativePath);
+
+    await expect(dispatch(["init", "--yes", "--agent", "codex", "--skill-location", outsideRelativePath], { cwd: repoRoot })).rejects.toThrow(
+      "Relative output path escapes repository root"
+    );
+
+    expect(fs.existsSync(path.join(repoRoot, "agent-memory.config.yaml"))).toBe(false);
+    expect(fs.existsSync(outsidePath)).toBe(false);
+  });
+
   test("does not install disabled agent targets during upgrade", async () => {
     const repoRoot = makeGitRepo();
     const init = await dispatch(["init", "--yes", "--agent", "codex"], { cwd: repoRoot });

@@ -162,6 +162,20 @@ user-invocable: false
     expect(fs.existsSync(referencesPath)).toBe(false);
   });
 
+  test("rejects relative install paths that escape the repository", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes", "--agent", "generic"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    const outsideRelativePath = `../${path.basename(repoRoot)}-outside-skill.md`;
+    const outsidePath = path.resolve(repoRoot, outsideRelativePath);
+
+    await expect(dispatch(["install-skill", "--agent", "codex", "--path", outsideRelativePath], { cwd: repoRoot })).rejects.toThrow(
+      "Relative output path escapes repository root"
+    );
+
+    expect(fs.existsSync(outsidePath)).toBe(false);
+  });
+
   test("reports invalid install-skill options", async () => {
     let stderr = "";
     const conflictingLocation = await runCli(

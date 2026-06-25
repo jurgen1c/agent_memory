@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadConfig, renderConfigTemplate } from "./config";
 import { buildAgentsMemoryContent } from "./init";
-import { findRepoRoot, resolveInsideRepo } from "./repo";
+import { findRepoRoot, resolveRepoOutputPath } from "./repo";
 import {
   codexSkillReferenceFiles,
   commandPrefixForRepo,
@@ -187,8 +187,13 @@ function upgradeSkillFiles(
       continue;
     }
 
-    const absolutePath = resolveInsideRepo(repoRoot, skill.path);
-    const relativePath = displayRepoPath(repoRoot, absolutePath);
+    const resolvedPath = resolveConfiguredSkillPath(repoRoot, skill.path, actions, warnings);
+
+    if (!resolvedPath) {
+      continue;
+    }
+
+    const { absolutePath, relativePath } = resolvedPath;
     const existing = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : null;
     const next = renderAgentSkill({ agent, config, commandPrefix: commandPrefixForRepo(repoRoot) });
 
@@ -235,8 +240,14 @@ function preserveLegacySingleAgentSelection(repoRoot: string, config: AgentMemor
     return;
   }
 
-  const existingAgents = enabledAgents.filter((agent) => fs.existsSync(resolveInsideRepo(repoRoot, config.agent_skills[agent].path)));
-  const missingAgents = enabledAgents.filter((agent) => !fs.existsSync(resolveInsideRepo(repoRoot, config.agent_skills[agent].path)));
+  const resolvedPaths = enabledAgents.map((agent) => ({ agent, path: tryResolveConfiguredPath(repoRoot, config.agent_skills[agent].path) }));
+
+  if (resolvedPaths.some((resolvedPath) => resolvedPath.path === null)) {
+    return;
+  }
+
+  const existingAgents = resolvedPaths.filter((resolvedPath) => fs.existsSync(resolvedPath.path as string)).map((resolvedPath) => resolvedPath.agent);
+  const missingAgents = resolvedPaths.filter((resolvedPath) => !fs.existsSync(resolvedPath.path as string)).map((resolvedPath) => resolvedPath.agent);
 
   if (existingAgents.length !== 1 || missingAgents.length !== 1) {
     return;
@@ -249,6 +260,34 @@ function preserveLegacySingleAgentSelection(repoRoot: string, config: AgentMemor
   warnings.push(
     `Preserved legacy single-agent install: disabled ${missingAgent} skill because only the ${existingAgent} skill is installed.`
   );
+}
+
+function resolveConfiguredSkillPath(
+  repoRoot: string,
+  skillPath: string,
+  actions: UpgradeAction[],
+  warnings: string[]
+): { absolutePath: string; relativePath: string } | null {
+  const absolutePath = tryResolveConfiguredPath(repoRoot, skillPath);
+
+  if (absolutePath === null) {
+    warnings.push(`Skill path ${skillPath} escapes the repository root; skipping to avoid unintended writes.`);
+    actions.push({ path: skillPath, status: "skipped", detail: "relative path escapes repository root" });
+    return null;
+  }
+
+  return {
+    absolutePath,
+    relativePath: displayRepoPath(repoRoot, absolutePath)
+  };
+}
+
+function tryResolveConfiguredPath(repoRoot: string, skillPath: string): string | null {
+  try {
+    return resolveRepoOutputPath(repoRoot, skillPath);
+  } catch {
+    return null;
+  }
 }
 
 function upgradeCodexSkillReferences(

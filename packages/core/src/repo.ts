@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { AgentMemoryError } from "./errors";
 import type { RepoInfo } from "./types";
 
 export function findRepoRoot(cwd = process.cwd()): RepoInfo {
@@ -36,4 +37,25 @@ export function resolveInsideRepo(repoRoot: string, targetPath: string): string 
   }
 
   return path.resolve(repoRoot, targetPath);
+}
+
+export function resolveRepoOutputPath(repoRoot: string, targetPath: string): string {
+  if (path.isAbsolute(targetPath)) {
+    return path.normalize(targetPath);
+  }
+
+  const resolved = path.resolve(repoRoot, targetPath);
+
+  if (!isPathInside(repoRoot, resolved)) {
+    throw new AgentMemoryError(`Relative output path escapes repository root: ${targetPath}`, {
+      details: ["Use a path inside the repository, or an absolute path when writing outside the repository is intentional."]
+    });
+  }
+
+  return resolved;
+}
+
+function isPathInside(parentPath: string, childPath: string): boolean {
+  const relativePath = path.relative(path.resolve(parentPath), path.resolve(childPath));
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
 }

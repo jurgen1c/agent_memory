@@ -3,7 +3,7 @@ import path from "node:path";
 import { defaultConfig, renderConfigTemplate } from "./config";
 import { AgentMemoryError } from "./errors";
 import { installMemoryHooks } from "./hooks";
-import { findRepoRoot } from "./repo";
+import { findRepoRoot, resolveRepoOutputPath } from "./repo";
 import { parseAgentTarget, renderAgentSkill, skillPathForLocation, writeCodexSkillReferences, type AgentTarget } from "./skills";
 import type { RepoInfo } from "./types";
 
@@ -51,6 +51,7 @@ export function initRepository(options: InitOptions): InitResult {
   if (options.skillLocation) {
     for (const agent of agents) {
       config.agent_skills[agent].path = skillPathForLocation(agent, options.skillLocation);
+      resolveRepoOutputPath(repo.root, config.agent_skills[agent].path);
     }
   }
 
@@ -135,7 +136,7 @@ function writeExecutable(repoRoot: string, relativePath: string, content: string
 }
 
 function resolveOutputPath(repoRoot: string, targetPath: string): string {
-  return path.isAbsolute(targetPath) ? path.normalize(targetPath) : path.join(repoRoot, targetPath);
+  return resolveRepoOutputPath(repoRoot, targetPath);
 }
 
 function displayOutputPath(repoRoot: string, absolutePath: string): string {
