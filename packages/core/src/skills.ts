@@ -25,6 +25,10 @@ export interface SkillReferenceWriteAction {
   detail?: string;
 }
 
+export interface SkillReferenceWriteActionAccumulator {
+  push(...actions: SkillReferenceWriteAction[]): number;
+}
+
 export interface SkillReferenceFile {
   path: string;
   content: string;
@@ -362,7 +366,7 @@ export function writeCodexSkillReferences(
   absoluteSkillPath: string,
   kind: AgentSkillKind,
   force: boolean,
-  actions: SkillReferenceWriteAction[]
+  actions: SkillReferenceWriteActionAccumulator
 ): void {
   const skillDir = path.dirname(absoluteSkillPath);
 
@@ -377,7 +381,7 @@ function writeFile(
   displayPath: string,
   content: string,
   force: boolean,
-  actions: SkillReferenceWriteAction[]
+  actions: SkillReferenceWriteActionAccumulator
 ): SkillInstallAction {
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
   const existedBefore = fs.existsSync(absolutePath);
