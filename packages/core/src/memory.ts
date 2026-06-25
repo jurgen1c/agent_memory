@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, type LoadedConfig } from "./config";
+import { loadConfig } from "./config";
 import { discoverFiles } from "./files";
 import { parseMarkdownFile } from "./markdown";
+import type { LoadedConfig } from "./types";
 import { parseYaml } from "./yaml";
 
 export interface MemoryClaim {
@@ -168,7 +169,7 @@ function loadRecipes(memoryRoot: string, files: string[]): MemoryRecipe[] {
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value;
+    return value as Record<string, unknown>;
   }
 
   return {};
