@@ -46,7 +46,7 @@ describe("graph layout", () => {
       claim("auth.unrelated", "auth", "Unrelated auth claim"),
       claim("billing.first", "billing", "First billing claim")
     ];
-    const relations = [relation("explicit:auth.first:requires:billing.first", "auth.first", "billing.first", false)];
+    const relations = [relation("explicit:auth.first:requires:billing.first", "auth.first", "billing.first", false, "requires")];
 
     const graph = buildGraph(claims, relations, new Set(claims.map((item) => item.id)), new Set(["explicit"]));
     const authNode = graph.nodes.find((node) => node.id === "auth.first");
@@ -96,12 +96,12 @@ function claim(id: string, system: string, title: string): GraphClaim {
   };
 }
 
-function relation(id: string, source: string, target: string, bidirectional: boolean): GraphRelation {
+function relation(id: string, source: string, target: string, bidirectional: boolean, relationName = "same_area"): GraphRelation {
   return {
     id,
     source,
     target,
-    relation: "same_area",
+    relation: relationName,
     strength: 60,
     origin: "explicit",
     bidirectional

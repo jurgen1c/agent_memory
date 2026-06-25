@@ -139,29 +139,29 @@ function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): voi
 
   const startMarker = "<!-- agent-memory:start -->";
   const endMarker = "<!-- agent-memory:end -->";
-  const startIndex = existing.indexOf(startMarker);
-  const endIndex = startIndex >= 0 ? existing.indexOf(endMarker, startIndex + startMarker.length) : existing.indexOf(endMarker);
+  const start = findStandaloneMarker(existing, startMarker);
+  const end = findStandaloneMarker(existing, endMarker, start ? start.lineEnd : 0);
 
-  if (startIndex >= 0 && endIndex > startIndex) {
-    const before = existing.slice(0, startIndex).trimEnd();
-    const after = existing.slice(endIndex + endMarker.length).trimStart();
+  if (start && end) {
+    const before = existing.slice(0, start.lineStart).trimEnd();
+    const after = existing.slice(end.lineEnd).trimStart();
     const updated = [before, section, after].filter((part) => part.length > 0).join("\n\n");
     fs.writeFileSync(absolutePath, `${updated}\n`);
     actions.push({ path: relativePath, status: "updated", detail: "refreshed agent-memory section" });
     return;
   }
 
-  if (startIndex >= 0) {
-    const before = existing.slice(0, startIndex).trimEnd();
+  if (start) {
+    const before = existing.slice(0, start.lineStart).trimEnd();
     const updated = [before, section].filter((part) => part.length > 0).join("\n\n");
     fs.writeFileSync(absolutePath, `${updated}\n`);
     actions.push({ path: relativePath, status: "updated", detail: "repaired agent-memory section" });
     return;
   }
 
-  if (endIndex >= 0) {
-    const before = existing.slice(0, endIndex).trimEnd();
-    const after = existing.slice(endIndex + endMarker.length).trimStart();
+  if (end) {
+    const before = existing.slice(0, end.lineStart).trimEnd();
+    const after = existing.slice(end.lineEnd).trimStart();
     const cleaned = [before, after].filter((part) => part.length > 0).join("\n\n");
     const separator = cleaned.length > 0 ? "\n\n" : "";
     fs.writeFileSync(absolutePath, `${cleaned}${separator}${section}\n`);
@@ -178,6 +178,31 @@ function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): voi
   const separator = existing.endsWith("\n") ? "\n" : "\n\n";
   fs.writeFileSync(absolutePath, `${existing}${separator}${section}\n`);
   actions.push({ path: relativePath, status: "updated", detail: "appended agent-memory section" });
+}
+
+function findStandaloneMarker(content: string, marker: string, fromIndex = 0): { lineStart: number; lineEnd: number } | null {
+  let searchIndex = fromIndex;
+
+  while (searchIndex < content.length) {
+    const markerIndex = content.indexOf(marker, searchIndex);
+
+    if (markerIndex < 0) {
+      return null;
+    }
+
+    const lineStart = content.lastIndexOf("\n", markerIndex - 1) + 1;
+    const lineBreak = content.indexOf("\n", markerIndex);
+    const lineEnd = lineBreak >= 0 ? lineBreak + 1 : content.length;
+    const lineContentEnd = lineBreak >= 0 ? lineBreak : content.length;
+
+    if (content.slice(lineStart, lineContentEnd).trim() === marker) {
+      return { lineStart, lineEnd };
+    }
+
+    searchIndex = markerIndex + marker.length;
+  }
+
+  return null;
 }
 
 function configTemplate(): string {

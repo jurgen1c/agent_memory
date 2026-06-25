@@ -103,6 +103,26 @@ Keep this footer too.
     expect(agents).not.toContain("## Old Agent Memory Section");
   });
 
+  test("preserves inline marker text when appending an AGENTS section", async () => {
+    const repoRoot = makeGitRepo();
+    const agentsPath = path.join(repoRoot, "AGENTS.md");
+    fs.writeFileSync(
+      agentsPath,
+      `# Agent Instructions
+
+Document a literal <!-- agent-memory:end --> marker without creating a managed section.
+`
+    );
+
+    const result = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const agents = fs.readFileSync(agentsPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("appended agent-memory section");
+    expect(agents).toContain("Document a literal <!-- agent-memory:end --> marker without creating a managed section.");
+    expect(agents).toContain("## Agent Memory Knowledge Base");
+  });
+
   test("repairs an AGENTS section with an unmatched start marker", async () => {
     const repoRoot = makeGitRepo();
     const agentsPath = path.join(repoRoot, "AGENTS.md");
