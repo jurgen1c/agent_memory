@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig } from "./config";
+import { loadConfig, renderYamlScalar } from "./config";
 import { AgentMemoryError } from "./errors";
 import { toPosix } from "./files";
 import { isPathInside, resolveRepoOutputPath } from "./repo";
@@ -599,17 +599,17 @@ function readConfidence(value: unknown): MigrationConfidence {
 function renderSystemMap(systemMap: DocsSystemMap): string {
   const lines = [
     "version: 1",
-    `source_root: ${yamlScalar(systemMap.source_root)}`,
+    `source_root: ${renderYamlScalar(systemMap.source_root)}`,
     "mappings:"
   ];
 
   for (const mapping of systemMap.mappings) {
     lines.push(
-      `  - source: ${yamlScalar(mapping.source)}`,
-      `    system: ${yamlScalar(mapping.system)}`,
-      `    title: ${yamlScalar(mapping.title)}`,
+      `  - source: ${renderYamlScalar(mapping.source)}`,
+      `    system: ${renderYamlScalar(mapping.system)}`,
+      `    title: ${renderYamlScalar(mapping.title)}`,
       `    confidence: ${mapping.confidence}`,
-      `    reason: ${yamlScalar(mapping.reason)}`
+      `    reason: ${renderYamlScalar(mapping.reason)}`
     );
   }
 
@@ -618,14 +618,6 @@ function renderSystemMap(systemMap: DocsSystemMap): string {
 
 function sourceSlugForMap(sourceRoot: string): string {
   return slugify(sourceRoot).replace(/_/g, "-") || "docs";
-}
-
-function yamlScalar(value: string): string {
-  if (/^[A-Za-z0-9_./-]+$/.test(value)) {
-    return value;
-  }
-
-  return JSON.stringify(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

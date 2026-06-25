@@ -88,10 +88,10 @@ export function renderConfigTemplate(config: AgentMemoryConfig = defaultConfig()
 version: ${config.version}
 
 # Canonical memory source directory. The file patterns below are relative to this path.
-memory_root: ${yamlScalar(config.memory_root)}
+memory_root: ${renderYamlScalar(config.memory_root)}
 
 # Generated SQLite cache. Keep this under an ignored directory and do not commit it.
-database_path: ${yamlScalar(config.database_path)}
+database_path: ${renderYamlScalar(config.database_path)}
 
 # Claim Markdown files. Use this to split or relocate atomic claim documents.
 ${renderStringArrayField("claims", config.claims)}
@@ -112,10 +112,10 @@ ${renderStringArrayField("waivers", config.waivers)}
 agent_skills:
   codex:
     enabled: ${config.agent_skills.codex.enabled}
-    path: ${yamlScalar(config.agent_skills.codex.path)}
+    path: ${renderYamlScalar(config.agent_skills.codex.path)}
   generic:
     enabled: ${config.agent_skills.generic.enabled}
-    path: ${yamlScalar(config.agent_skills.generic.path)}
+    path: ${renderYamlScalar(config.agent_skills.generic.path)}
 
 # Git hook settings. install-hooks reads this list when creating non-blocking sync hooks.
 git:
@@ -343,10 +343,10 @@ function renderStringArrayField(key: string, values: string[], indent = 0): stri
 
 function renderStringList(values: string[], indent: number): string {
   const prefix = " ".repeat(indent);
-  return values.map((value) => `${prefix}- ${yamlScalar(value)}`).join("\n");
+  return values.map((value) => `${prefix}- ${renderYamlScalar(value)}`).join("\n");
 }
 
-function yamlScalar(value: string): string {
+export function renderYamlScalar(value: string): string {
   if (/^[A-Za-z0-9_./*@{}-]+$/.test(value) && !isYamlReservedScalar(value) && !startsWithYamlIndicator(value)) {
     return value;
   }
@@ -355,7 +355,15 @@ function yamlScalar(value: string): string {
 }
 
 function isYamlReservedScalar(value: string): boolean {
-  return value === "true" || value === "false" || value === "null" || value === "~" || /^-?\d+$/.test(value);
+  const normalized = value.toLowerCase();
+  return (
+    normalized === "true" ||
+    normalized === "false" ||
+    normalized === "null" ||
+    normalized === "~" ||
+    /^[+-]?(?:\d[\d_]*|\d[\d_]*\.[\d_]*|\.[\d_]+)(?:[eE][+-]?\d[\d_]*)?$/.test(value) ||
+    /^[+-]?\d[\d_]*[eE][+-]?\d[\d_]*$/.test(value)
+  );
 }
 
 function startsWithYamlIndicator(value: string): boolean {

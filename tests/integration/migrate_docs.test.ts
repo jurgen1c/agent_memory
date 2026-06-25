@@ -79,8 +79,10 @@ describe("migrate-docs command", () => {
     fs.mkdirSync(path.join(repoRoot, "docs/agent-memory/claims/search"), { recursive: true });
     fs.writeFileSync(path.join(repoRoot, "docs/agent-memory/claims/search/.gitkeep"), "");
     fs.mkdirSync(path.join(repoRoot, "docs/canonical/auth"), { recursive: true });
+    fs.mkdirSync(path.join(repoRoot, "docs/canonical/null"), { recursive: true });
     fs.mkdirSync(path.join(repoRoot, "docs/canonical/reference"), { recursive: true });
     fs.writeFileSync(path.join(repoRoot, "docs/canonical/auth/oauth.md"), "# OAuth Behavior\n\nTenant auth notes.\n");
+    fs.writeFileSync(path.join(repoRoot, "docs/canonical/null/value.md"), "# 1.2\n\nNumeric-looking title.\n");
     fs.writeFileSync(path.join(repoRoot, "docs/canonical/reference/search.md"), "# Search Ranking\n\nSearch notes.\n");
     fs.writeFileSync(path.join(repoRoot, "docs/canonical/overview.md"), "# General Overview\n\nGeneral notes.\n");
 
@@ -95,6 +97,9 @@ describe("migrate-docs command", () => {
     expect(systemMap).toContain("source_root: docs/canonical");
     expect(systemMap).toContain("source: docs/canonical/auth/oauth.md");
     expect(systemMap).toContain("system: auth");
+    expect(systemMap).toContain("source: docs/canonical/null/value.md");
+    expect(systemMap).toContain('system: "null"');
+    expect(systemMap).toContain('title: "1.2"');
     expect(systemMap).toContain("source: docs/canonical/reference/search.md");
     expect(systemMap).toContain("system: search");
     expect(systemMap).toContain("source: docs/canonical/overview.md");
