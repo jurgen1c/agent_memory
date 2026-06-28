@@ -578,6 +578,7 @@ function parseClaimStatus(value: string): ClaimStatus {
   }
 
   throw new AgentMemoryError(`Invalid claim status: ${value}`, {
+    code: "BAD_REQUEST",
     details: [`Expected one of: ${CLAIM_STATUSES.join(", ")}`]
   });
 }
@@ -588,6 +589,7 @@ function parseClaimConfidence(value: string): ClaimConfidence {
   }
 
   throw new AgentMemoryError(`Invalid claim confidence: ${value}`, {
+    code: "BAD_REQUEST",
     details: [`Expected one of: ${CLAIM_CONFIDENCE_VALUES.join(", ")}`]
   });
 }

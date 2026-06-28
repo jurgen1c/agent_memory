@@ -336,9 +336,10 @@ function planOneDoc(
 ): MigratedDocPlan {
   const sourcePath = displayPath(repoRoot, docPath);
   const content = fs.readFileSync(docPath, "utf8");
-  const title = mappedTitle?.trim() || extractTitle(content, docPath);
-  const slug = slugify(title || path.basename(docPath, path.extname(docPath)));
+  const baseTitle = mappedTitle?.trim() || extractTitle(content, docPath);
+  const slug = slugify(baseTitle || path.basename(docPath, path.extname(docPath)));
   const migrationSlug = uniqueMigrationSlug(system, slug, allocatedIds, allocatedPaths);
+  const title = uniqueMigrationTitle(baseTitle, slug, migrationSlug);
   const suggestedId = `${system}.${migrationSlug}`;
   const targetPath = targetPathForDraft(repoRoot, memoryRoot, system, migrationSlug);
 
@@ -383,6 +384,17 @@ function uniqueMigrationSlug(system: string, sourceSlug: string, allocatedIds: S
 
     counter += 1;
   }
+}
+
+function uniqueMigrationTitle(baseTitle: string, sourceSlug: string, migrationSlug: string): string {
+  const baseMigrationSlug = `migrated_${sourceSlug}`;
+
+  if (migrationSlug === baseMigrationSlug) {
+    return baseTitle;
+  }
+
+  const suffix = migrationSlug.slice(baseMigrationSlug.length + 1);
+  return suffix.length > 0 ? `${baseTitle} ${suffix}` : baseTitle;
 }
 
 function targetPathForDraft(repoRoot: string, memoryRoot: string, system: string, migrationSlug: string): string {

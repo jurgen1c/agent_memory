@@ -54,41 +54,52 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
   const configuredDbPath = options.dbPath ?? memory.loadedConfig.config.database_path;
   const databasePath = path.isAbsolute(configuredDbPath) ? configuredDbPath : path.join(repoRoot, configuredDbPath);
   const memoryRoot = path.join(repoRoot, memory.loadedConfig.config.memory_root);
+  const tempDatabasePath = temporaryDatabasePath(databasePath);
 
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
 
-  if (fs.existsSync(databasePath)) {
-    fs.unlinkSync(databasePath);
-  }
-
-  const database = await openSqliteDatabase(databasePath);
+  let replaced = false;
 
   try {
-    createSchema(database);
-    insertMemory(database, memory);
-    insertMetadata(database, memory, databasePath);
+    const database = await openSqliteDatabase(tempDatabasePath);
 
-    const explicitRelations = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claim_relations WHERE origin = 'explicit'")?.count ?? 0;
-    const inferredRelations = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claim_relations WHERE origin = 'inferred'")?.count ?? 0;
-    const recipeClaims = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM recipe_claims")?.count ?? 0;
-    const ftsRows = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claims_fts")?.count ?? 0;
+    let result: CompileResult;
 
-    return {
-      databasePath,
-      repoRoot,
-      memoryRoot,
-      counts: {
-        claims: memory.claims.length,
-        explicitRelations,
-        inferredRelations,
-        indexes: memory.indexes.length,
-        recipes: memory.recipes.length,
-        recipeClaims,
-        ftsRows
-      }
-    };
+    try {
+      createSchema(database);
+      insertMemory(database, memory);
+      insertMetadata(database, memory, databasePath);
+
+      const explicitRelations = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claim_relations WHERE origin = 'explicit'")?.count ?? 0;
+      const inferredRelations = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claim_relations WHERE origin = 'inferred'")?.count ?? 0;
+      const recipeClaims = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM recipe_claims")?.count ?? 0;
+      const ftsRows = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claims_fts")?.count ?? 0;
+
+      result = {
+        databasePath,
+        repoRoot,
+        memoryRoot,
+        counts: {
+          claims: memory.claims.length,
+          explicitRelations,
+          inferredRelations,
+          indexes: memory.indexes.length,
+          recipes: memory.recipes.length,
+          recipeClaims,
+          ftsRows
+        }
+      };
+    } finally {
+      database.close();
+    }
+
+    fs.renameSync(tempDatabasePath, databasePath);
+    replaced = true;
+    return result;
   } finally {
-    database.close();
+    if (!replaced) {
+      cleanupDatabaseArtifacts(tempDatabasePath);
+    }
   }
 }
 
@@ -489,4 +500,19 @@ function currentGitCommit(repoRoot: string): string {
 
 function sha256(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function temporaryDatabasePath(databasePath: string): string {
+  const random = crypto.randomBytes(8).toString("hex");
+  return path.join(path.dirname(databasePath), `.${path.basename(databasePath)}.${process.pid}.${Date.now()}.${random}.tmp`);
+}
+
+function cleanupDatabaseArtifacts(databasePath: string): void {
+  for (const artifactPath of [databasePath, `${databasePath}-journal`, `${databasePath}-wal`, `${databasePath}-shm`]) {
+    try {
+      fs.rmSync(artifactPath, { force: true });
+    } catch {
+      // Cleanup is best effort; the original database path has not been replaced.
+    }
+  }
 }

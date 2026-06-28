@@ -44,9 +44,19 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   const bun = bunRuntime();
 
   if (bun) {
-    return startBunUiServer(bun, options);
+    try {
+      return await startBunUiServer(bun, options);
+    } catch (error) {
+      if (!isAddressInUse(error)) {
+        throw error;
+      }
+    }
   }
 
+  return startNodeUiServer(options);
+}
+
+async function startNodeUiServer(options: UiServerOptions = {}): Promise<UiServerHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const requestedPort = options.port ?? DEFAULT_PORT;
   const token = options.token ?? crypto.randomBytes(18).toString("base64url");
@@ -80,10 +90,11 @@ async function startBunUiServer(bun: BunRuntime, options: UiServerOptions): Prom
   const requestedPort = options.port ?? DEFAULT_PORT;
   const token = options.token ?? crypto.randomBytes(18).toString("base64url");
   const staticRoot = options.staticRoot ?? defaultStaticRoot();
-  const startPort = requestedPort === 0 ? randomEphemeralPort() : requestedPort;
+  const startPort = requestedPort;
+  const scanLimit = requestedPort === 0 ? 1 : PORT_SCAN_LIMIT;
   let lastError: unknown;
 
-  for (let offset = 0; offset < PORT_SCAN_LIMIT; offset += 1) {
+  for (let offset = 0; offset < scanLimit; offset += 1) {
     const port = startPort + offset;
 
     try {
@@ -229,6 +240,10 @@ function requireTokenValue(value: string | string[] | null | undefined, token: s
 }
 
 function statusForError(error: AgentMemoryError): number {
+  if (error.code === "BAD_REQUEST") {
+    return 400;
+  }
+
   if (error.code === "FORBIDDEN") {
     return 403;
   }
@@ -276,12 +291,27 @@ async function readJson<T>(request: http.IncomingMessage): Promise<T> {
   }
 
   const raw = Buffer.concat(chunks).toString("utf8");
-  return (raw.length > 0 ? JSON.parse(raw) : {}) as T;
+  return parseJsonBody(raw) as T;
 }
 
 async function readRequestJson<T>(request: Request): Promise<T> {
   const raw = await request.text();
-  return (raw.length > 0 ? JSON.parse(raw) : {}) as T;
+  return parseJsonBody(raw) as T;
+}
+
+function parseJsonBody(raw: string): unknown {
+  if (raw.length === 0) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    throw new AgentMemoryError("Invalid JSON request body.", {
+      code: "BAD_REQUEST",
+      cause: error
+    });
+  }
 }
 
 function serveStatic(response: http.ServerResponse, staticRoot: string, requestPath: string): void {
@@ -368,12 +398,13 @@ function contentType(filePath: string): string {
 
 function listen(server: http.Server, host: string, requestedPort: number): Promise<number> {
   return new Promise((resolve, reject) => {
-    const startPort = requestedPort === 0 ? randomEphemeralPort() : requestedPort;
+    const startPort = requestedPort;
+    const scanLimit = requestedPort === 0 ? 1 : PORT_SCAN_LIMIT;
 
-    const tryPort = (port: number): void => {
+    const tryPort = (port: number, attempt: number): void => {
       const onError = (error: NodeJS.ErrnoException): void => {
-        if (error.code === "EADDRINUSE") {
-          tryPort(port + 1);
+        if (error.code === "EADDRINUSE" && attempt + 1 < scanLimit) {
+          tryPort(port + 1, attempt + 1);
           return;
         }
 
@@ -389,20 +420,13 @@ function listen(server: http.Server, host: string, requestedPort: number): Promi
       });
     };
 
-    tryPort(startPort);
+    tryPort(startPort, 0);
   });
 }
 
-function randomEphemeralPort(): number {
-  return 45000 + Math.floor(Math.random() * 1000);
-}
-
 function isAddressInUse(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    ("code" in error ? (error as { code?: string }).code === "EADDRINUSE" : String(error).includes("EADDRINUSE"))
-  );
+  const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: string }).code : undefined;
+  return code === "EADDRINUSE" || String(error).includes("EADDRINUSE") || String(error).includes("port") && String(error).includes("in use");
 }
 
 function bunRuntime(): BunRuntime | undefined {

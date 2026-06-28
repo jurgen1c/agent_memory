@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import { normalizeChangedFiles } from "./changes";
 import { ConfigError } from "./errors";
 import { loadConfig } from "./config";
-import { discoverFiles } from "./files";
+import { discoverFiles, toPosix } from "./files";
 import { parseMarkdownFile, extractMarkdownSection } from "./markdown";
+import { isPathInside } from "./repo";
+import type { AgentMemoryConfig } from "./types";
 import { parseYaml } from "./yaml";
 import { CLAIM_TYPES } from "./templates";
 
@@ -45,6 +48,7 @@ interface LoadedClaim {
   title: string;
   claim: string;
   sourceFiles: string[];
+  relatedFiles: string[];
   tags: string[];
   path: string;
   relativePath: string;
@@ -58,6 +62,8 @@ interface LoadedRecipe {
   path: string;
   relativePath: string;
 }
+
+type ValidationConfig = AgentMemoryConfig["validation"];
 
 const CLAIM_STATUSES = [
   "current",
@@ -92,22 +98,35 @@ export function validateRepository(options: ValidateRepositoryOptions = {}): Val
   const repoRoot = loaded.repo.root;
   const memoryRoot = path.join(repoRoot, loaded.config.memory_root);
   const issues: ValidationIssue[] = [];
+  const changedFiles = new Set(normalizeChangedFiles(options.changedFiles ?? [], repoRoot));
+  const scoped = changedFiles.size > 0;
 
-  const claimFiles = discoverFiles(memoryRoot, loaded.config.claims);
-  const graphFiles = discoverFiles(memoryRoot, loaded.config.graphs);
-  const indexFiles = discoverFiles(memoryRoot, loaded.config.indexes);
-  const recipeFiles = discoverFiles(memoryRoot, loaded.config.recipes);
+  const allClaimFiles = discoverFiles(memoryRoot, loaded.config.claims);
+  const allGraphFiles = discoverFiles(memoryRoot, loaded.config.graphs);
+  const allIndexFiles = discoverFiles(memoryRoot, loaded.config.indexes);
+  const allRecipeFiles = discoverFiles(memoryRoot, loaded.config.recipes);
+
+  const claimFiles = scoped ? selectChangedFiles(allClaimFiles, changedFiles, repoRoot) : allClaimFiles;
+  const graphFiles = scoped ? selectChangedFiles(allGraphFiles, changedFiles, repoRoot) : allGraphFiles;
+  const indexFiles = scoped ? selectChangedFiles(allIndexFiles, changedFiles, repoRoot) : allIndexFiles;
+  const recipeFiles = scoped ? selectChangedFiles(allRecipeFiles, changedFiles, repoRoot) : allRecipeFiles;
 
   const claims = loadClaims(repoRoot, memoryRoot, claimFiles, loaded.config.validation, issues);
   const recipes = loadRecipes(memoryRoot, recipeFiles, issues);
   const graphs = loadYamlArtifacts(memoryRoot, graphFiles, "graph", issues);
   const indexes = loadYamlArtifacts(memoryRoot, indexFiles, "index", issues);
 
-  validateUniqueClaims(claims, issues);
-  validateUniqueRecipes(recipes, issues);
-  validateGraphs(graphs, new Set(claims.map((claim) => claim.id)), issues);
-  validateIndexes(indexes, issues);
-  validateRecipeReferences(recipes, new Map(claims.map((claim) => [claim.id, claim])), issues);
+  const allClaims = scoped ? loadClaims(repoRoot, memoryRoot, allClaimFiles, loaded.config.validation, []) : claims;
+  const allRecipes = scoped ? loadRecipes(memoryRoot, allRecipeFiles, []) : recipes;
+  const claimsById = new Map(allClaims.map((claim) => [claim.id, claim]));
+
+  validateUniqueClaims(claims, issues, allClaims);
+  validateUniqueClaimTitles(claims, allClaims, loaded.config.validation, Boolean(options.strict), issues);
+  validateClaimFilePaths(claims, loaded.config.validation, Boolean(options.strict), issues);
+  validateUniqueRecipes(recipes, issues, allRecipes);
+  validateGraphs(graphs, new Set(allClaims.map((claim) => claim.id)), issues);
+  validateIndexes(indexes, repoRoot, issues);
+  validateRecipeReferences(recipes, claimsById, issues);
 
   const errors = issues.filter((issue) => issue.severity === "error");
   const warnings = issues.filter((issue) => issue.severity === "warning");
@@ -129,19 +148,13 @@ function loadClaims(
   repoRoot: string,
   memoryRoot: string,
   files: string[],
-  validationConfig: {
-    require_source_files: boolean;
-    require_verification: boolean;
-    reject_multi_claim_documents: boolean;
-    max_claim_frontmatter_length: number;
-    max_claim_section_length: number;
-  },
+  validationConfig: ValidationConfig,
   issues: ValidationIssue[]
 ): LoadedClaim[] {
   const claims: LoadedClaim[] = [];
 
   for (const filePath of files) {
-    const relativePath = path.relative(memoryRoot, filePath);
+    const relativePath = toPosix(path.relative(memoryRoot, filePath));
 
     try {
       const markdown = parseMarkdownFile(filePath);
@@ -178,6 +191,7 @@ function normalizeClaim(raw: Record<string, unknown>, relativePath: string, issu
   }
 
   const sourceFiles = readStringArray(raw, "source_files", relativePath, issues);
+  const relatedFiles = readOptionalStringArray(raw, "related_files", relativePath, issues);
   const tags = readStringArray(raw, "tags", relativePath, issues);
 
   return {
@@ -190,6 +204,7 @@ function normalizeClaim(raw: Record<string, unknown>, relativePath: string, issu
     title: raw.title as string,
     claim: raw.claim as string,
     sourceFiles,
+    relatedFiles,
     tags,
     path: "",
     relativePath,
@@ -200,10 +215,7 @@ function normalizeClaim(raw: Record<string, unknown>, relativePath: string, issu
 function validateClaimFields(
   claim: LoadedClaim,
   repoRoot: string,
-  validationConfig: {
-    require_source_files: boolean;
-    require_verification: boolean;
-  },
+  validationConfig: Pick<ValidationConfig, "require_source_files" | "require_verification">,
   issues: ValidationIssue[]
 ): void {
   if (!CLAIM_TYPES.includes(claim.type as never)) {
@@ -238,22 +250,15 @@ function validateClaimFields(
     }
   }
 
-  for (const sourceFile of claim.sourceFiles) {
-    if (!fs.existsSync(path.join(repoRoot, sourceFile))) {
-      addError(issues, "claim.source_files.missing", `Referenced source file does not exist: ${sourceFile}`, claim.relativePath, claim.id);
-    }
-  }
+  validateRepoPathReferences(claim.sourceFiles, "claim.source_files", repoRoot, claim.relativePath, claim.id, true, issues);
+  validateRepoPathReferences(claim.relatedFiles, "claim.related_files", repoRoot, claim.relativePath, claim.id, true, issues);
 }
 
 function validateOneClaimPerFile(
   frontmatterRaw: string,
   body: string,
   relativePath: string,
-  validationConfig: {
-    reject_multi_claim_documents: boolean;
-    max_claim_frontmatter_length: number;
-    max_claim_section_length: number;
-  },
+  validationConfig: Pick<ValidationConfig, "reject_multi_claim_documents" | "max_claim_frontmatter_length" | "max_claim_section_length">,
   issues: ValidationIssue[]
 ): void {
   if (!validationConfig.reject_multi_claim_documents) {
@@ -287,31 +292,114 @@ function validateOneClaimPerFile(
   }
 }
 
-function validateUniqueClaims(claims: LoadedClaim[], issues: ValidationIssue[]): void {
+function validateUniqueClaims(claims: LoadedClaim[], issues: ValidationIssue[], referenceClaims: LoadedClaim[] = claims): void {
   const byId = new Map<string, LoadedClaim[]>();
 
-  for (const claim of claims) {
+  for (const claim of referenceClaims) {
     byId.set(claim.id, [...(byId.get(claim.id) ?? []), claim]);
   }
 
+  const selectedPaths = new Set(claims.map((claim) => claim.relativePath));
+
   for (const [id, matchingClaims] of byId.entries()) {
     if (matchingClaims.length > 1) {
+      const selectedClaim = matchingClaims.find((claim) => selectedPaths.has(claim.relativePath));
+
+      if (!selectedClaim && referenceClaims !== claims) {
+        continue;
+      }
+
       addError(
         issues,
         "claim.id.duplicate",
         `Duplicate claim ID ${id} appears in ${matchingClaims.map((claim) => claim.relativePath).join(", ")}.`,
-        matchingClaims[0].relativePath,
+        selectedClaim?.relativePath ?? matchingClaims[0].relativePath,
         id
       );
     }
   }
 }
 
+function validateUniqueClaimTitles(
+  claims: LoadedClaim[],
+  referenceClaims: LoadedClaim[],
+  validationConfig: ValidationConfig,
+  strict: boolean,
+  issues: ValidationIssue[]
+): void {
+  if (!validationConfig.require_unique_titles_within_system && !strict) {
+    return;
+  }
+
+  const selectedPaths = new Set(claims.map((claim) => claim.relativePath));
+  const bySystemAndTitle = new Map<string, LoadedClaim[]>();
+
+  for (const claim of referenceClaims) {
+    const key = `${normalizeIdentifierPart(claim.system)}\u0000${normalizeIdentifierPart(claim.title)}`;
+    bySystemAndTitle.set(key, [...(bySystemAndTitle.get(key) ?? []), claim]);
+  }
+
+  for (const matchingClaims of bySystemAndTitle.values()) {
+    if (matchingClaims.length <= 1) {
+      continue;
+    }
+
+    const selectedClaim = matchingClaims.find((claim) => selectedPaths.has(claim.relativePath));
+
+    if (!selectedClaim) {
+      continue;
+    }
+
+    addError(
+      issues,
+      "claim.title.duplicate",
+      `Duplicate claim title "${selectedClaim.title}" appears in ${matchingClaims.map((claim) => claim.relativePath).join(", ")}.`,
+      selectedClaim.relativePath,
+      selectedClaim.id
+    );
+  }
+}
+
+function validateClaimFilePaths(
+  claims: LoadedClaim[],
+  validationConfig: ValidationConfig,
+  strict: boolean,
+  issues: ValidationIssue[]
+): void {
+  if (!validationConfig.require_claim_file_matches_id && !strict) {
+    return;
+  }
+
+  for (const claim of claims) {
+    const expectedPath = expectedClaimRelativePath(claim);
+
+    if (claim.relativePath !== expectedPath) {
+      addError(
+        issues,
+        "claim.file_path",
+        `Claim file path should be ${expectedPath} for claim ID ${claim.id}.`,
+        claim.relativePath,
+        claim.id
+      );
+    }
+  }
+}
+
+function expectedClaimRelativePath(claim: LoadedClaim): string {
+  const idPrefix = `${claim.system}.`;
+  const idRemainder = claim.id.startsWith(idPrefix) ? claim.id.slice(idPrefix.length) : claim.id;
+  return toPosix(path.join("claims", claim.system, `${idRemainder.replace(/\./g, "_")}.md`));
+}
+
+function normalizeIdentifierPart(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 function loadYamlArtifacts(memoryRoot: string, files: string[], kind: string, issues: ValidationIssue[]): Array<{ path: string; relativePath: string; data: unknown }> {
   const artifacts: Array<{ path: string; relativePath: string; data: unknown }> = [];
 
   for (const filePath of files) {
-    const relativePath = path.relative(memoryRoot, filePath);
+    const relativePath = toPosix(path.relative(memoryRoot, filePath));
 
     try {
       artifacts.push({
@@ -404,7 +492,7 @@ function readSourceTargetClaims(edge: Record<string, unknown>, relativePath: str
   return refs;
 }
 
-function validateIndexes(indexes: Array<{ relativePath: string; data: unknown }>, issues: ValidationIssue[]): void {
+function validateIndexes(indexes: Array<{ relativePath: string; data: unknown }>, repoRoot: string, issues: ValidationIssue[]): void {
   for (const index of indexes) {
     if (!isRecord(index.data)) {
       addError(issues, "index.schema", "Index file must be a mapping.", index.relativePath);
@@ -416,7 +504,11 @@ function validateIndexes(indexes: Array<{ relativePath: string; data: unknown }>
 
     for (const field of ["claim_globs", "recipe_globs", "default_queries", "watched_files", "tags"]) {
       if (index.data[field] !== undefined) {
-        readStringArray(index.data, field, index.relativePath, issues);
+        const values = readStringArray(index.data, field, index.relativePath, issues);
+
+        if (field === "watched_files") {
+          validateRepoPathReferences(values, "index.watched_files", repoRoot, index.relativePath, undefined, false, issues);
+        }
       }
     }
   }
@@ -457,20 +549,28 @@ function loadRecipes(memoryRoot: string, files: string[], issues: ValidationIssu
   return recipes;
 }
 
-function validateUniqueRecipes(recipes: LoadedRecipe[], issues: ValidationIssue[]): void {
+function validateUniqueRecipes(recipes: LoadedRecipe[], issues: ValidationIssue[], referenceRecipes: LoadedRecipe[] = recipes): void {
   const byId = new Map<string, LoadedRecipe[]>();
 
-  for (const recipe of recipes) {
+  for (const recipe of referenceRecipes) {
     byId.set(recipe.id, [...(byId.get(recipe.id) ?? []), recipe]);
   }
 
+  const selectedPaths = new Set(recipes.map((recipe) => recipe.relativePath));
+
   for (const [id, matchingRecipes] of byId.entries()) {
     if (matchingRecipes.length > 1) {
+      const selectedRecipe = matchingRecipes.find((recipe) => selectedPaths.has(recipe.relativePath));
+
+      if (!selectedRecipe && referenceRecipes !== recipes) {
+        continue;
+      }
+
       addError(
         issues,
         "recipe.id.duplicate",
         `Duplicate recipe ID ${id} appears in ${matchingRecipes.map((recipe) => recipe.relativePath).join(", ")}.`,
-        matchingRecipes[0].relativePath,
+        selectedRecipe?.relativePath ?? matchingRecipes[0].relativePath,
         id
       );
     }
@@ -522,6 +622,14 @@ function readStringArray(data: Record<string, unknown>, field: string, relativeP
   return value;
 }
 
+function readOptionalStringArray(data: Record<string, unknown>, field: string, relativePath: string, issues: ValidationIssue[]): string[] {
+  if (data[field] === undefined) {
+    return [];
+  }
+
+  return readStringArray(data, field, relativePath, issues);
+}
+
 function addError(issues: ValidationIssue[], code: string, message: string, filePath?: string, id?: string): void {
   issues.push({
     severity: "error",
@@ -546,4 +654,61 @@ function formatCaughtError(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function selectChangedFiles(files: string[], changedFiles: Set<string>, repoRoot: string): string[] {
+  return files.filter((filePath) => changedFiles.has(toPosix(path.relative(repoRoot, filePath))));
+}
+
+function validateRepoPathReferences(
+  references: string[],
+  fieldCode: string,
+  repoRoot: string,
+  relativePath: string,
+  id: string | undefined,
+  requireExists: boolean,
+  issues: ValidationIssue[]
+): void {
+  for (const reference of references) {
+    const resolved = resolveRepoReference(repoRoot, reference);
+
+    if (!isPathInside(repoRoot, resolved) || existingParentEscapesRepo(repoRoot, resolved)) {
+      addError(issues, `${fieldCode}.outside_repo`, `Referenced path escapes repository root: ${reference}`, relativePath, id);
+      continue;
+    }
+
+    if (requireExists && !fs.existsSync(resolved)) {
+      addError(issues, `${fieldCode}.missing`, `Referenced source file does not exist: ${reference}`, relativePath, id);
+    }
+  }
+}
+
+function resolveRepoReference(repoRoot: string, reference: string): string {
+  return path.isAbsolute(reference) ? path.normalize(reference) : path.resolve(repoRoot, reference);
+}
+
+function existingParentEscapesRepo(repoRoot: string, resolvedPath: string): boolean {
+  const existingParent = nearestExistingParent(resolvedPath);
+
+  try {
+    return !isPathInside(fs.realpathSync(repoRoot), fs.realpathSync(existingParent));
+  } catch {
+    return false;
+  }
+}
+
+function nearestExistingParent(targetPath: string): string {
+  let candidate = fs.existsSync(targetPath) ? targetPath : path.dirname(targetPath);
+
+  while (!fs.existsSync(candidate)) {
+    const parent = path.dirname(candidate);
+
+    if (parent === candidate) {
+      return candidate;
+    }
+
+    candidate = parent;
+  }
+
+  return candidate;
 }

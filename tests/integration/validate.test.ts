@@ -47,10 +47,164 @@ describe("validate command", () => {
     expect(parsed.valid).toBe(false);
     expect(parsed.errors.some((issue: { code: string }) => issue.code === "graph.edge.missing_claim")).toBe(true);
   });
+
+  test("scopes changed-file validation to changed canonical memory files", async () => {
+    const cwd = copyFixture(mockApp);
+    writeClaim(cwd, "docs/agent-memory/claims/auth/broken_unrelated.md", {
+      id: "auth.broken_unrelated",
+      title: "Broken unrelated claim",
+      sourceFiles: ["src/missing.js"]
+    });
+
+    const unrelated = await dispatch(["validate", "--changed-files", "README.md", "--json"], { cwd });
+    expect(unrelated.exitCode).toBe(0);
+
+    const unrelatedParsed = JSON.parse(unrelated.stdout);
+    expect(unrelatedParsed.valid).toBe(true);
+    expect(unrelatedParsed.counts.claims).toBe(0);
+
+    const changed = await dispatch(["validate", "--changed-files", "docs/agent-memory/claims/auth/broken_unrelated.md"], { cwd });
+    expect(changed.exitCode).toBe(2);
+    expect(changed.stdout).toContain("claim.source_files.missing");
+  });
+
+  test("checks changed graphs against unchanged claim references", async () => {
+    const cwd = copyFixture(mockApp);
+    const graphPath = path.join(cwd, "docs/agent-memory/graph/auth-tenancy.yaml");
+    fs.appendFileSync(
+      graphPath,
+      [
+        "",
+        "  - source: auth.student_oauth.uid_is_tenant_scoped",
+        "    target: auth.missing_claim",
+        "    relation: requires",
+        "    reason: Missing target proves scoped graph validation.",
+        "    strength: 95",
+        "    bidirectional: false",
+        ""
+      ].join("\n")
+    );
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/graph/auth-tenancy.yaml"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("graph.edge.missing_claim");
+    expect(result.stdout).toContain("auth.missing_claim");
+  });
+
+  test("detects duplicate titles for changed claims against unchanged claims", async () => {
+    const cwd = copyFixture(mockApp);
+    writeClaim(cwd, "docs/agent-memory/claims/auth/student_oauth_title_duplicate.md", {
+      id: "auth.student_oauth.title_duplicate",
+      title: "Student OAuth UID is tenant scoped"
+    });
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/claims/auth/student_oauth_title_duplicate.md"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("claim.title.duplicate");
+  });
+
+  test("strict mode enforces claim file paths", async () => {
+    const cwd = copyFixture(mockApp);
+    writeClaim(cwd, "docs/agent-memory/claims/auth/wrong_path.md", {
+      id: "auth.strict_path.required",
+      title: "Strict path claim"
+    });
+
+    const defaultResult = await dispatch(["validate", "--changed-files", "docs/agent-memory/claims/auth/wrong_path.md"], { cwd });
+    expect(defaultResult.exitCode).toBe(0);
+
+    const strictResult = await dispatch(["validate", "--strict", "--changed-files", "docs/agent-memory/claims/auth/wrong_path.md"], { cwd });
+    expect(strictResult.exitCode).toBe(2);
+    expect(strictResult.stdout).toContain("claim.file_path");
+  });
+
+  test("rejects claim file references that escape the repository", async () => {
+    const cwd = copyFixture(mockApp);
+    writeClaim(cwd, "docs/agent-memory/claims/auth/outside_reference.md", {
+      id: "auth.outside_reference",
+      title: "Outside reference claim",
+      sourceFiles: ["../outside.js"],
+      relatedFiles: ["../../outside-related.js"]
+    });
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/claims/auth/outside_reference.md"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("claim.source_files.outside_repo");
+    expect(result.stdout).toContain("claim.related_files.outside_repo");
+  });
+
+  test("rejects index watched files that escape the repository", async () => {
+    const cwd = copyFixture(mockApp);
+    const indexPath = path.join(cwd, "docs/agent-memory/indexes/auth.yaml");
+    fs.writeFileSync(indexPath, fs.readFileSync(indexPath, "utf8").replace("  - src/tenant.js\n", "  - src/tenant.js\n  - ../outside/**/*.js\n"));
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/indexes/auth.yaml"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("index.watched_files.outside_repo");
+  });
 });
 
 function copyFixture(source: string): string {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-validate-"));
   fs.cpSync(source, target, { recursive: true });
   return target;
+}
+
+function writeClaim(
+  cwd: string,
+  relativePath: string,
+  overrides: {
+    id: string;
+    title: string;
+    sourceFiles?: string[];
+    relatedFiles?: string[];
+  }
+): void {
+  const claimPath = path.join(cwd, relativePath);
+  fs.mkdirSync(path.dirname(claimPath), { recursive: true });
+  fs.writeFileSync(
+    claimPath,
+    `---
+id: ${overrides.id}
+type: fact
+system: auth
+status: current
+confidence: high
+severity: important
+
+title: ${overrides.title}
+
+claim: Test claim for validation behavior.
+
+source_files:
+${(overrides.sourceFiles ?? ["src/auth.js"]).map((sourceFile) => `  - ${sourceFile}`).join("\n")}
+
+related_files:
+${(overrides.relatedFiles ?? ["src/tenant.js"]).map((relatedFile) => `  - ${relatedFile}`).join("\n")}
+
+symbols:
+  - resolveStudentOAuthIdentity
+
+routes: []
+
+tags:
+  - auth
+
+verification:
+  - bun test
+
+last_verified_commit: null
+---
+
+# ${overrides.title}
+
+## Claim
+
+Test claim for validation behavior.
+`
+  );
 }

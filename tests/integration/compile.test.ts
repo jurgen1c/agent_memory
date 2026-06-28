@@ -76,6 +76,45 @@ describe("compile command", () => {
     expect(secondCounts).toEqual(firstCounts);
   });
 
+  test("keeps the previous database when a rebuild is rejected", async () => {
+    const cwd = copyFixture(mockApp);
+    const databasePath = path.join(cwd, ".agent-memory/memory.sqlite");
+    await dispatch(["compile"], { cwd });
+    const firstCounts = readCounts(databasePath);
+    fs.unlinkSync(path.join(cwd, "src/auth.js"));
+
+    const exitCode = await runCli(
+      ["compile"],
+      {
+        stdout: { write: () => true },
+        stderr: { write: () => true }
+      },
+      { cwd }
+    );
+
+    expect(exitCode).toBe(4);
+    expect(fs.existsSync(databasePath)).toBe(true);
+    expect(readCounts(databasePath)).toEqual(firstCounts);
+  });
+
+  test("cleans temporary databases when replacement fails", async () => {
+    const cwd = copyFixture(mockApp);
+    const blockedPath = path.join(cwd, "tmp/blocked.sqlite");
+    fs.mkdirSync(blockedPath, { recursive: true });
+
+    const exitCode = await runCli(
+      ["compile", "--db", "tmp/blocked.sqlite"],
+      {
+        stdout: { write: () => true },
+        stderr: { write: () => true }
+      },
+      { cwd }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(fs.readdirSync(path.join(cwd, "tmp")).filter((entry) => entry.includes(".blocked.sqlite.") && entry.endsWith(".tmp"))).toEqual([]);
+  });
+
   test("refuses to compile invalid memory", async () => {
     const cwd = copyFixture(invalidFixture);
     let stderr = "";

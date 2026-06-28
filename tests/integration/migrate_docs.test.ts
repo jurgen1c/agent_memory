@@ -55,6 +55,7 @@ describe("migrate-docs command", () => {
     expect(fs.readFileSync(firstPath, "utf8")).toContain("id: auth.migrated_same");
     expect(fs.readFileSync(firstPath, "utf8")).toContain("docs/legacy/a.md");
     expect(fs.readFileSync(secondPath, "utf8")).toContain("id: auth.migrated_same_2");
+    expect(fs.readFileSync(secondPath, "utf8")).toContain("title: Same 2");
     expect(fs.readFileSync(secondPath, "utf8")).toContain("docs/legacy/b.md");
 
     const validate = await dispatch(["validate"], { cwd: repoRoot });

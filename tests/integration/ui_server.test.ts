@@ -43,6 +43,115 @@ describe("UI server", () => {
     }
   });
 
+  test("serves claim details with relations and related claims", async () => {
+    const cwd = copyFixture(mockApp);
+    const staticRoot = makeStaticRoot();
+    const server = await startUiServer({ cwd, port: 0, staticRoot, token: "test-token" });
+
+    try {
+      const detail = await getJson<{
+        claim: { id: string };
+        relations: Array<{ relation: string; target: string }>;
+        relatedClaims: Array<{ id: string }>;
+      }>(`${baseUrl(server.port)}/api/claims/auth.student_oauth.uid_is_tenant_scoped`);
+
+      expect(detail.claim.id).toBe("auth.student_oauth.uid_is_tenant_scoped");
+      expect(detail.relations.some((relation) => relation.relation === "requires")).toBe(true);
+      expect(detail.relatedClaims.some((claim) => claim.id === "tenancy.current_tenant.required_for_student_auth")).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("returns 404 for unknown claim details", async () => {
+    const cwd = copyFixture(mockApp);
+    const staticRoot = makeStaticRoot();
+    const server = await startUiServer({ cwd, port: 0, staticRoot, token: "test-token" });
+
+    try {
+      const response = await fetch(`${baseUrl(server.port)}/api/claims/auth.missing`);
+      const body = (await response.json()) as { code: string };
+
+      expect(response.status).toBe(404);
+      expect(body.code).toBe("NOT_FOUND");
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("requires token for sync and compiles when authorized", async () => {
+    const cwd = copyFixture(mockApp);
+    const staticRoot = makeStaticRoot();
+    const server = await startUiServer({ cwd, port: 0, staticRoot, token: "test-token" });
+
+    try {
+      const denied = await fetch(`${baseUrl(server.port)}/api/sync`, { method: "POST" });
+      expect(denied.status).toBe(403);
+
+      const response = await fetch(`${baseUrl(server.port)}/api/sync`, {
+        method: "POST",
+        headers: { "x-agent-memory-token": "test-token" }
+      });
+      const result = (await response.json()) as { validation: { valid: boolean }; compile: { counts: { claims: number } } };
+
+      expect(response.status).toBe(200);
+      expect(result.validation.valid).toBe(true);
+      expect(result.compile.counts.claims).toBe(2);
+      expect(fs.existsSync(path.join(cwd, ".agent-memory/memory.sqlite"))).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("rejects invalid review payloads without writing claims", async () => {
+    const cwd = copyFixture(mockApp);
+    const staticRoot = makeStaticRoot();
+    const server = await startUiServer({ cwd, port: 0, staticRoot, token: "test-token" });
+    const claimPath = path.join(cwd, "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md");
+    const before = fs.readFileSync(claimPath, "utf8");
+
+    try {
+      const response = await fetch(`${baseUrl(server.port)}/api/claims/auth.student_oauth.uid_is_tenant_scoped/review`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-agent-memory-token": "test-token"
+        },
+        body: JSON.stringify({ status: "approved", confidence: "high" })
+      });
+      const body = (await response.json()) as { code: string };
+
+      expect(response.status).toBe(400);
+      expect(body.code).toBe("BAD_REQUEST");
+      expect(fs.readFileSync(claimPath, "utf8")).toBe(before);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("rejects malformed JSON review payloads", async () => {
+    const cwd = copyFixture(mockApp);
+    const staticRoot = makeStaticRoot();
+    const server = await startUiServer({ cwd, port: 0, staticRoot, token: "test-token" });
+
+    try {
+      const response = await fetch(`${baseUrl(server.port)}/api/claims/auth.student_oauth.uid_is_tenant_scoped/review`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-agent-memory-token": "test-token"
+        },
+        body: "{"
+      });
+      const body = (await response.json()) as { code: string };
+
+      expect(response.status).toBe(400);
+      expect(body.code).toBe("BAD_REQUEST");
+    } finally {
+      await server.close();
+    }
+  });
+
   test("review update writes claim, validates, and recompiles", async () => {
     const cwd = copyFixture(mockApp);
     const staticRoot = makeStaticRoot();
