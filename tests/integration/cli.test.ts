@@ -25,6 +25,7 @@ describe("CLI", () => {
     const installHooks = await dispatch(["help", "install-hooks"]);
     const upgrade = await dispatch(["help", "upgrade"]);
     const migrateDocs = await dispatch(["help", "migrate-docs"]);
+    const audit = await dispatch(["help", "audit"]);
 
     expect(init.stdout).toContain("agent-memory init --yes --force");
     expect(init.stdout).toContain("--skill-location .agents");
@@ -33,6 +34,7 @@ describe("CLI", () => {
     expect(installHooks.stdout).toContain("agent-memory install-hooks --json");
     expect(upgrade.stdout).toContain("agent-memory upgrade --write --force");
     expect(migrateDocs.stdout).toContain("lowercase memory namespace");
+    expect(audit.stdout).toContain("agent-memory audit --git-diff --base origin/main");
   });
 
   test("renders inline help for every command", async () => {
@@ -46,6 +48,7 @@ describe("CLI", () => {
       "system",
       "context",
       "coverage",
+      "audit",
       "doctor",
       "sync",
       "upgrade",

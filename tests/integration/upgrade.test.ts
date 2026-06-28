@@ -34,6 +34,7 @@ describe("upgrade command", () => {
     const agents = fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8");
     const skill = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"), "utf8");
     const claimsReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"), "utf8");
+    const coverageReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/coverage-and-validation.md"), "utf8");
     const loaded = loadConfig({ repoRoot });
 
     expect(result.exitCode).toBe(0);
@@ -47,9 +48,11 @@ describe("upgrade command", () => {
     expect(agents).toContain("### Agent-Memory-First Workflow");
     expect(agents).not.toContain("Old managed text");
     expect(skill).toContain("## Available Commands");
+    expect(skill).toContain("memory audit --git-diff");
     expect(skill).toContain("memory/claims/**/*.md");
     expect(skill).toContain("references/claims.md");
     expect(claimsReference).toContain("<!-- agent-memory:generated-reference repo-memory/claims.md -->");
+    expect(coverageReference).toContain("## Stale Review");
   });
 
   test("is idempotent after writing the current support files", async () => {

@@ -47,6 +47,7 @@ describe("init command", () => {
     expect(agents).toContain("bin/memory context --task");
     expect(agents).toContain("After non-trivial work:");
     expect(agents).toContain("Update memory in the same change when durable repository knowledge changed.");
+    expect(agents).toContain("bin/memory audit --git-diff");
     expect(agents).toContain("Recipes for new or changed repeatable workflows.");
     expect(agents).toContain("Waivers for intentional coverage exceptions with a reason and expiration.");
     expect(fs.statSync(path.join(repoRoot, "bin/memory")).mode & 0o111).toBeGreaterThan(0);

@@ -297,6 +297,7 @@ After non-trivial work:
 1. Update memory in the same change when durable repository knowledge changed.
 2. Use \`bin/memory templates list\` and \`bin/memory templates show <template>\` before creating artifacts.
 3. Run \`bin/memory validate\` and \`bin/memory sync\` before finishing changes that touch memory.
+4. Run \`bin/memory audit --git-diff\` before finishing when canonical memory files changed.
 
 Update targets:
 

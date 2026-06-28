@@ -153,6 +153,19 @@ const TOPICS: HelpTopic[] = [
     phase: "Phase 9"
   },
   {
+    name: "audit",
+    purpose: "Audit changed memory for deterministic stale-claim risks.",
+    usage: [
+      "agent-memory audit --changed-files file1 file2",
+      "agent-memory audit --git-diff",
+      "agent-memory audit --git-diff --base origin/main",
+      "agent-memory audit --git-diff --json"
+    ],
+    examples: ["agent-memory audit --changed-files docs/agent-memory/claims/auth/example.md", "agent-memory audit --git-diff --base origin/main"],
+    agentNotes: ["Returns exit code 6 when changed memory overlaps active claims without an explicit review decision or stale markers are invalid."],
+    phase: "Phase 9"
+  },
+  {
     name: "doctor",
     purpose: "Check whether the compiled SQLite database is present, fresh, and compatible.",
     usage: ["agent-memory doctor", "agent-memory doctor --json"],
@@ -285,6 +298,7 @@ export function renderHelp(topicName?: string): string {
     "  system               Summarize compiled memory for one system.",
     "  context              Build agent-ready task or file context.",
     "  coverage             Check watched-file memory coverage.",
+    "  audit                Audit deterministic stale-claim risks.",
     "  doctor               Check compiled database health.",
     "  sync                 Compile, validate, and doctor memory.",
     "  upgrade              Refresh generated support files for a newer agent-memory version.",

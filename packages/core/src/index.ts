@@ -1,4 +1,5 @@
 export * from "./agent_commands";
+export * from "./audit";
 export * from "./config";
 export * from "./compiler";
 export * from "./context_builder";

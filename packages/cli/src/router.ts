@@ -2,6 +2,7 @@ import { AgentMemoryError, formatError, NotFoundError, toAgentMemoryError } from
 import type { ExitCode } from "../../core/src/types";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../../core/src/version";
 import { runAgentManifestCommand } from "./commands/agent_manifest";
+import { runAuditCommand } from "./commands/audit";
 import { runCompileCommand } from "./commands/compile";
 import { runContextCommand } from "./commands/context";
 import { runCoverageCommand } from "./commands/coverage";
@@ -176,6 +177,17 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
     }
 
     return runCoverageCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "audit") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("audit")
+      };
+    }
+
+    return runAuditCommand(rest, { cwd: context.cwd });
   }
 
   if (command === "doctor") {
