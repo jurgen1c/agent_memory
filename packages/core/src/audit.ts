@@ -2,7 +2,7 @@ import path from "node:path";
 import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
 import { loadConfig } from "./config";
 import { pathMatchesPattern, toPosix } from "./files";
-import { loadMemory, type MemoryClaim, type MemoryGraphEdge } from "./memory";
+import { loadMemory, type MemoryClaim, type MemoryGraph } from "./memory";
 
 export interface AuditOptions {
   cwd?: string;
@@ -46,6 +46,7 @@ interface ExplicitRelation {
   source: string;
   target: string;
   relation: string;
+  sourcePath: string;
 }
 
 const ACTIVE_STATUSES = new Set(["current", "proposed", "experimental", "needs_review", "needs_verification"]);
@@ -68,12 +69,12 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
   const changedFileSet = new Set(changedFiles);
   const claims = memory.claims.map((claim) => ({ ...claim, sourcePath: toPosix(claim.sourcePath) }));
   const claimsById = new Map(claims.map((claim) => [claim.id, claim]));
-  const explicitRelations = explicitRelationsFromGraphs(memory.graphs.flatMap((graph) => graph.edges));
+  const explicitRelations = explicitRelationsFromGraphs(memory.graphs);
   const findings = [
     ...findOverlappingChangedClaims(claims, changedFileSet, memoryRootRelative, explicitRelations),
     ...findUnreviewedRelatedSourceClaims(claims, changedFileSet, memoryRootRelative),
-    ...findInvalidDeprecatedBy(claims, claimsById, memoryRootRelative),
-    ...findUnreviewedActiveConflicts(claimsById, explicitRelations, memoryRootRelative)
+    ...findInvalidDeprecatedBy(claims, claimsById, changedFileSet, memoryRootRelative),
+    ...findUnreviewedActiveConflicts(claimsById, explicitRelations, changedFileSet, memoryRootRelative)
   ];
 
   return {
@@ -166,6 +167,7 @@ function findUnreviewedRelatedSourceClaims(
 function findInvalidDeprecatedBy(
   claims: ClaimRecord[],
   claimsById: Map<string, ClaimRecord>,
+  changedFiles: Set<string>,
   memoryRootRelative: string
 ): AuditFinding[] {
   const findings: AuditFinding[] = [];
@@ -178,6 +180,13 @@ function findInvalidDeprecatedBy(
     }
 
     const replacement = claimsById.get(replacementId);
+
+    if (
+      !claimTouchedByChangedFiles(claim, changedFiles, memoryRootRelative) &&
+      (!replacement || !claimTouchedByChangedFiles(replacement, changedFiles, memoryRootRelative))
+    ) {
+      continue;
+    }
 
     if (!replacement) {
       findings.push({
@@ -214,6 +223,7 @@ function findInvalidDeprecatedBy(
 function findUnreviewedActiveConflicts(
   claimsById: Map<string, ClaimRecord>,
   explicitRelations: ExplicitRelation[],
+  changedFiles: Set<string>,
   memoryRootRelative: string
 ): AuditFinding[] {
   const findings: AuditFinding[] = [];
@@ -239,6 +249,14 @@ function findUnreviewedActiveConflicts(
 
     seenPairs.add(key);
 
+    if (
+      !changedFiles.has(memoryPath(memoryRootRelative, relation.sourcePath)) &&
+      !claimTouchedByChangedFiles(source, changedFiles, memoryRootRelative) &&
+      !claimTouchedByChangedFiles(target, changedFiles, memoryRootRelative)
+    ) {
+      continue;
+    }
+
     if (REVIEW_STATUSES.has(source.status) || REVIEW_STATUSES.has(target.status)) {
       continue;
     }
@@ -255,32 +273,36 @@ function findUnreviewedActiveConflicts(
   return findings;
 }
 
-function explicitRelationsFromGraphs(edges: MemoryGraphEdge[]): ExplicitRelation[] {
+function explicitRelationsFromGraphs(graphs: MemoryGraph[]): ExplicitRelation[] {
   const relations: ExplicitRelation[] = [];
 
-  for (const edge of edges) {
-    if (edge.claims && edge.claims.length > 1) {
-      for (let left = 0; left < edge.claims.length; left += 1) {
-        for (let right = left + 1; right < edge.claims.length; right += 1) {
-          relations.push({ source: edge.claims[left], target: edge.claims[right], relation: edge.relation });
+  for (const graph of graphs) {
+    const sourcePath = toPosix(graph.sourcePath);
 
-          if (edge.bidirectional) {
-            relations.push({ source: edge.claims[right], target: edge.claims[left], relation: edge.relation });
+    for (const edge of graph.edges) {
+      if (edge.claims && edge.claims.length > 1) {
+        for (let left = 0; left < edge.claims.length; left += 1) {
+          for (let right = left + 1; right < edge.claims.length; right += 1) {
+            relations.push({ source: edge.claims[left], target: edge.claims[right], relation: edge.relation, sourcePath });
+
+            if (edge.bidirectional) {
+              relations.push({ source: edge.claims[right], target: edge.claims[left], relation: edge.relation, sourcePath });
+            }
           }
         }
+
+        continue;
       }
 
-      continue;
-    }
+      if (!edge.source || !edge.target) {
+        continue;
+      }
 
-    if (!edge.source || !edge.target) {
-      continue;
-    }
+      relations.push({ source: edge.source, target: edge.target, relation: edge.relation, sourcePath });
 
-    relations.push({ source: edge.source, target: edge.target, relation: edge.relation });
-
-    if (edge.bidirectional) {
-      relations.push({ source: edge.target, target: edge.source, relation: edge.relation });
+      if (edge.bidirectional) {
+        relations.push({ source: edge.target, target: edge.source, relation: edge.relation, sourcePath });
+      }
     }
   }
 
@@ -315,6 +337,16 @@ function sharedAuditAttributes(left: ClaimRecord, right: ClaimRecord): string[] 
 
 function claimMentionsFile(claim: ClaimRecord, sourceFile: string): boolean {
   return [...claim.sourceFiles, ...claim.relatedFiles].some((pattern) => pattern === sourceFile || pathMatchesPattern(pattern, sourceFile));
+}
+
+function claimTouchedByChangedFiles(claim: ClaimRecord, changedFiles: Set<string>, memoryRootRelative: string): boolean {
+  if (changedFiles.has(memoryPath(memoryRootRelative, claim.sourcePath))) {
+    return true;
+  }
+
+  return Array.from(changedFiles)
+    .filter((file) => !isMemoryFile(file, memoryRootRelative))
+    .some((file) => claimMentionsFile(claim, file));
 }
 
 function hasReviewDecision(leftId: string, rightId: string, explicitRelations: ExplicitRelation[]): boolean {

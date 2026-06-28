@@ -127,6 +127,24 @@ describe("audit command", () => {
     expect(result.stdout).toContain("claim.deprecated_by_active_status");
   });
 
+  test("ignores pre-existing unrelated deprecated_by problems", async () => {
+    const cwd = copyFixture(mockApp);
+    writeClaim(cwd, "claims/auth/student_oauth_bad_deprecated_by.md", {
+      id: "auth.student_oauth.bad_deprecated_by",
+      status: "current",
+      sourceFiles: ["src/bad-auth.js"],
+      relatedFiles: [],
+      symbols: ["badResolver"],
+      tags: ["bad-auth"],
+      deprecatedBy: "auth.student_oauth.missing"
+    });
+
+    const result = await dispatch(["audit", "--changed-files", "README.md"], { cwd });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Agent Memory audit passed");
+  });
+
   test("fails when active conflicts have no review status", async () => {
     const cwd = copyFixture(mockApp);
     const graphPath = appendGraphEdge(cwd, {
@@ -139,6 +157,30 @@ describe("audit command", () => {
 
     expect(result.exitCode).toBe(6);
     expect(result.stdout).toContain("graph.active_conflict_unreviewed");
+  });
+
+  test("ignores pre-existing unrelated active conflicts", async () => {
+    const cwd = copyFixture(mockApp);
+    appendGraphEdge(cwd, {
+      source: "auth.student_oauth.uid_is_tenant_scoped",
+      target: "tenancy.current_tenant.required_for_student_auth",
+      relation: "conflicts_with"
+    });
+    const claimPath = writeClaim(cwd, "claims/billing/payment_provider.md", {
+      id: "billing.payment.provider",
+      system: "billing",
+      status: "current",
+      sourceFiles: ["src/payment.js"],
+      relatedFiles: [],
+      symbols: ["resolvePaymentProvider"],
+      routes: ["/payments"],
+      tags: ["billing", "payments"]
+    });
+
+    const result = await dispatch(["audit", "--changed-files", claimPath], { cwd });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Agent Memory audit passed");
   });
 
   test("passes for unrelated changed claims", async () => {
