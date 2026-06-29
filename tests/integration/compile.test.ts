@@ -67,6 +67,7 @@ describe("compile command", () => {
 
   test("rebuilds deterministically without duplicating rows", async () => {
     const cwd = copyFixture(mockApp);
+    const databaseDir = path.join(cwd, ".agent-memory");
     await dispatch(["compile"], { cwd });
     const firstCounts = readCounts(path.join(cwd, ".agent-memory/memory.sqlite"));
 
@@ -74,6 +75,7 @@ describe("compile command", () => {
     const secondCounts = readCounts(path.join(cwd, ".agent-memory/memory.sqlite"));
 
     expect(secondCounts).toEqual(firstCounts);
+    expect(fs.readdirSync(databaseDir).filter((entry) => entry.includes(".memory.sqlite.") && (entry.endsWith(".tmp") || entry.endsWith(".bak")))).toEqual([]);
   });
 
   test("keeps the previous database when a rebuild is rejected", async () => {

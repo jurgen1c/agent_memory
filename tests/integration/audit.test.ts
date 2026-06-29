@@ -128,6 +128,32 @@ describe("audit command", () => {
     expect(result.stdout).toContain("Agent Memory audit passed");
   });
 
+  test("treats reviewed deprecated_by replacements as overlap review decisions", async () => {
+    const cwd = copyFixture(mockApp);
+    writeClaim(cwd, "claims/auth/student_oauth_replacement.md", {
+      id: "auth.student_oauth.replacement",
+      status: "current",
+      sourceFiles: ["src/replacement-auth.js"],
+      relatedFiles: [],
+      symbols: ["replacementResolver"],
+      tags: ["replacement"]
+    });
+    const supersededPath = writeClaim(cwd, "claims/auth/student_oauth_superseded.md", {
+      id: "auth.student_oauth.superseded",
+      status: "needs_review",
+      sourceFiles: ["src/replacement-auth.js"],
+      relatedFiles: [],
+      symbols: ["replacementResolver"],
+      tags: ["replacement"],
+      deprecatedBy: "auth.student_oauth.replacement"
+    });
+
+    const result = await dispatch(["audit", "--changed-files", supersededPath], { cwd });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Agent Memory audit passed");
+  });
+
   test("fails when deprecated_by is missing or attached to an active stable claim", async () => {
     const cwd = copyFixture(mockApp);
     const claimPath = writeClaim(cwd, "claims/auth/student_oauth_bad_deprecated_by.md", {

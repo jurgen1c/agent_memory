@@ -93,7 +93,7 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
       database.close();
     }
 
-    fs.renameSync(tempDatabasePath, databasePath);
+    replaceDatabase(tempDatabasePath, databasePath);
     replaced = true;
     return result;
   } finally {
@@ -505,6 +505,42 @@ function sha256(value: string): string {
 function temporaryDatabasePath(databasePath: string): string {
   const random = crypto.randomBytes(8).toString("hex");
   return path.join(path.dirname(databasePath), `.${path.basename(databasePath)}.${process.pid}.${Date.now()}.${random}.tmp`);
+}
+
+function backupDatabasePath(databasePath: string): string {
+  const random = crypto.randomBytes(8).toString("hex");
+  return path.join(path.dirname(databasePath), `.${path.basename(databasePath)}.${process.pid}.${Date.now()}.${random}.bak`);
+}
+
+function replaceDatabase(tempDatabasePath: string, databasePath: string): void {
+  const backupPath = backupDatabasePath(databasePath);
+  let backedUp = false;
+  let installed = false;
+
+  try {
+    if (fs.existsSync(databasePath)) {
+      if (!fs.statSync(databasePath).isFile()) {
+        throw new AgentMemoryError(`Database path is not a file: ${databasePath}`);
+      }
+
+      fs.renameSync(databasePath, backupPath);
+      backedUp = true;
+    }
+
+    fs.renameSync(tempDatabasePath, databasePath);
+    installed = true;
+  } catch (error) {
+    if (backedUp && !installed && !fs.existsSync(databasePath) && fs.existsSync(backupPath)) {
+      fs.renameSync(backupPath, databasePath);
+      backedUp = false;
+    }
+
+    throw error;
+  } finally {
+    if (installed && backedUp) {
+      cleanupDatabaseArtifacts(backupPath);
+    }
+  }
 }
 
 function cleanupDatabaseArtifacts(databasePath: string): void {

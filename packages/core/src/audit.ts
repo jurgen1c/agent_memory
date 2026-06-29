@@ -112,7 +112,7 @@ function findOverlappingChangedClaims(
 
       const shared = sharedAuditAttributes(claim, other);
 
-      if (shared.length === 0 || hasReviewDecision(claim.id, other.id, explicitRelations)) {
+      if (shared.length === 0 || hasReviewDecision(claim, other, explicitRelations)) {
         continue;
       }
 
@@ -349,12 +349,20 @@ function claimTouchedByChangedFiles(claim: ClaimRecord, changedFiles: Set<string
     .some((file) => claimMentionsFile(claim, file));
 }
 
-function hasReviewDecision(leftId: string, rightId: string, explicitRelations: ExplicitRelation[]): boolean {
+function hasReviewDecision(left: ClaimRecord, right: ClaimRecord, explicitRelations: ExplicitRelation[]): boolean {
+  return hasExplicitReviewDecision(left.id, right.id, explicitRelations) || hasDeprecatedByReviewDecision(left, right);
+}
+
+function hasExplicitReviewDecision(leftId: string, rightId: string, explicitRelations: ExplicitRelation[]): boolean {
   return explicitRelations.some(
     (relation) =>
       REVIEW_DECISION_RELATIONS.has(relation.relation) &&
       ((relation.source === leftId && relation.target === rightId) || (relation.source === rightId && relation.target === leftId))
   );
+}
+
+function hasDeprecatedByReviewDecision(left: ClaimRecord, right: ClaimRecord): boolean {
+  return readString(left.raw, "deprecated_by") === right.id || readString(right.raw, "deprecated_by") === left.id;
 }
 
 function isActiveClaim(claim: ClaimRecord): boolean {
