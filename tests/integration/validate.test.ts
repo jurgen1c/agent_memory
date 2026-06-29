@@ -136,6 +136,22 @@ describe("validate command", () => {
     expect(result.stdout).toContain("claim.related_files.outside_repo");
   });
 
+  test("reports missing related files with field-specific wording", async () => {
+    const cwd = copyFixture(mockApp);
+    writeClaim(cwd, "docs/agent-memory/claims/auth/missing_related_reference.md", {
+      id: "auth.missing_related_reference",
+      title: "Missing related reference claim",
+      relatedFiles: ["src/missing-related.js"]
+    });
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/claims/auth/missing_related_reference.md", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as { errors: Array<{ code: string; message: string }> };
+    const error = parsed.errors.find((candidate) => candidate.code === "claim.related_files.missing");
+
+    expect(result.exitCode).toBe(2);
+    expect(error?.message).toBe("Referenced related file does not exist: src/missing-related.js");
+  });
+
   test("rejects index watched files that escape the repository", async () => {
     const cwd = copyFixture(mockApp);
     const indexPath = path.join(cwd, "docs/agent-memory/indexes/auth.yaml");

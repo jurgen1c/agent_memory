@@ -60,6 +60,26 @@ describe("audit command", () => {
     expect(result.stdout).toContain("auth.student_oauth.uid_is_tenant_scoped");
   });
 
+  test("sorts overlap finding IDs and paths in JSON output", async () => {
+    const cwd = copyFixture(mockApp);
+    const claimPath = writeClaim(cwd, "claims/auth/aaa_overlap.md", {
+      id: "auth.aaa_overlap",
+      status: "current",
+      sourceFiles: ["src/new-auth.js"],
+      relatedFiles: [],
+      symbols: ["resolveStudentOAuthIdentity"],
+      tags: ["new-auth"]
+    });
+
+    const result = await dispatch(["audit", "--changed-files", claimPath, "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as { findings: Array<{ code: string; claimIds: string[]; paths: string[] }> };
+    const finding = parsed.findings.find((candidate) => candidate.code === "claim.overlap_without_review");
+
+    expect(result.exitCode).toBe(6);
+    expect(finding?.claimIds).toEqual([...(finding?.claimIds ?? [])].sort());
+    expect(finding?.paths).toEqual([...(finding?.paths ?? [])].sort());
+  });
+
   test("passes when changed overlapping claims have an explicit replaces edge", async () => {
     const cwd = copyFixture(mockApp);
     const claimPath = writeClaim(cwd, "claims/auth/student_oauth_replacement.md", {

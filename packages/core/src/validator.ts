@@ -678,9 +678,25 @@ function validateRepoPathReferences(
     }
 
     if (requireExists && !fs.existsSync(resolved)) {
-      addError(issues, `${fieldCode}.missing`, `Referenced source file does not exist: ${reference}`, relativePath, id);
+      addError(issues, `${fieldCode}.missing`, `Referenced ${referenceLabel(fieldCode)} does not exist: ${reference}`, relativePath, id);
     }
   }
+}
+
+function referenceLabel(fieldCode: string): string {
+  if (fieldCode.endsWith(".source_files")) {
+    return "source file";
+  }
+
+  if (fieldCode.endsWith(".related_files")) {
+    return "related file";
+  }
+
+  if (fieldCode.endsWith(".watched_files")) {
+    return "watched file";
+  }
+
+  return "path";
 }
 
 function resolveRepoReference(repoRoot: string, reference: string): string {

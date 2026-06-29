@@ -119,8 +119,8 @@ function findOverlappingChangedClaims(
       findings.push({
         code: "claim.overlap_without_review",
         message: `Changed active claim ${claim.id} overlaps active claim ${other.id} by ${shared.join(", ")} without a replaces or conflicts_with decision.`,
-        claimIds: [claim.id, other.id],
-        paths: [memoryPath(memoryRootRelative, claim.sourcePath), memoryPath(memoryRootRelative, other.sourcePath)],
+        claimIds: [claim.id, other.id].sort(),
+        paths: [memoryPath(memoryRootRelative, claim.sourcePath), memoryPath(memoryRootRelative, other.sourcePath)].sort(),
         remediation: "Update the older claim directly, mark one claim stale/deprecated, or add an explicit replaces or conflicts_with graph edge."
       });
     }
