@@ -90,8 +90,8 @@ async function startBunUiServer(bun: BunRuntime, options: UiServerOptions): Prom
   const requestedPort = options.port ?? DEFAULT_PORT;
   const token = options.token ?? crypto.randomBytes(18).toString("base64url");
   const staticRoot = options.staticRoot ?? defaultStaticRoot();
-  const startPort = requestedPort;
-  const scanLimit = requestedPort === 0 ? 1 : PORT_SCAN_LIMIT;
+  const startPort = requestedPort === 0 ? randomEphemeralPort() : requestedPort;
+  const scanLimit = PORT_SCAN_LIMIT;
   let lastError: unknown;
 
   for (let offset = 0; offset < scanLimit; offset += 1) {
@@ -398,8 +398,8 @@ function contentType(filePath: string): string {
 
 function listen(server: http.Server, host: string, requestedPort: number): Promise<number> {
   return new Promise((resolve, reject) => {
-    const startPort = requestedPort;
-    const scanLimit = requestedPort === 0 ? 1 : PORT_SCAN_LIMIT;
+    const startPort = requestedPort === 0 ? randomEphemeralPort() : requestedPort;
+    const scanLimit = PORT_SCAN_LIMIT;
 
     const tryPort = (port: number, attempt: number): void => {
       const onError = (error: NodeJS.ErrnoException): void => {
@@ -422,6 +422,10 @@ function listen(server: http.Server, host: string, requestedPort: number): Promi
 
     tryPort(startPort, 0);
   });
+}
+
+function randomEphemeralPort(): number {
+  return 45000 + Math.floor(Math.random() * 1000);
 }
 
 function isAddressInUse(error: unknown): boolean {
