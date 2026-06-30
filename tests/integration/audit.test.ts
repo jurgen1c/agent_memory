@@ -60,6 +60,28 @@ describe("audit command", () => {
     expect(result.stdout).toContain("auth.student_oauth.uid_is_tenant_scoped");
   });
 
+  test("normalizes leading dot segments in configured memory root", async () => {
+    const cwd = copyFixture(mockApp);
+    const configPath = path.join(cwd, "agent-memory.config.yaml");
+    fs.writeFileSync(
+      configPath,
+      fs.readFileSync(configPath, "utf8").replace("memory_root: docs/agent-memory", "memory_root: ./docs/agent-memory")
+    );
+    const claimPath = writeClaim(cwd, "claims/auth/student_oauth_new_current.md", {
+      id: "auth.student_oauth.new_current",
+      status: "current",
+      sourceFiles: ["src/new-auth.js"],
+      relatedFiles: [],
+      symbols: ["resolveStudentOAuthIdentity"],
+      tags: ["new-auth"]
+    });
+
+    const result = await dispatch(["audit", "--changed-files", claimPath], { cwd });
+
+    expect(result.exitCode).toBe(6);
+    expect(result.stdout).toContain("claim.overlap_without_review");
+  });
+
   test("sorts overlap finding IDs and paths in JSON output", async () => {
     const cwd = copyFixture(mockApp);
     const claimPath = writeClaim(cwd, "claims/auth/aaa_overlap.md", {
