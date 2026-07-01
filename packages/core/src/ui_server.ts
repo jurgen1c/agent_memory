@@ -428,9 +428,10 @@ function randomEphemeralPort(): number {
   return 45000 + Math.floor(Math.random() * 1000);
 }
 
-function isAddressInUse(error: unknown): boolean {
+export function isAddressInUse(error: unknown): boolean {
   const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: string }).code : undefined;
-  return code === "EADDRINUSE" || String(error).includes("EADDRINUSE") || String(error).includes("port") && String(error).includes("in use");
+  const message = error instanceof Error ? error.message : String(error);
+  return code === "EADDRINUSE" || /\bEADDRINUSE\b/i.test(message) || /\baddress already in use\b/i.test(message) || /\bport \d+ in use\??$/i.test(message);
 }
 
 function bunRuntime(): BunRuntime | undefined {

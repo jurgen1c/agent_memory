@@ -116,8 +116,8 @@ export function validateRepository(options: ValidateRepositoryOptions = {}): Val
   const graphs = loadYamlArtifacts(memoryRoot, graphFiles, "graph", issues);
   const indexes = loadYamlArtifacts(memoryRoot, indexFiles, "index", issues);
 
-  const allClaims = scoped ? loadClaims(repoRoot, memoryRoot, allClaimFiles, loaded.config.validation, []) : claims;
-  const allRecipes = scoped ? loadRecipes(memoryRoot, allRecipeFiles, []) : recipes;
+  const allClaims = scoped ? loadClaimReferences(memoryRoot, allClaimFiles) : claims;
+  const allRecipes = scoped ? loadRecipeReferences(memoryRoot, allRecipeFiles) : recipes;
   const claimsById = new Map(allClaims.map((claim) => [claim.id, claim]));
 
   validateUniqueClaims(claims, issues, allClaims);
@@ -179,6 +179,60 @@ function loadClaims(
   }
 
   return claims;
+}
+
+function loadClaimReferences(memoryRoot: string, files: string[]): LoadedClaim[] {
+  const claims: LoadedClaim[] = [];
+
+  for (const filePath of files) {
+    const relativePath = toPosix(path.relative(memoryRoot, filePath));
+
+    try {
+      const markdown = parseMarkdownFile(filePath);
+
+      if (!isRecord(markdown.frontmatter)) {
+        continue;
+      }
+
+      const claim = normalizeClaimReference(markdown.frontmatter, filePath, relativePath);
+
+      if (claim) {
+        claims.push(claim);
+      }
+    } catch {
+      // Scoped reference loading is best effort; changed files still receive full validation.
+    }
+  }
+
+  return claims;
+}
+
+function normalizeClaimReference(raw: Record<string, unknown>, filePath: string, relativePath: string): LoadedClaim | null {
+  if (
+    typeof raw.id !== "string" ||
+    typeof raw.system !== "string" ||
+    typeof raw.status !== "string" ||
+    typeof raw.title !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: raw.id,
+    type: typeof raw.type === "string" ? raw.type : "",
+    system: raw.system,
+    status: raw.status,
+    confidence: typeof raw.confidence === "string" ? raw.confidence : "",
+    severity: typeof raw.severity === "string" ? raw.severity : "",
+    title: raw.title,
+    claim: typeof raw.claim === "string" ? raw.claim : "",
+    sourceFiles: [],
+    relatedFiles: [],
+    tags: [],
+    path: filePath,
+    relativePath,
+    raw
+  };
 }
 
 function normalizeClaim(raw: Record<string, unknown>, relativePath: string, issues: ValidationIssue[]): LoadedClaim | null {
@@ -544,6 +598,34 @@ function loadRecipes(memoryRoot: string, files: string[], issues: ValidationIssu
       path: artifact.path,
       relativePath: artifact.relativePath
     });
+  }
+
+  return recipes;
+}
+
+function loadRecipeReferences(memoryRoot: string, files: string[]): LoadedRecipe[] {
+  const recipes: LoadedRecipe[] = [];
+
+  for (const filePath of files) {
+    const relativePath = toPosix(path.relative(memoryRoot, filePath));
+
+    try {
+      const data = parseYaml(fs.readFileSync(filePath, "utf8"));
+
+      if (!isRecord(data) || typeof data.id !== "string") {
+        continue;
+      }
+
+      recipes.push({
+        id: data.id,
+        status: typeof data.status === "string" ? data.status : "",
+        requiredClaims: [],
+        path: filePath,
+        relativePath
+      });
+    } catch {
+      // Scoped reference loading is best effort; changed files still receive full validation.
+    }
   }
 
   return recipes;

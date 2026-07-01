@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { startUiServer } from "../../packages/core/src/ui_server";
+import { isAddressInUse, startUiServer } from "../../packages/core/src/ui_server";
 
 const repoRoot = path.resolve(".");
 const mockApp = path.join(repoRoot, "examples/mock-app");
@@ -150,6 +150,11 @@ describe("UI server", () => {
     } finally {
       await server.close();
     }
+  });
+
+  test("does not treat unrelated Bun startup errors as address conflicts", async () => {
+    expect(isAddressInUse(new Error("Failed to start server. Is port 45984 in use?"))).toBe(true);
+    expect(isAddressInUse(new Error("port configuration is in use by an invalid runtime option"))).toBe(false);
   });
 
   test("review update writes claim, validates, and recompiles", async () => {

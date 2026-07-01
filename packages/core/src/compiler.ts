@@ -525,6 +525,7 @@ function replaceDatabase(tempDatabasePath: string, databasePath: string): void {
 
       fs.renameSync(databasePath, backupPath);
       backedUp = true;
+      cleanupDatabaseArtifacts(databasePath);
     }
 
     fs.renameSync(tempDatabasePath, databasePath);

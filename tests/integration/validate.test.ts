@@ -92,6 +92,36 @@ describe("validate command", () => {
     expect(result.stdout).toContain("auth.missing_claim");
   });
 
+  test("does not check unchanged claim source paths when loading scoped references", async () => {
+    const cwd = copyFixture(mockApp);
+    const missingReference = path.join(cwd, "src/reference-missing.js");
+    writeClaim(cwd, "docs/agent-memory/claims/auth/unchanged_reference_only.md", {
+      id: "auth.unchanged_reference_only",
+      title: "Unchanged reference only",
+      sourceFiles: ["src/reference-missing.js"]
+    });
+
+    const originalExistsSync = fs.existsSync;
+    let sourcePathChecks = 0;
+
+    fs.existsSync = ((target: fs.PathLike) => {
+      if (typeof target === "string" && target === missingReference) {
+        sourcePathChecks += 1;
+      }
+
+      return originalExistsSync(target);
+    }) as typeof fs.existsSync;
+
+    try {
+      const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/graph/auth-tenancy.yaml"], { cwd });
+
+      expect(result.exitCode).toBe(0);
+      expect(sourcePathChecks).toBe(0);
+    } finally {
+      fs.existsSync = originalExistsSync;
+    }
+  });
+
   test("detects duplicate titles for changed claims against unchanged claims", async () => {
     const cwd = copyFixture(mockApp);
     writeClaim(cwd, "docs/agent-memory/claims/auth/student_oauth_title_duplicate.md", {

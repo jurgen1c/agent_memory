@@ -102,6 +102,23 @@ describe("compile command", () => {
     expect(fs.readdirSync(databaseDir).filter((entry) => entry.includes(".memory.sqlite.") && entry.includes(".tmp"))).toEqual([]);
   });
 
+  test("cleans stale sidecar files from the original database path before replacement", async () => {
+    const cwd = copyFixture(mockApp);
+    const databasePath = path.join(cwd, ".agent-memory/memory.sqlite");
+    await dispatch(["compile"], { cwd });
+
+    for (const suffix of ["-journal", "-wal", "-shm"]) {
+      fs.writeFileSync(`${databasePath}${suffix}`, "stale sidecar");
+    }
+
+    await dispatch(["compile"], { cwd });
+
+    for (const suffix of ["-journal", "-wal", "-shm"]) {
+      expect(fs.existsSync(`${databasePath}${suffix}`)).toBe(false);
+    }
+    expect(readCounts(databasePath).claims).toBe(2);
+  });
+
   test("keeps the previous database when a rebuild is rejected", async () => {
     const cwd = copyFixture(mockApp);
     const databasePath = path.join(cwd, ".agent-memory/memory.sqlite");
