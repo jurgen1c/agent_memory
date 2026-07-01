@@ -1,8 +1,9 @@
 import path from "node:path";
 import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
 import { loadConfig } from "./config";
-import { configuredPathRelativeToRepo, pathMatchesPattern, toPosix } from "./files";
+import { canonicalMemoryFileInventory, configuredPathRelativeToRepo, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
 import { loadMemory, type MemoryClaim, type MemoryGraph } from "./memory";
+import type { AgentMemoryConfig } from "./types";
 
 export interface AuditOptions {
   cwd?: string;
@@ -59,6 +60,7 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
   const repoRoot = loaded.repo.root;
   const memory = loadMemory(repoRoot);
   const memoryRootRelative = configuredPathRelativeToRepo(repoRoot, loaded.config.memory_root);
+  const memoryFiles = canonicalMemoryFiles(repoRoot, memoryRootRelative, loaded.config);
   const changedFiles = normalizeAuditFiles(
     [
       ...(options.changedFiles ?? []),
@@ -72,9 +74,9 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
   const explicitRelations = explicitRelationsFromGraphs(memory.graphs);
   const findings = [
     ...findOverlappingChangedClaims(claims, changedFileSet, memoryRootRelative, explicitRelations),
-    ...findUnreviewedRelatedSourceClaims(claims, changedFileSet, memoryRootRelative),
-    ...findInvalidDeprecatedBy(claims, claimsById, changedFileSet, memoryRootRelative),
-    ...findUnreviewedActiveConflicts(claimsById, explicitRelations, changedFileSet, memoryRootRelative)
+    ...findUnreviewedRelatedSourceClaims(claims, changedFileSet, memoryRootRelative, memoryFiles),
+    ...findInvalidDeprecatedBy(claims, claimsById, changedFileSet, memoryRootRelative, memoryFiles),
+    ...findUnreviewedActiveConflicts(claimsById, explicitRelations, changedFileSet, memoryRootRelative, memoryFiles)
   ];
 
   return {
@@ -133,10 +135,11 @@ function findOverlappingChangedClaims(
 function findUnreviewedRelatedSourceClaims(
   claims: ClaimRecord[],
   changedFiles: Set<string>,
-  memoryRootRelative: string
+  memoryRootRelative: string,
+  memoryFiles: Set<string>
 ): AuditFinding[] {
   const activeClaims = claims.filter(isActiveClaim);
-  const changedSourceFiles = Array.from(changedFiles).filter((file) => !isMemoryFile(file, memoryRootRelative));
+  const changedSourceFiles = Array.from(changedFiles).filter((file) => !isMemoryFile(file, memoryFiles));
   const findings: AuditFinding[] = [];
 
   for (const sourceFile of changedSourceFiles) {
@@ -169,7 +172,8 @@ function findInvalidDeprecatedBy(
   claims: ClaimRecord[],
   claimsById: Map<string, ClaimRecord>,
   changedFiles: Set<string>,
-  memoryRootRelative: string
+  memoryRootRelative: string,
+  memoryFiles: Set<string>
 ): AuditFinding[] {
   const findings: AuditFinding[] = [];
 
@@ -183,8 +187,8 @@ function findInvalidDeprecatedBy(
     const replacement = claimsById.get(replacementId);
 
     if (
-      !claimTouchedByChangedFiles(claim, changedFiles, memoryRootRelative) &&
-      (!replacement || !claimTouchedByChangedFiles(replacement, changedFiles, memoryRootRelative))
+      !claimTouchedByChangedFiles(claim, changedFiles, memoryRootRelative, memoryFiles) &&
+      (!replacement || !claimTouchedByChangedFiles(replacement, changedFiles, memoryRootRelative, memoryFiles))
     ) {
       continue;
     }
@@ -225,7 +229,8 @@ function findUnreviewedActiveConflicts(
   claimsById: Map<string, ClaimRecord>,
   explicitRelations: ExplicitRelation[],
   changedFiles: Set<string>,
-  memoryRootRelative: string
+  memoryRootRelative: string,
+  memoryFiles: Set<string>
 ): AuditFinding[] {
   const findings: AuditFinding[] = [];
   const seenPairs = new Set<string>();
@@ -252,8 +257,8 @@ function findUnreviewedActiveConflicts(
 
     if (
       !changedFiles.has(memoryPath(memoryRootRelative, relation.sourcePath)) &&
-      !claimTouchedByChangedFiles(source, changedFiles, memoryRootRelative) &&
-      !claimTouchedByChangedFiles(target, changedFiles, memoryRootRelative)
+      !claimTouchedByChangedFiles(source, changedFiles, memoryRootRelative, memoryFiles) &&
+      !claimTouchedByChangedFiles(target, changedFiles, memoryRootRelative, memoryFiles)
     ) {
       continue;
     }
@@ -317,6 +322,15 @@ function normalizeClaimForAudit(claim: MemoryClaim): ClaimRecord {
     sourceFiles: claim.sourceFiles.map(toAuditFileReference),
     relatedFiles: claim.relatedFiles.map(toAuditFileReference)
   };
+}
+
+function canonicalMemoryFiles(
+  repoRoot: string,
+  memoryRootRelative: string,
+  config: AgentMemoryConfig
+): Set<string> {
+  const memoryRoot = resolveConfiguredPath(repoRoot, config.memory_root);
+  return new Set(canonicalMemoryFileInventory(memoryRoot, config).map((file) => memoryPath(memoryRootRelative, file)));
 }
 
 function toAuditFileReference(value: string): string {
@@ -391,13 +405,18 @@ function claimMentionsFile(claim: ClaimRecord, sourceFile: string): boolean {
   return [...claim.sourceFiles, ...claim.relatedFiles].some((pattern) => pattern === sourceFile || pathMatchesPattern(pattern, sourceFile));
 }
 
-function claimTouchedByChangedFiles(claim: ClaimRecord, changedFiles: Set<string>, memoryRootRelative: string): boolean {
+function claimTouchedByChangedFiles(
+  claim: ClaimRecord,
+  changedFiles: Set<string>,
+  memoryRootRelative: string,
+  memoryFiles: Set<string>
+): boolean {
   if (changedFiles.has(memoryPath(memoryRootRelative, claim.sourcePath))) {
     return true;
   }
 
   return Array.from(changedFiles)
-    .filter((file) => !isMemoryFile(file, memoryRootRelative))
+    .filter((file) => !isMemoryFile(file, memoryFiles))
     .some((file) => claimMentionsFile(claim, file));
 }
 
@@ -430,8 +449,8 @@ function normalizeAuditFiles(files: string[], repoRoot: string): string[] {
   return Array.from(new Set(normalizeChangedFiles(files, repoRoot))).sort();
 }
 
-function isMemoryFile(file: string, memoryRootRelative: string): boolean {
-  return file === memoryRootRelative || file.startsWith(`${memoryRootRelative}/`);
+function isMemoryFile(file: string, memoryFiles: Set<string>): boolean {
+  return memoryFiles.has(file);
 }
 
 function memoryPath(memoryRootRelative: string, sourcePath: string): string {

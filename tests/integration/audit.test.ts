@@ -96,6 +96,37 @@ describe("audit command", () => {
     expect(result.stdout).toContain("claim.overlap_without_review");
   });
 
+  test("does not treat canonical memory files as source changes when memory root is the repo root", async () => {
+    const cwd = copyFixture(mockApp);
+    updateMemoryRootToRepoRoot(cwd);
+    const changedClaimPath = writeClaim(cwd, "claims/auth/root_memory_changed.md", {
+      id: "auth.root_memory.changed",
+      status: "current",
+      sourceFiles: ["docs/agent-memory/claims/auth/root_memory_changed.md"],
+      relatedFiles: [],
+      symbols: ["rootMemoryChanged"],
+      tags: ["root-memory-changed"]
+    });
+    writeClaim(cwd, "claims/auth/root_memory_unchanged.md", {
+      id: "auth.root_memory.unchanged",
+      status: "current",
+      sourceFiles: ["docs/agent-memory/claims/auth/root_memory_changed.md"],
+      relatedFiles: [],
+      symbols: ["rootMemoryUnchanged"],
+      tags: ["root-memory-unchanged"]
+    });
+    appendGraphEdge(cwd, {
+      source: "auth.root_memory.changed",
+      target: "auth.root_memory.unchanged",
+      relation: "replaces"
+    });
+
+    const result = await dispatch(["audit", "--changed-files", changedClaimPath], { cwd });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Agent Memory audit passed");
+  });
+
   test("sorts overlap finding IDs and paths in JSON output", async () => {
     const cwd = copyFixture(mockApp);
     const claimPath = writeClaim(cwd, "claims/auth/aaa_overlap.md", {
@@ -457,6 +488,19 @@ function copyFixture(source: string): string {
 function updateMemoryRoot(cwd: string, memoryRoot: string): void {
   const configPath = path.join(cwd, "agent-memory.config.yaml");
   fs.writeFileSync(configPath, fs.readFileSync(configPath, "utf8").replace("memory_root: docs/agent-memory", `memory_root: ${memoryRoot}`));
+}
+
+function updateMemoryRootToRepoRoot(cwd: string): void {
+  const configPath = path.join(cwd, "agent-memory.config.yaml");
+  const config = fs
+    .readFileSync(configPath, "utf8")
+    .replace("memory_root: docs/agent-memory", "memory_root: .")
+    .replace("  - claims/**/*.md", "  - docs/agent-memory/claims/**/*.md")
+    .replace("  - graph/**/*.yaml", "  - docs/agent-memory/graph/**/*.yaml")
+    .replace("  - indexes/**/*.yaml", "  - docs/agent-memory/indexes/**/*.yaml")
+    .replace("  - recipes/**/*.yaml", "  - docs/agent-memory/recipes/**/*.yaml")
+    .replace("  - waivers/**/*.yaml", "  - docs/agent-memory/waivers/**/*.yaml");
+  fs.writeFileSync(configPath, config);
 }
 
 function writeClaim(cwd: string, relativeMemoryPath: string, options: ClaimOptions): string {
