@@ -755,7 +755,7 @@ function validateRepoPathReferences(
     const resolved = resolveRepoReference(repoRoot, reference);
 
     if (!isPathInside(repoRoot, resolved) || existingParentEscapesRepo(repoRoot, resolved)) {
-      addError(issues, `${fieldCode}.outside_repo`, `Referenced path escapes repository root: ${reference}`, relativePath, id);
+      addError(issues, `${fieldCode}.outside_repo`, `Referenced path escapes repository root or cannot be validated safely: ${reference}`, relativePath, id);
       continue;
     }
 

@@ -191,6 +191,7 @@ describe("validate command", () => {
 
       expect(result.exitCode).toBe(2);
       expect(result.stdout).toContain("claim.source_files.outside_repo");
+      expect(result.stdout).toContain("Referenced path escapes repository root or cannot be validated safely: src/auth.js");
     } finally {
       fs.realpathSync = originalRealpathSync;
     }
