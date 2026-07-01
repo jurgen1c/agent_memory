@@ -18,7 +18,7 @@ describe("audit command", () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.changedFiles).toEqual(["README.md"]);
     expect(parsed.findings).toEqual([]);
-    expect(parsed.warnings).toEqual([]);
+    expect(parsed.warnings).toContain("Not inside a git repository; using current working directory as repo root.");
   });
 
   test("reports missing changed-file input", async () => {

@@ -81,7 +81,7 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
     ok: findings.length === 0,
     changedFiles,
     findings: uniqueFindings(findings),
-    warnings: []
+    warnings: loaded.repo.warnings
   };
 }
 
