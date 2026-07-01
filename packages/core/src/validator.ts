@@ -782,7 +782,8 @@ function referenceLabel(fieldCode: string): string {
 }
 
 function resolveRepoReference(repoRoot: string, reference: string): string {
-  return path.isAbsolute(reference) ? path.normalize(reference) : path.resolve(repoRoot, reference);
+  const normalizedReference = reference.replaceAll("\\", "/");
+  return path.isAbsolute(normalizedReference) ? path.normalize(normalizedReference) : path.resolve(repoRoot, normalizedReference);
 }
 
 function existingParentEscapesRepo(repoRoot: string, resolvedPath: string): boolean {

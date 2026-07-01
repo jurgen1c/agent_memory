@@ -166,6 +166,21 @@ describe("validate command", () => {
     expect(result.stdout).toContain("claim.related_files.outside_repo");
   });
 
+  test("accepts claim file references with backslash separators", async () => {
+    const cwd = copyFixture(mockApp);
+    const claimPath = "docs/agent-memory/claims/auth/windows_reference.md";
+    writeClaim(cwd, claimPath, {
+      id: "auth.windows_reference",
+      title: "Windows reference claim",
+      sourceFiles: ["src\\auth.js"],
+      relatedFiles: ["src\\tenant.js"]
+    });
+
+    const result = await dispatch(["validate", "--changed-files", claimPath], { cwd });
+
+    expect(result.exitCode).toBe(0);
+  });
+
   test("rejects claim file references when realpath checks fail", async () => {
     const cwd = copyFixture(mockApp);
     const claimPath = "docs/agent-memory/claims/auth/realpath_failure.md";
