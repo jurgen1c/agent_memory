@@ -67,7 +67,7 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
     repoRoot
   );
   const changedFileSet = new Set(changedFiles);
-  const claims = memory.claims.map((claim) => ({ ...claim, sourcePath: toPosix(claim.sourcePath) }));
+  const claims = memory.claims.map(normalizeClaimForAudit);
   const claimsById = new Map(claims.map((claim) => [claim.id, claim]));
   const explicitRelations = explicitRelationsFromGraphs(memory.graphs);
   const findings = [
@@ -308,6 +308,19 @@ function explicitRelationsFromGraphs(graphs: MemoryGraph[]): ExplicitRelation[] 
   }
 
   return relations;
+}
+
+function normalizeClaimForAudit(claim: MemoryClaim): ClaimRecord {
+  return {
+    ...claim,
+    sourcePath: toPosix(claim.sourcePath),
+    sourceFiles: claim.sourceFiles.map(toAuditFileReference),
+    relatedFiles: claim.relatedFiles.map(toAuditFileReference)
+  };
+}
+
+function toAuditFileReference(value: string): string {
+  return toPosix(value).replaceAll("\\", "/");
 }
 
 function indexClaimsByAuditAttribute(claims: ClaimRecord[]): Map<string, ClaimRecord[]> {

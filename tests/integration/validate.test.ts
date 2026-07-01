@@ -213,6 +213,20 @@ describe("validate command", () => {
     expect(error?.message).toBe("Referenced related file does not exist: src/missing-related.js");
   });
 
+  test("renders empty related file overrides as valid YAML arrays", async () => {
+    const cwd = copyFixture(mockApp);
+    const claimPath = "docs/agent-memory/claims/auth/no_related_reference.md";
+    writeClaim(cwd, claimPath, {
+      id: "auth.no_related_reference",
+      title: "No related reference claim",
+      relatedFiles: []
+    });
+
+    const result = await dispatch(["validate", "--changed-files", claimPath], { cwd });
+
+    expect(result.exitCode).toBe(0);
+  });
+
   test("rejects index watched files that escape the repository", async () => {
     const cwd = copyFixture(mockApp);
     const indexPath = path.join(cwd, "docs/agent-memory/indexes/auth.yaml");
@@ -257,11 +271,9 @@ title: ${overrides.title}
 
 claim: Test claim for validation behavior.
 
-source_files:
-${(overrides.sourceFiles ?? ["src/auth.js"]).map((sourceFile) => `  - ${sourceFile}`).join("\n")}
+${renderYamlField("source_files", overrides.sourceFiles ?? ["src/auth.js"])}
 
-related_files:
-${(overrides.relatedFiles ?? ["src/tenant.js"]).map((relatedFile) => `  - ${relatedFile}`).join("\n")}
+${renderYamlField("related_files", overrides.relatedFiles ?? ["src/tenant.js"])}
 
 symbols:
   - resolveStudentOAuthIdentity
@@ -284,4 +296,8 @@ last_verified_commit: null
 Test claim for validation behavior.
 `
   );
+}
+
+function renderYamlField(name: string, values: string[]): string {
+  return values.length > 0 ? `${name}:\n${values.map((value) => `  - ${value}`).join("\n")}` : `${name}: []`;
 }

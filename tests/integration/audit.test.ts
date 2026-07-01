@@ -116,6 +116,24 @@ describe("audit command", () => {
     expect(finding?.paths).toEqual([...(finding?.paths ?? [])].sort());
   });
 
+  test("matches overlapping claim file references with backslash separators", async () => {
+    const cwd = copyFixture(mockApp);
+    const claimPath = writeClaim(cwd, "claims/auth/student_oauth_windows_path_overlap.md", {
+      id: "auth.student_oauth.windows_path_overlap",
+      status: "current",
+      sourceFiles: ["src\\auth.js"],
+      relatedFiles: [],
+      symbols: [],
+      tags: ["windows-path"]
+    });
+
+    const result = await dispatch(["audit", "--changed-files", claimPath], { cwd });
+
+    expect(result.exitCode).toBe(6);
+    expect(result.stdout).toContain("claim.overlap_without_review");
+    expect(result.stdout).toContain("auth.student_oauth.uid_is_tenant_scoped");
+  });
+
   test("passes when changed overlapping claims have an explicit replaces edge", async () => {
     const cwd = copyFixture(mockApp);
     const claimPath = writeClaim(cwd, "claims/auth/student_oauth_replacement.md", {
@@ -322,6 +340,58 @@ describe("audit command", () => {
     expect(result.exitCode).toBe(6);
     expect(result.stdout).toContain("source.related_claims_not_reviewed");
     expect(result.stdout).toContain("tenancy.current_tenant.required_for_student_auth");
+  });
+
+  test("matches changed source files against claim file references with backslash separators", async () => {
+    const cwd = copyFixture(mockApp);
+    const changedClaimPath = writeClaim(cwd, "claims/auth/student_oauth_reviewed_windows_path.md", {
+      id: "auth.student_oauth.reviewed_windows_path",
+      status: "current",
+      sourceFiles: ["src\\auth.js"],
+      relatedFiles: [],
+      symbols: ["resolveStudentOAuthIdentityReviewed"],
+      tags: ["reviewed-windows-path"]
+    });
+
+    const result = await dispatch(["audit", "--changed-files", "src/auth.js", changedClaimPath], { cwd });
+
+    expect(result.exitCode).toBe(6);
+    expect(result.stdout).toContain("source.related_claims_not_reviewed");
+    expect(result.stdout).toContain("auth.student_oauth.uid_is_tenant_scoped");
+  });
+
+  test("benchmarks overlap audit against many unrelated active claims", async () => {
+    const cwd = copyFixture(mockApp);
+
+    for (let index = 0; index < 1_000; index += 1) {
+      writeClaim(cwd, `claims/perf/unrelated_${index}.md`, {
+        id: `perf.unrelated_${index}`,
+        system: "perf",
+        status: "current",
+        sourceFiles: [`src/perf-${index}.js`],
+        relatedFiles: [],
+        symbols: [`perfSymbol${index}`],
+        routes: [`/perf/${index}`],
+        tags: [`perf-${index}`]
+      });
+    }
+
+    const claimPath = writeClaim(cwd, "claims/auth/student_oauth_perf_overlap.md", {
+      id: "auth.student_oauth.perf_overlap",
+      status: "current",
+      sourceFiles: ["src/new-auth.js"],
+      relatedFiles: [],
+      symbols: ["resolveStudentOAuthIdentity"],
+      tags: ["perf-overlap"]
+    });
+    const startedAt = performance.now();
+    const result = await dispatch(["audit", "--changed-files", claimPath, "--json"], { cwd });
+    const elapsedMs = performance.now() - startedAt;
+    const parsed = JSON.parse(result.stdout) as { findings: Array<{ code: string }> };
+
+    expect(result.exitCode).toBe(6);
+    expect(parsed.findings.some((finding) => finding.code === "claim.overlap_without_review")).toBe(true);
+    expect(elapsedMs).toBeLessThan(2_000);
   });
 
   test("checks git diff files", async () => {
