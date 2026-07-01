@@ -48,6 +48,16 @@ export function toPosix(value: string): string {
   return value.split(path.sep).join("/");
 }
 
+export function resolveConfiguredPath(repoRoot: string, configuredPath: string): string {
+  return path.isAbsolute(configuredPath) ? path.normalize(configuredPath) : path.join(repoRoot, configuredPath);
+}
+
+export function configuredPathRelativeToRepo(repoRoot: string, configuredPath: string): string {
+  return toPosix(path.relative(repoRoot, resolveConfiguredPath(repoRoot, configuredPath)))
+    .replace(/^(?:\.\/)+/, "")
+    .replace(/\/+$/, "");
+}
+
 function walkFiles(root: string): string[] {
   const entries = fs.readdirSync(root, { withFileTypes: true });
   const files: string[] = [];

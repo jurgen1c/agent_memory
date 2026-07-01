@@ -1,7 +1,7 @@
 import path from "node:path";
 import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
 import { loadConfig } from "./config";
-import { pathMatchesPattern, toPosix } from "./files";
+import { configuredPathRelativeToRepo, pathMatchesPattern, toPosix } from "./files";
 import { loadMemory, type MemoryClaim, type MemoryGraph } from "./memory";
 
 export interface AuditOptions {
@@ -58,7 +58,7 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
   const loaded = loadConfig({ cwd: options.cwd });
   const repoRoot = loaded.repo.root;
   const memory = loadMemory(repoRoot);
-  const memoryRootRelative = normalizeMemoryRoot(loaded.config.memory_root);
+  const memoryRootRelative = configuredPathRelativeToRepo(repoRoot, loaded.config.memory_root);
   const changedFiles = normalizeAuditFiles(
     [
       ...(options.changedFiles ?? []),
@@ -376,12 +376,6 @@ function intersects(left: string[], right: string[]): boolean {
 
 function normalizeAuditFiles(files: string[], repoRoot: string): string[] {
   return Array.from(new Set(normalizeChangedFiles(files, repoRoot))).sort();
-}
-
-function normalizeMemoryRoot(memoryRoot: string): string {
-  return toPosix(path.normalize(memoryRoot))
-    .replace(/^(?:\.\/)+/, "")
-    .replace(/\/+$/, "");
 }
 
 function isMemoryFile(file: string, memoryRootRelative: string): boolean {
