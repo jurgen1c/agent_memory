@@ -791,7 +791,7 @@ function existingParentEscapesRepo(repoRoot: string, resolvedPath: string): bool
   try {
     return !isPathInside(fs.realpathSync(repoRoot), fs.realpathSync(existingParent));
   } catch {
-    return false;
+    return true;
   }
 }
 

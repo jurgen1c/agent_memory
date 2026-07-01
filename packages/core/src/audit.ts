@@ -93,11 +93,12 @@ function findOverlappingChangedClaims(
 ): AuditFinding[] {
   const activeClaims = claims.filter(isActiveClaim);
   const changedActiveClaims = activeClaims.filter((claim) => changedFiles.has(memoryPath(memoryRootRelative, claim.sourcePath)));
+  const claimsByAttribute = indexClaimsByAuditAttribute(activeClaims);
   const findings: AuditFinding[] = [];
   const seenPairs = new Set<string>();
 
   for (const claim of changedActiveClaims) {
-    for (const other of activeClaims) {
+    for (const other of candidateOverlappingClaims(claim, claimsByAttribute)) {
       if (claim.id === other.id) {
         continue;
       }
@@ -192,7 +193,7 @@ function findInvalidDeprecatedBy(
       findings.push({
         code: "claim.deprecated_by_missing",
         message: `Claim ${claim.id} has deprecated_by ${replacementId}, but the replacement claim does not exist.`,
-        claimIds: [claim.id, replacementId],
+        claimIds: [claim.id, replacementId].sort(),
         paths: [memoryPath(memoryRootRelative, claim.sourcePath)],
         remediation: "Create the replacement claim, correct deprecated_by, or remove the deprecated_by value."
       });
@@ -200,8 +201,8 @@ function findInvalidDeprecatedBy(
       findings.push({
         code: "claim.deprecated_by_inactive",
         message: `Claim ${claim.id} has deprecated_by ${replacementId}, but the replacement claim is ${replacement.status}.`,
-        claimIds: [claim.id, replacementId],
-        paths: [memoryPath(memoryRootRelative, claim.sourcePath), memoryPath(memoryRootRelative, replacement.sourcePath)],
+        claimIds: [claim.id, replacementId].sort(),
+        paths: [memoryPath(memoryRootRelative, claim.sourcePath), memoryPath(memoryRootRelative, replacement.sourcePath)].sort(),
         remediation: "Point deprecated_by at an active replacement claim or reactivate the intended replacement."
       });
     }
@@ -307,6 +308,44 @@ function explicitRelationsFromGraphs(graphs: MemoryGraph[]): ExplicitRelation[] 
   }
 
   return relations;
+}
+
+function indexClaimsByAuditAttribute(claims: ClaimRecord[]): Map<string, ClaimRecord[]> {
+  const index = new Map<string, ClaimRecord[]>();
+
+  for (const claim of claims) {
+    for (const key of auditAttributeKeys(claim)) {
+      index.set(key, [...(index.get(key) ?? []), claim]);
+    }
+  }
+
+  return index;
+}
+
+function candidateOverlappingClaims(claim: ClaimRecord, claimsByAttribute: Map<string, ClaimRecord[]>): ClaimRecord[] {
+  const candidates = new Map<string, ClaimRecord>();
+
+  for (const key of auditAttributeKeys(claim)) {
+    for (const candidate of claimsByAttribute.get(key) ?? []) {
+      candidates.set(candidate.id, candidate);
+    }
+  }
+
+  return Array.from(candidates.values());
+}
+
+function auditAttributeKeys(claim: ClaimRecord): string[] {
+  return [
+    ...claim.sourceFiles.map((value) => auditAttributeKey("source_files", value)),
+    ...claim.relatedFiles.map((value) => auditAttributeKey("related_files", value)),
+    ...claim.symbols.map((value) => auditAttributeKey("symbols", value)),
+    ...claim.routes.map((value) => auditAttributeKey("routes", value)),
+    ...claim.tags.map((value) => auditAttributeKey("tags", value))
+  ].filter((key) => key.length > 0);
+}
+
+function auditAttributeKey(kind: string, value: string): string {
+  return value.length > 0 ? `${kind}\0${value}` : "";
 }
 
 function sharedAuditAttributes(left: ClaimRecord, right: ClaimRecord): string[] {

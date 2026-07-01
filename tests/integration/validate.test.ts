@@ -166,6 +166,36 @@ describe("validate command", () => {
     expect(result.stdout).toContain("claim.related_files.outside_repo");
   });
 
+  test("rejects claim file references when realpath checks fail", async () => {
+    const cwd = copyFixture(mockApp);
+    const claimPath = "docs/agent-memory/claims/auth/realpath_failure.md";
+    const referencedPath = path.join(cwd, "src/auth.js");
+    writeClaim(cwd, claimPath, {
+      id: "auth.realpath_failure",
+      title: "Realpath failure claim",
+      sourceFiles: ["src/auth.js"]
+    });
+
+    const originalRealpathSync = fs.realpathSync;
+
+    fs.realpathSync = ((target: fs.PathLike, options?: BufferEncoding | { encoding?: BufferEncoding | null } | null) => {
+      if (target === referencedPath) {
+        throw new Error("realpath unavailable");
+      }
+
+      return originalRealpathSync(target, options as never);
+    }) as typeof fs.realpathSync;
+
+    try {
+      const result = await dispatch(["validate", "--changed-files", claimPath], { cwd });
+
+      expect(result.exitCode).toBe(2);
+      expect(result.stdout).toContain("claim.source_files.outside_repo");
+    } finally {
+      fs.realpathSync = originalRealpathSync;
+    }
+  });
+
   test("reports missing related files with field-specific wording", async () => {
     const cwd = copyFixture(mockApp);
     writeClaim(cwd, "docs/agent-memory/claims/auth/missing_related_reference.md", {

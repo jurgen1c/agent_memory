@@ -209,6 +209,35 @@ describe("audit command", () => {
     expect(result.stdout).toContain("claim.deprecated_by_active_status");
   });
 
+  test("sorts deprecated_by finding IDs and paths in JSON output", async () => {
+    const cwd = copyFixture(mockApp);
+    writeClaim(cwd, "claims/auth/zzz_inactive_replacement.md", {
+      id: "auth.aaa_inactive_replacement",
+      status: "deprecated",
+      sourceFiles: ["src/inactive-replacement.js"],
+      relatedFiles: [],
+      symbols: ["inactiveReplacement"],
+      tags: ["inactive-replacement"]
+    });
+    const claimPath = writeClaim(cwd, "claims/auth/aaa_superseded.md", {
+      id: "auth.zzz_superseded",
+      status: "deprecated",
+      sourceFiles: ["src/superseded.js"],
+      relatedFiles: [],
+      symbols: ["superseded"],
+      tags: ["superseded"],
+      deprecatedBy: "auth.aaa_inactive_replacement"
+    });
+
+    const result = await dispatch(["audit", "--changed-files", claimPath, "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as { findings: Array<{ code: string; claimIds: string[]; paths: string[] }> };
+    const finding = parsed.findings.find((candidate) => candidate.code === "claim.deprecated_by_inactive");
+
+    expect(result.exitCode).toBe(6);
+    expect(finding?.claimIds).toEqual([...(finding?.claimIds ?? [])].sort());
+    expect(finding?.paths).toEqual([...(finding?.paths ?? [])].sort());
+  });
+
   test("ignores pre-existing unrelated deprecated_by problems", async () => {
     const cwd = copyFixture(mockApp);
     writeClaim(cwd, "claims/auth/student_oauth_bad_deprecated_by.md", {
