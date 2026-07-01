@@ -78,6 +78,30 @@ describe("compile command", () => {
     expect(fs.readdirSync(databaseDir).filter((entry) => entry.includes(".memory.sqlite.") && (entry.endsWith(".tmp") || entry.endsWith(".bak")))).toEqual([]);
   });
 
+  test("cleans temporary sidecar files after successful replacement", async () => {
+    const cwd = copyFixture(mockApp);
+    const databaseDir = path.join(cwd, ".agent-memory");
+    const originalRenameSync = fs.renameSync;
+
+    fs.renameSync = ((oldPath: fs.PathLike, newPath: fs.PathLike) => {
+      if (typeof oldPath === "string" && oldPath.includes(".memory.sqlite.") && oldPath.endsWith(".tmp")) {
+        for (const suffix of ["-journal", "-wal", "-shm"]) {
+          fs.writeFileSync(`${oldPath}${suffix}`, "temporary sidecar");
+        }
+      }
+
+      originalRenameSync(oldPath, newPath);
+    }) as typeof fs.renameSync;
+
+    try {
+      await dispatch(["compile"], { cwd });
+    } finally {
+      fs.renameSync = originalRenameSync;
+    }
+
+    expect(fs.readdirSync(databaseDir).filter((entry) => entry.includes(".memory.sqlite.") && entry.includes(".tmp"))).toEqual([]);
+  });
+
   test("keeps the previous database when a rebuild is rejected", async () => {
     const cwd = copyFixture(mockApp);
     const databasePath = path.join(cwd, ".agent-memory/memory.sqlite");

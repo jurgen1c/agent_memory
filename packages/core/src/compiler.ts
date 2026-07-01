@@ -540,6 +540,9 @@ function replaceDatabase(tempDatabasePath: string, databasePath: string): void {
     if (installed && backedUp) {
       cleanupDatabaseArtifacts(backupPath);
     }
+    if (installed) {
+      cleanupDatabaseArtifacts(tempDatabasePath);
+    }
   }
 }
 
@@ -548,7 +551,7 @@ function cleanupDatabaseArtifacts(databasePath: string): void {
     try {
       fs.rmSync(artifactPath, { force: true });
     } catch {
-      // Cleanup is best effort; the original database path has not been replaced.
+      // Cleanup is best effort; failures should not hide the compile result.
     }
   }
 }
