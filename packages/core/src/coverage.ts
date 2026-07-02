@@ -81,7 +81,7 @@ export async function checkCoverage(options: CoverageOptions = {}): Promise<Cove
   );
   const waivers = loadCoverageWaivers(memoryRoot, loaded.config.waivers);
   const warnings = waivers.flatMap((waiver) => waiver.problems.map((problem) => `${waiver.sourcePath}: ${problem}`));
-  const database = await openSqliteDatabase(databasePath);
+  const database = await openSqliteDatabase(databasePath, { readonly: true });
 
   try {
     const indexes = loadCoverageIndexes(database);

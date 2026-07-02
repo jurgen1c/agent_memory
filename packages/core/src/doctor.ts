@@ -41,7 +41,7 @@ export async function doctorMemory(options: DoctorOptions = {}): Promise<DoctorR
 
   checks.push(ok("database_exists", `Database exists at ${databasePath}.`));
 
-  const database = await openSqliteDatabase(databasePath);
+  const database = await openSqliteDatabase(databasePath, { readonly: true });
 
   try {
     const metadataTableExists = tableExists(database, "compile_metadata");
