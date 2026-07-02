@@ -3,7 +3,7 @@ import path from "node:path";
 import { normalizeChangedFiles } from "./changes";
 import { ConfigError } from "./errors";
 import { loadConfig } from "./config";
-import { discoverFiles, toPosix } from "./files";
+import { discoverFiles, resolveConfiguredPath, toPosix } from "./files";
 import { parseMarkdownFile, extractMarkdownSection } from "./markdown";
 import { isPathInside } from "./repo";
 import type { AgentMemoryConfig } from "./types";
@@ -101,7 +101,7 @@ const RELATIONS = [
 export function validateRepository(options: ValidateRepositoryOptions = {}): ValidationResult {
   const loaded = loadConfig({ cwd: options.cwd });
   const repoRoot = loaded.repo.root;
-  const memoryRoot = path.join(repoRoot, loaded.config.memory_root);
+  const memoryRoot = resolveConfiguredPath(repoRoot, loaded.config.memory_root);
   const pathContext = createRepoPathValidationContext(repoRoot);
   const issues: ValidationIssue[] = [];
   const changedFiles = new Set(normalizeChangedFiles(options.changedFiles ?? [], repoRoot));

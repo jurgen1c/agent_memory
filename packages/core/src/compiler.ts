@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { AgentMemoryError } from "./errors";
-import { canonicalMemoryFileInventory } from "./files";
+import { canonicalMemoryFileInventory, resolveConfiguredPath } from "./files";
 import { loadMemory, type LoadedMemory, type MemoryClaim, type MemoryGraphEdge } from "./memory";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
 import { validateRepository, type ValidationResult } from "./validator";
@@ -53,7 +53,7 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
   const repoRoot = memory.loadedConfig.repo.root;
   const configuredDbPath = options.dbPath ?? memory.loadedConfig.config.database_path;
   const databasePath = path.isAbsolute(configuredDbPath) ? configuredDbPath : path.join(repoRoot, configuredDbPath);
-  const memoryRoot = path.join(repoRoot, memory.loadedConfig.config.memory_root);
+  const memoryRoot = resolveConfiguredPath(repoRoot, memory.loadedConfig.config.memory_root);
   const tempDatabasePath = temporaryDatabasePath(databasePath);
 
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
@@ -466,7 +466,7 @@ function relationKey(relation: RelationRow): string {
 
 function insertMetadata(database: SqliteDatabase, memory: LoadedMemory, databasePath: string): void {
   const configPath = memory.loadedConfig.path;
-  const memoryRoot = path.join(memory.loadedConfig.repo.root, memory.loadedConfig.config.memory_root);
+  const memoryRoot = resolveConfiguredPath(memory.loadedConfig.repo.root, memory.loadedConfig.config.memory_root);
   const canonicalFileInventory = canonicalMemoryFileInventory(memoryRoot, memory.loadedConfig.config);
   const metadata: Record<string, string> = {
     schema_version: "1",

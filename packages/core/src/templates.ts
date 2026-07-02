@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { AgentMemoryError, NotFoundError } from "./errors";
 import { loadConfig } from "./config";
+import { resolveConfiguredPath } from "./files";
 
 export const CLAIM_TYPES = [
   "fact",
@@ -464,7 +465,7 @@ export function copyTemplate(name: string, options: CopyTemplateOptions): CopyTe
 
 export function createClaim(options: NewClaimOptions): NewClaimResult {
   const loaded = loadConfig({ cwd: options.cwd });
-  const memoryRoot = path.resolve(loaded.repo.root, loaded.config.memory_root);
+  const memoryRoot = resolveConfiguredPath(loaded.repo.root, loaded.config.memory_root);
   const normalizedSystem = normalizeSystem(options.system);
   const sourceFile = options.sourceFile ?? "TODO_SOURCE_FILE";
   const verificationStep = options.verificationStep ?? "TODO: Add a concrete verification step.";

@@ -205,7 +205,8 @@ describe("validate command", () => {
       const result = await dispatch(["validate", "--changed-files", claimPath], { cwd });
 
       expect(result.exitCode).toBe(0);
-      expect(repoRootRealpathCalls).toBe(1);
+      // Once for guarded memory_root resolution and once for the cached path-validation context.
+      expect(repoRootRealpathCalls).toBe(2);
     } finally {
       fs.realpathSync = originalRealpathSync;
     }

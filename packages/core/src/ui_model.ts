@@ -4,7 +4,7 @@ import { compileMemory, type CompileResult } from "./compiler";
 import { loadConfig } from "./config";
 import { doctorMemory, type DoctorResult } from "./doctor";
 import { AgentMemoryError, NotFoundError } from "./errors";
-import { discoverCanonicalMemoryFiles, toPosix } from "./files";
+import { discoverCanonicalMemoryFiles, resolveConfiguredPath, toPosix } from "./files";
 import { parseMarkdown } from "./markdown";
 import { loadMemory, type LoadedMemory, type MemoryClaim, type MemoryGraphEdge } from "./memory";
 import { commandPrefixForRepo } from "./skills";
@@ -118,7 +118,7 @@ export async function buildUiMemoryModel(cwd?: string): Promise<UiMemoryModel> {
   const loaded = loadConfig({ cwd });
   const memory = loadMemory(cwd);
   const repoRoot = loaded.repo.root;
-  const memoryRoot = path.join(repoRoot, loaded.config.memory_root);
+  const memoryRoot = resolveConfiguredPath(repoRoot, loaded.config.memory_root);
   const databasePath = path.isAbsolute(loaded.config.database_path) ? loaded.config.database_path : path.join(repoRoot, loaded.config.database_path);
   const validation = validateRepository({ cwd });
   const doctor = await doctorMemory({ cwd });
@@ -142,7 +142,7 @@ export async function buildUiMemoryModel(cwd?: string): Promise<UiMemoryModel> {
 export function getUiClaimDetail(cwd: string | undefined, id: string): UiClaimDetail {
   const loaded = loadConfig({ cwd });
   const memory = loadMemory(cwd);
-  const memoryRoot = path.join(loaded.repo.root, loaded.config.memory_root);
+  const memoryRoot = resolveConfiguredPath(loaded.repo.root, loaded.config.memory_root);
   const claims = memory.claims.map((claim) => toUiClaim(memoryRoot, claim));
   const claim = claims.find((candidate) => candidate.id === id);
 
@@ -171,7 +171,7 @@ export async function reviewClaim(options: ReviewClaimOptions): Promise<ReviewCl
     throw new NotFoundError(`Claim not found: ${options.id}`);
   }
 
-  const memoryRoot = path.join(loaded.repo.root, loaded.config.memory_root);
+  const memoryRoot = resolveConfiguredPath(loaded.repo.root, loaded.config.memory_root);
   const absolutePath = path.join(memoryRoot, claim.sourcePath);
   updateClaimFrontmatter(absolutePath, {
     status,
