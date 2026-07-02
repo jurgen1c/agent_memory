@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
 import { loadConfig } from "./config";
-import { discoverFiles, pathMatchesPattern, toPosix } from "./files";
+import { configuredPathRelativeToRepo, discoverFiles, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
 import { parseYaml } from "./yaml";
 import { NotFoundError } from "./errors";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
@@ -62,8 +62,8 @@ interface MemoryFile {
 export async function checkCoverage(options: CoverageOptions = {}): Promise<CoverageResult> {
   const loaded = loadConfig({ cwd: options.cwd });
   const repoRoot = loaded.repo.root;
-  const memoryRoot = path.join(repoRoot, loaded.config.memory_root);
-  const memoryRootRelative = toPosix(loaded.config.memory_root).replace(/\/+$/, "");
+  const memoryRoot = resolveConfiguredPath(repoRoot, loaded.config.memory_root);
+  const memoryRootRelative = configuredPathRelativeToRepo(repoRoot, loaded.config.memory_root);
   const databasePath = path.isAbsolute(loaded.config.database_path) ? loaded.config.database_path : path.join(repoRoot, loaded.config.database_path);
 
   if (!fs.existsSync(databasePath)) {
@@ -81,7 +81,7 @@ export async function checkCoverage(options: CoverageOptions = {}): Promise<Cove
   );
   const waivers = loadCoverageWaivers(memoryRoot, loaded.config.waivers);
   const warnings = waivers.flatMap((waiver) => waiver.problems.map((problem) => `${waiver.sourcePath}: ${problem}`));
-  const database = await openSqliteDatabase(databasePath);
+  const database = await openSqliteDatabase(databasePath, { readonly: true });
 
   try {
     const indexes = loadCoverageIndexes(database);

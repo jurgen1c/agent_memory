@@ -67,6 +67,7 @@ describe("compile command", () => {
 
   test("rebuilds deterministically without duplicating rows", async () => {
     const cwd = copyFixture(mockApp);
+    const databaseDir = path.join(cwd, ".agent-memory");
     await dispatch(["compile"], { cwd });
     const firstCounts = readCounts(path.join(cwd, ".agent-memory/memory.sqlite"));
 
@@ -74,6 +75,87 @@ describe("compile command", () => {
     const secondCounts = readCounts(path.join(cwd, ".agent-memory/memory.sqlite"));
 
     expect(secondCounts).toEqual(firstCounts);
+    expect(fs.readdirSync(databaseDir).filter((entry) => entry.includes(".memory.sqlite.") && (entry.endsWith(".tmp") || entry.endsWith(".bak")))).toEqual([]);
+  });
+
+  test("cleans temporary sidecar files after successful replacement", async () => {
+    const cwd = copyFixture(mockApp);
+    const databaseDir = path.join(cwd, ".agent-memory");
+    const originalRenameSync = fs.renameSync;
+
+    fs.renameSync = ((oldPath: fs.PathLike, newPath: fs.PathLike) => {
+      if (typeof oldPath === "string" && oldPath.includes(".memory.sqlite.") && oldPath.endsWith(".tmp")) {
+        for (const suffix of ["-journal", "-wal", "-shm"]) {
+          fs.writeFileSync(`${oldPath}${suffix}`, "temporary sidecar");
+        }
+      }
+
+      originalRenameSync(oldPath, newPath);
+    }) as typeof fs.renameSync;
+
+    try {
+      await dispatch(["compile"], { cwd });
+    } finally {
+      fs.renameSync = originalRenameSync;
+    }
+
+    expect(fs.readdirSync(databaseDir).filter((entry) => entry.includes(".memory.sqlite.") && entry.includes(".tmp"))).toEqual([]);
+  });
+
+  test("cleans stale sidecar files from the original database path before replacement", async () => {
+    const cwd = copyFixture(mockApp);
+    const databasePath = path.join(cwd, ".agent-memory/memory.sqlite");
+    await dispatch(["compile"], { cwd });
+
+    for (const suffix of ["-journal", "-wal", "-shm"]) {
+      fs.writeFileSync(`${databasePath}${suffix}`, "stale sidecar");
+    }
+
+    await dispatch(["compile"], { cwd });
+
+    for (const suffix of ["-journal", "-wal", "-shm"]) {
+      expect(fs.existsSync(`${databasePath}${suffix}`)).toBe(false);
+    }
+    expect(readCounts(databasePath).claims).toBe(2);
+  });
+
+  test("keeps the previous database when a rebuild is rejected", async () => {
+    const cwd = copyFixture(mockApp);
+    const databasePath = path.join(cwd, ".agent-memory/memory.sqlite");
+    await dispatch(["compile"], { cwd });
+    const firstCounts = readCounts(databasePath);
+    fs.unlinkSync(path.join(cwd, "src/auth.js"));
+
+    const exitCode = await runCli(
+      ["compile"],
+      {
+        stdout: { write: () => true },
+        stderr: { write: () => true }
+      },
+      { cwd }
+    );
+
+    expect(exitCode).toBe(4);
+    expect(fs.existsSync(databasePath)).toBe(true);
+    expect(readCounts(databasePath)).toEqual(firstCounts);
+  });
+
+  test("cleans temporary databases when replacement fails", async () => {
+    const cwd = copyFixture(mockApp);
+    const blockedPath = path.join(cwd, "tmp/blocked.sqlite");
+    fs.mkdirSync(blockedPath, { recursive: true });
+
+    const exitCode = await runCli(
+      ["compile", "--db", "tmp/blocked.sqlite"],
+      {
+        stdout: { write: () => true },
+        stderr: { write: () => true }
+      },
+      { cwd }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(fs.readdirSync(path.join(cwd, "tmp")).filter((entry) => entry.includes(".blocked.sqlite.") && entry.endsWith(".tmp"))).toEqual([]);
   });
 
   test("refuses to compile invalid memory", async () => {

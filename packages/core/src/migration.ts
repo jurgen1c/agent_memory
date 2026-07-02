@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadConfig, renderYamlScalar } from "./config";
 import { AgentMemoryError } from "./errors";
-import { toPosix } from "./files";
+import { resolveConfiguredPath, toPosix } from "./files";
 import { isPathInside, resolveRepoOutputPath } from "./repo";
 import { parseYaml } from "./yaml";
 
@@ -133,7 +133,7 @@ export function migrateDocs(options: MigrateDocsOptions): MigrateDocsResult {
 
   const loaded = loadConfig({ cwd: options.cwd });
   const repoRoot = loaded.repo.root;
-  const memoryRoot = path.join(repoRoot, loaded.config.memory_root);
+  const memoryRoot = resolveConfiguredPath(repoRoot, loaded.config.memory_root);
   const sourceRoot = resolveSourceRoot(repoRoot, options.fromPath);
   const system = normalizeMigrationSystem(options.system);
   const mode = options.mode ?? "plan";
@@ -174,7 +174,7 @@ export function classifyDocs(options: ClassifyDocsOptions): ClassifyDocsResult {
 
   const loaded = loadConfig({ cwd: options.cwd });
   const repoRoot = loaded.repo.root;
-  const memoryRoot = path.join(repoRoot, loaded.config.memory_root);
+  const memoryRoot = resolveConfiguredPath(repoRoot, loaded.config.memory_root);
   const sourceRoot = resolveSourceRoot(repoRoot, options.fromPath);
 
   if (!fs.existsSync(sourceRoot)) {
@@ -223,7 +223,7 @@ export function migrateDocsFromSystemMap(options: MigrateDocsSystemMapOptions): 
 
   const loaded = loadConfig({ cwd: options.cwd });
   const repoRoot = loaded.repo.root;
-  const memoryRoot = path.join(repoRoot, loaded.config.memory_root);
+  const memoryRoot = resolveConfiguredPath(repoRoot, loaded.config.memory_root);
   const absoluteMapPath = resolveSourceRoot(repoRoot, options.systemMapPath);
   const mode = options.mode ?? "plan";
 
@@ -336,9 +336,10 @@ function planOneDoc(
 ): MigratedDocPlan {
   const sourcePath = displayPath(repoRoot, docPath);
   const content = fs.readFileSync(docPath, "utf8");
-  const title = mappedTitle?.trim() || extractTitle(content, docPath);
-  const slug = slugify(title || path.basename(docPath, path.extname(docPath)));
+  const baseTitle = mappedTitle?.trim() || extractTitle(content, docPath);
+  const slug = slugify(baseTitle || path.basename(docPath, path.extname(docPath)));
   const migrationSlug = uniqueMigrationSlug(system, slug, allocatedIds, allocatedPaths);
+  const title = uniqueMigrationTitle(baseTitle, slug, migrationSlug);
   const suggestedId = `${system}.${migrationSlug}`;
   const targetPath = targetPathForDraft(repoRoot, memoryRoot, system, migrationSlug);
 
@@ -383,6 +384,17 @@ function uniqueMigrationSlug(system: string, sourceSlug: string, allocatedIds: S
 
     counter += 1;
   }
+}
+
+function uniqueMigrationTitle(baseTitle: string, sourceSlug: string, migrationSlug: string): string {
+  const baseMigrationSlug = `migrated_${sourceSlug}`;
+
+  if (migrationSlug === baseMigrationSlug) {
+    return baseTitle;
+  }
+
+  const suffix = migrationSlug.slice(baseMigrationSlug.length + 1);
+  return suffix.length > 0 ? `${baseTitle} ${suffix}` : baseTitle;
 }
 
 function targetPathForDraft(repoRoot: string, memoryRoot: string, system: string, migrationSlug: string): string {

@@ -148,7 +148,7 @@ async function openConfiguredDatabase(cwd?: string): Promise<OpenDatabase> {
   }
 
   return {
-    database: await openSqliteDatabase(databasePath),
+    database: await openSqliteDatabase(databasePath, { readonly: true }),
     databasePath,
     repoRoot: loaded.repo.root,
     contextDefaults: loaded.config.context

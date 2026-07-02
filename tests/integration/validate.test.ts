@@ -47,10 +47,343 @@ describe("validate command", () => {
     expect(parsed.valid).toBe(false);
     expect(parsed.errors.some((issue: { code: string }) => issue.code === "graph.edge.missing_claim")).toBe(true);
   });
+
+  test("scopes changed-file validation to changed canonical memory files", async () => {
+    const cwd = copyFixture(mockApp);
+    writeClaim(cwd, "docs/agent-memory/claims/auth/broken_unrelated.md", {
+      id: "auth.broken_unrelated",
+      title: "Broken unrelated claim",
+      sourceFiles: ["src/missing.js"]
+    });
+
+    const unrelated = await dispatch(["validate", "--changed-files", "README.md", "--json"], { cwd });
+    expect(unrelated.exitCode).toBe(0);
+
+    const unrelatedParsed = JSON.parse(unrelated.stdout);
+    expect(unrelatedParsed.valid).toBe(true);
+    expect(unrelatedParsed.counts.claims).toBe(0);
+
+    const changed = await dispatch(["validate", "--changed-files", "docs/agent-memory/claims/auth/broken_unrelated.md"], { cwd });
+    expect(changed.exitCode).toBe(2);
+    expect(changed.stdout).toContain("claim.source_files.missing");
+  });
+
+  test("checks changed graphs against unchanged claim references", async () => {
+    const cwd = copyFixture(mockApp);
+    const graphPath = path.join(cwd, "docs/agent-memory/graph/auth-tenancy.yaml");
+    fs.appendFileSync(
+      graphPath,
+      [
+        "",
+        "  - source: auth.student_oauth.uid_is_tenant_scoped",
+        "    target: auth.missing_claim",
+        "    relation: requires",
+        "    reason: Missing target proves scoped graph validation.",
+        "    strength: 95",
+        "    bidirectional: false",
+        ""
+      ].join("\n")
+    );
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/graph/auth-tenancy.yaml"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("graph.edge.missing_claim");
+    expect(result.stdout).toContain("auth.missing_claim");
+  });
+
+  test("checks unchanged graph and recipe references when a changed claim file was deleted", async () => {
+    const cwd = copyFixture(mockApp);
+    const claimPath = "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md";
+    fs.unlinkSync(path.join(cwd, claimPath));
+
+    const result = await dispatch(["validate", "--changed-files", claimPath], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("graph.edge.missing_claim");
+    expect(result.stdout).toContain("recipe.required_claim.missing");
+    expect(result.stdout).toContain("auth.student_oauth.uid_is_tenant_scoped");
+  });
+
+  test("does not check unchanged claim source paths when loading scoped references", async () => {
+    const cwd = copyFixture(mockApp);
+    const missingReference = path.join(cwd, "src/reference-missing.js");
+    writeClaim(cwd, "docs/agent-memory/claims/auth/unchanged_reference_only.md", {
+      id: "auth.unchanged_reference_only",
+      title: "Unchanged reference only",
+      sourceFiles: ["src/reference-missing.js"]
+    });
+
+    const originalExistsSync = fs.existsSync;
+    let sourcePathChecks = 0;
+
+    fs.existsSync = ((target: fs.PathLike) => {
+      if (typeof target === "string" && target === missingReference) {
+        sourcePathChecks += 1;
+      }
+
+      return originalExistsSync(target);
+    }) as typeof fs.existsSync;
+
+    try {
+      const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/graph/auth-tenancy.yaml"], { cwd });
+
+      expect(result.exitCode).toBe(0);
+      expect(sourcePathChecks).toBe(0);
+    } finally {
+      fs.existsSync = originalExistsSync;
+    }
+  });
+
+  test("detects duplicate titles for changed claims against unchanged claims", async () => {
+    const cwd = copyFixture(mockApp);
+    writeClaim(cwd, "docs/agent-memory/claims/auth/student_oauth_title_duplicate.md", {
+      id: "auth.student_oauth.title_duplicate",
+      title: "Student OAuth UID is tenant scoped"
+    });
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/claims/auth/student_oauth_title_duplicate.md"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("claim.title.duplicate");
+  });
+
+  test("strict mode enforces claim file paths", async () => {
+    const cwd = copyFixture(mockApp);
+    writeClaim(cwd, "docs/agent-memory/claims/auth/wrong_path.md", {
+      id: "auth.strict_path.required",
+      title: "Strict path claim"
+    });
+
+    const defaultResult = await dispatch(["validate", "--changed-files", "docs/agent-memory/claims/auth/wrong_path.md"], { cwd });
+    expect(defaultResult.exitCode).toBe(0);
+
+    const strictResult = await dispatch(["validate", "--strict", "--changed-files", "docs/agent-memory/claims/auth/wrong_path.md"], { cwd });
+    expect(strictResult.exitCode).toBe(2);
+    expect(strictResult.stdout).toContain("claim.file_path");
+  });
+
+  test("strict mode supports relocated claim globs", async () => {
+    const cwd = copyFixture(mockApp);
+    updateMemoryRootToRepoRoot(cwd);
+    const claimPath = "docs/agent-memory/claims/auth/relocated_strict_path.md";
+    writeClaim(cwd, claimPath, {
+      id: "auth.relocated.strict_path",
+      title: "Relocated strict path claim"
+    });
+
+    const result = await dispatch(["validate", "--strict", "--changed-files", claimPath], { cwd });
+
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("rejects claim file references that escape the repository", async () => {
+    const cwd = copyFixture(mockApp);
+    writeClaim(cwd, "docs/agent-memory/claims/auth/outside_reference.md", {
+      id: "auth.outside_reference",
+      title: "Outside reference claim",
+      sourceFiles: ["../outside.js"],
+      relatedFiles: ["../../outside-related.js"]
+    });
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/claims/auth/outside_reference.md"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("claim.source_files.outside_repo");
+    expect(result.stdout).toContain("claim.related_files.outside_repo");
+  });
+
+  test("accepts claim file references with backslash separators", async () => {
+    const cwd = copyFixture(mockApp);
+    const claimPath = "docs/agent-memory/claims/auth/windows_reference.md";
+    writeClaim(cwd, claimPath, {
+      id: "auth.windows_reference",
+      title: "Windows reference claim",
+      sourceFiles: ["src\\auth.js"],
+      relatedFiles: ["src\\tenant.js"]
+    });
+
+    const result = await dispatch(["validate", "--changed-files", claimPath], { cwd });
+
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("caches repository realpath while validating path references", async () => {
+    const cwd = copyFixture(mockApp);
+    const claimPath = "docs/agent-memory/claims/auth/cached_realpath.md";
+    writeClaim(cwd, claimPath, {
+      id: "auth.cached_realpath",
+      title: "Cached realpath claim",
+      sourceFiles: ["src/auth.js"],
+      relatedFiles: ["src/tenant.js"]
+    });
+    const originalRealpathSync = fs.realpathSync;
+    let repoRootRealpathCalls = 0;
+
+    fs.realpathSync = ((target: fs.PathLike, options?: BufferEncoding | { encoding?: BufferEncoding | null } | null) => {
+      if (target === cwd) {
+        repoRootRealpathCalls += 1;
+      }
+
+      return originalRealpathSync(target, options as never);
+    }) as typeof fs.realpathSync;
+
+    try {
+      const result = await dispatch(["validate", "--changed-files", claimPath], { cwd });
+
+      expect(result.exitCode).toBe(0);
+      // Once for guarded memory_root resolution and once for the cached path-validation context.
+      expect(repoRootRealpathCalls).toBe(2);
+    } finally {
+      fs.realpathSync = originalRealpathSync;
+    }
+  });
+
+  test("rejects claim file references when realpath checks fail", async () => {
+    const cwd = copyFixture(mockApp);
+    const claimPath = "docs/agent-memory/claims/auth/realpath_failure.md";
+    const referencedPath = path.join(cwd, "src/auth.js");
+    writeClaim(cwd, claimPath, {
+      id: "auth.realpath_failure",
+      title: "Realpath failure claim",
+      sourceFiles: ["src/auth.js"]
+    });
+
+    const originalRealpathSync = fs.realpathSync;
+
+    fs.realpathSync = ((target: fs.PathLike, options?: BufferEncoding | { encoding?: BufferEncoding | null } | null) => {
+      if (target === referencedPath) {
+        throw new Error("realpath unavailable");
+      }
+
+      return originalRealpathSync(target, options as never);
+    }) as typeof fs.realpathSync;
+
+    try {
+      const result = await dispatch(["validate", "--changed-files", claimPath], { cwd });
+
+      expect(result.exitCode).toBe(2);
+      expect(result.stdout).toContain("claim.source_files.outside_repo");
+      expect(result.stdout).toContain("Referenced path escapes repository root or cannot be validated safely: src/auth.js");
+    } finally {
+      fs.realpathSync = originalRealpathSync;
+    }
+  });
+
+  test("reports missing related files with field-specific wording", async () => {
+    const cwd = copyFixture(mockApp);
+    writeClaim(cwd, "docs/agent-memory/claims/auth/missing_related_reference.md", {
+      id: "auth.missing_related_reference",
+      title: "Missing related reference claim",
+      relatedFiles: ["src/missing-related.js"]
+    });
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/claims/auth/missing_related_reference.md", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as { errors: Array<{ code: string; message: string }> };
+    const error = parsed.errors.find((candidate) => candidate.code === "claim.related_files.missing");
+
+    expect(result.exitCode).toBe(2);
+    expect(error?.message).toBe("Referenced related file does not exist: src/missing-related.js");
+  });
+
+  test("renders empty related file overrides as valid YAML arrays", async () => {
+    const cwd = copyFixture(mockApp);
+    const claimPath = "docs/agent-memory/claims/auth/no_related_reference.md";
+    writeClaim(cwd, claimPath, {
+      id: "auth.no_related_reference",
+      title: "No related reference claim",
+      relatedFiles: []
+    });
+
+    const result = await dispatch(["validate", "--changed-files", claimPath], { cwd });
+
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("rejects index watched files that escape the repository", async () => {
+    const cwd = copyFixture(mockApp);
+    const indexPath = path.join(cwd, "docs/agent-memory/indexes/auth.yaml");
+    fs.writeFileSync(indexPath, fs.readFileSync(indexPath, "utf8").replace("  - src/tenant.js\n", "  - src/tenant.js\n  - ../outside/**/*.js\n"));
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/indexes/auth.yaml"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("index.watched_files.outside_repo");
+  });
 });
 
 function copyFixture(source: string): string {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-validate-"));
   fs.cpSync(source, target, { recursive: true });
   return target;
+}
+
+function updateMemoryRootToRepoRoot(cwd: string): void {
+  const configPath = path.join(cwd, "agent-memory.config.yaml");
+  const config = fs
+    .readFileSync(configPath, "utf8")
+    .replace("memory_root: docs/agent-memory", "memory_root: .")
+    .replace("  - claims/**/*.md", "  - docs/agent-memory/claims/**/*.md")
+    .replace("  - graph/**/*.yaml", "  - docs/agent-memory/graph/**/*.yaml")
+    .replace("  - indexes/**/*.yaml", "  - docs/agent-memory/indexes/**/*.yaml")
+    .replace("  - recipes/**/*.yaml", "  - docs/agent-memory/recipes/**/*.yaml")
+    .replace("  - waivers/**/*.yaml", "  - docs/agent-memory/waivers/**/*.yaml");
+  fs.writeFileSync(configPath, config);
+}
+
+function writeClaim(
+  cwd: string,
+  relativePath: string,
+  overrides: {
+    id: string;
+    title: string;
+    sourceFiles?: string[];
+    relatedFiles?: string[];
+  }
+): void {
+  const claimPath = path.join(cwd, relativePath);
+  fs.mkdirSync(path.dirname(claimPath), { recursive: true });
+  fs.writeFileSync(
+    claimPath,
+    `---
+id: ${overrides.id}
+type: fact
+system: auth
+status: current
+confidence: high
+severity: important
+
+title: ${overrides.title}
+
+claim: Test claim for validation behavior.
+
+${renderYamlField("source_files", overrides.sourceFiles ?? ["src/auth.js"])}
+
+${renderYamlField("related_files", overrides.relatedFiles ?? ["src/tenant.js"])}
+
+symbols:
+  - resolveStudentOAuthIdentity
+
+routes: []
+
+tags:
+  - auth
+
+verification:
+  - bun test
+
+last_verified_commit: null
+---
+
+# ${overrides.title}
+
+## Claim
+
+Test claim for validation behavior.
+`
+  );
+}
+
+function renderYamlField(name: string, values: string[]): string {
+  return values.length > 0 ? `${name}:\n${values.map((value) => `  - ${value}`).join("\n")}` : `${name}: []`;
 }

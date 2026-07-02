@@ -31,9 +31,6 @@ jobs:
             echo "Release tag $GITHUB_REF_NAME does not match package version $expected_tag." >&2
             exit 1
           fi
-      - run: bun run audit
-      - run: bun run lint
-      - run: bun test
-      - run: bun run build
+      - run: bun run ci
       - run: npm pack --dry-run
       - run: npm publish --provenance --access public

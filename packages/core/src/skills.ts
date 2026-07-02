@@ -209,6 +209,12 @@ ${options.commandPrefix} doctor
 ${options.commandPrefix} coverage --git-diff
 \`\`\`
 
+If any canonical memory file changed, also run:
+
+\`\`\`bash
+${options.commandPrefix} audit --git-diff
+\`\`\`
+
 ## When to Update Memory
 
 Update memory when:
@@ -502,6 +508,10 @@ function coverageAndValidationReference(): string {
 Run \`validate\` before finishing memory changes. Run \`compile\` and \`doctor\` when retrieval behavior or generated SQLite freshness matters.
 
 Use \`coverage --git-diff\` for non-trivial code changes. If watched files changed without memory updates, either update the relevant claim, index, recipe, or graph, or add a time-boxed waiver with a clear reason.
+
+## Stale Review
+
+Run \`audit --git-diff\` when canonical memory files changed. Resolve audit failures by marking superseded claims stale or deprecated, adding explicit \`replaces\` or \`conflicts_with\` graph edges, or updating the older claim directly.
 
 Generated files under \`.agent-memory/\` are cache data and must not be committed.
 `;

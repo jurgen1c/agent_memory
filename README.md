@@ -103,6 +103,7 @@ bin/memory new claim --type fact --system auth --title "Student OAuth UID is ten
 bin/memory validate
 bin/memory compile
 bin/memory coverage --git-diff
+bin/memory audit --git-diff
 ```
 
 ## Command Reference
@@ -122,6 +123,7 @@ Use `agent-memory help <command>` for full usage and examples.
 | `system` | Summarize claims, recipes, watched files, and graph activity for one system. |
 | `context` | Build task-ready context from a task, changed files, or git diff. |
 | `coverage` | Check whether changed watched files have related memory updates or waivers. |
+| `audit` | Audit changed memory for deterministic stale-claim risks. |
 | `doctor` | Check whether the compiled database exists, is fresh, and is compatible. |
 | `sync` | Compile, validate, and doctor memory in one command. |
 | `upgrade` | Refresh generated config comments, managed `AGENTS.md` guidance, and agent skill files after package upgrades. |
@@ -147,6 +149,7 @@ Command usage cheat sheet:
 | `system` | System ID, such as `auth`. | `--json` |
 | `context` | One of `--task`, `--changed-files`, or `--git-diff`. | `--budget small`, `--budget medium`, `--budget full`, `--depth <n>`, `--include-inferred`, `--no-include-inferred`, `--json` |
 | `coverage` | `--changed-files` or `--git-diff`. | `--base <ref>` with `--git-diff`, `--json` |
+| `audit` | `--changed-files` or `--git-diff`. | `--base <ref>` with `--git-diff`, `--json` |
 | `doctor` | None. | `--json` |
 | `sync` | None. | `--json` |
 | `upgrade` | None. Dry-run by default. | `--write`, `--force`, `--json` |
@@ -297,6 +300,7 @@ jobs:
       - run: npm install
       - run: npx agent-memory sync
       - run: npx agent-memory coverage --git-diff --base origin/main
+      - run: npx agent-memory audit --git-diff --base origin/main
 ```
 
 If the repository uses the generated wrapper, prefer:
@@ -304,9 +308,11 @@ If the repository uses the generated wrapper, prefer:
 ```bash
 bin/memory sync
 bin/memory coverage --git-diff --base origin/main
+bin/memory audit --git-diff --base origin/main
 ```
 
 `coverage` exits with code `6` when a changed watched file has no related memory update or valid waiver.
+`audit` also exits with code `6` when changed memory has deterministic stale-claim risks, such as overlapping active claims without `replaces` or `conflicts_with`, invalid `deprecated_by`, or unresolved active conflicts.
 
 ## Migrating Existing Docs
 

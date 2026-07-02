@@ -26,13 +26,15 @@ export interface UiServerHandle {
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4317;
 const PORT_SCAN_LIMIT = 100;
+const MIN_FALLBACK_PORT = 1024;
+const MAX_FALLBACK_PORT = 65535;
 
-type BunServer = {
+export type BunServer = {
   port: number;
   stop(force?: boolean): void | Promise<void>;
 };
 
-type BunRuntime = {
+export type BunRuntime = {
   serve(options: {
     hostname: string;
     port: number;
@@ -44,9 +46,19 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   const bun = bunRuntime();
 
   if (bun) {
-    return startBunUiServer(bun, options);
+    try {
+      return await startBunUiServer(bun, options);
+    } catch (error) {
+      if (!isAddressInUse(error)) {
+        throw error;
+      }
+    }
   }
 
+  return startNodeUiServer(options);
+}
+
+async function startNodeUiServer(options: UiServerOptions = {}): Promise<UiServerHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const requestedPort = options.port ?? DEFAULT_PORT;
   const token = options.token ?? crypto.randomBytes(18).toString("base64url");
@@ -75,16 +87,17 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   };
 }
 
-async function startBunUiServer(bun: BunRuntime, options: UiServerOptions): Promise<UiServerHandle> {
+export async function startBunUiServer(bun: BunRuntime, options: UiServerOptions): Promise<UiServerHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const requestedPort = options.port ?? DEFAULT_PORT;
   const token = options.token ?? crypto.randomBytes(18).toString("base64url");
   const staticRoot = options.staticRoot ?? defaultStaticRoot();
   const startPort = requestedPort === 0 ? randomEphemeralPort() : requestedPort;
+  const scanLimit = requestedPort === 0 ? MAX_FALLBACK_PORT - MIN_FALLBACK_PORT + 1 : PORT_SCAN_LIMIT;
   let lastError: unknown;
 
-  for (let offset = 0; offset < PORT_SCAN_LIMIT; offset += 1) {
-    const port = startPort + offset;
+  for (let offset = 0; offset < scanLimit; offset += 1) {
+    const port = nextFallbackPort(startPort, offset);
 
     try {
       const server = bun.serve({
@@ -229,6 +242,10 @@ function requireTokenValue(value: string | string[] | null | undefined, token: s
 }
 
 function statusForError(error: AgentMemoryError): number {
+  if (error.code === "BAD_REQUEST") {
+    return 400;
+  }
+
   if (error.code === "FORBIDDEN") {
     return 403;
   }
@@ -276,12 +293,27 @@ async function readJson<T>(request: http.IncomingMessage): Promise<T> {
   }
 
   const raw = Buffer.concat(chunks).toString("utf8");
-  return (raw.length > 0 ? JSON.parse(raw) : {}) as T;
+  return parseJsonBody(raw) as T;
 }
 
 async function readRequestJson<T>(request: Request): Promise<T> {
   const raw = await request.text();
-  return (raw.length > 0 ? JSON.parse(raw) : {}) as T;
+  return parseJsonBody(raw) as T;
+}
+
+function parseJsonBody(raw: string): unknown {
+  if (raw.trim().length === 0) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    throw new AgentMemoryError("Invalid JSON request body.", {
+      code: "BAD_REQUEST",
+      cause: error
+    });
+  }
 }
 
 function serveStatic(response: http.ServerResponse, staticRoot: string, requestPath: string): void {
@@ -368,12 +400,13 @@ function contentType(filePath: string): string {
 
 function listen(server: http.Server, host: string, requestedPort: number): Promise<number> {
   return new Promise((resolve, reject) => {
-    const startPort = requestedPort === 0 ? randomEphemeralPort() : requestedPort;
+    const startPort = requestedPort === 0 ? 0 : requestedPort;
+    const scanLimit = PORT_SCAN_LIMIT;
 
-    const tryPort = (port: number): void => {
+    const tryPort = (port: number, attempt: number): void => {
       const onError = (error: NodeJS.ErrnoException): void => {
-        if (error.code === "EADDRINUSE") {
-          tryPort(port + 1);
+        if (error.code === "EADDRINUSE" && attempt + 1 < scanLimit) {
+          tryPort(port + 1, attempt + 1);
           return;
         }
 
@@ -389,7 +422,7 @@ function listen(server: http.Server, host: string, requestedPort: number): Promi
       });
     };
 
-    tryPort(startPort);
+    tryPort(startPort, 0);
   });
 }
 
@@ -397,12 +430,20 @@ function randomEphemeralPort(): number {
   return 45000 + Math.floor(Math.random() * 1000);
 }
 
-function isAddressInUse(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    ("code" in error ? (error as { code?: string }).code === "EADDRINUSE" : String(error).includes("EADDRINUSE"))
-  );
+function nextFallbackPort(startPort: number, offset: number): number {
+  const candidate = startPort + offset;
+
+  if (candidate <= MAX_FALLBACK_PORT) {
+    return candidate;
+  }
+
+  return MIN_FALLBACK_PORT + ((candidate - MAX_FALLBACK_PORT - 1) % (MAX_FALLBACK_PORT - MIN_FALLBACK_PORT + 1));
+}
+
+export function isAddressInUse(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: string }).code : undefined;
+  const message = error instanceof Error ? error.message : String(error);
+  return code === "EADDRINUSE" || /\bEADDRINUSE\b/i.test(message) || /\baddress already in use\b/i.test(message) || /\bport \d+ in use\??$/i.test(message);
 }
 
 function bunRuntime(): BunRuntime | undefined {

@@ -207,7 +207,7 @@ async function openConfiguredDatabase(cwd?: string): Promise<{ database: SqliteD
   }
 
   return {
-    database: await openSqliteDatabase(databasePath),
+    database: await openSqliteDatabase(databasePath, { readonly: true }),
     databasePath
   };
 }

@@ -29,6 +29,7 @@ user-invocable: false
 # Repo Memory Skill
 `)).toBe(true);
     expect(content).toContain("bin/memory sync");
+    expect(content).toContain("bin/memory audit --git-diff");
     expect(content).toContain(".agent-memory/memory.sqlite");
     expect(content).toContain("templates show claim:fact");
     expect(content).toContain("Relationship Graphs");
@@ -37,6 +38,9 @@ user-invocable: false
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"))).toBe(true);
     expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"), "utf8")).toContain(
       "<!-- agent-memory:generated-reference repo-memory/claims.md -->"
+    );
+    expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/coverage-and-validation.md"), "utf8")).toContain(
+      "## Stale Review"
     );
   });
 
@@ -229,6 +233,7 @@ describe("agent-manifest command", () => {
     expect(parsed.paths.database).toBe(".agent-memory/memory.sqlite");
     expect(parsed.paths.skills.codex).toBe(".codex/skills/repo-memory/SKILL.md");
     expect(parsed.commands.some((command: { name: string }) => command.name === "context")).toBe(true);
+    expect(parsed.commands.some((command: { name: string }) => command.name === "audit")).toBe(true);
     expect(parsed.commands.find((command: { name: string }) => command.name === "context").examples[0]).toContain("bin/memory");
   });
 

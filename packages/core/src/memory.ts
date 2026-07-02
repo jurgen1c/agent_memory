@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config";
-import { discoverFiles } from "./files";
+import { discoverFiles, resolveConfiguredPath } from "./files";
 import { parseMarkdownFile } from "./markdown";
 import type { LoadedConfig } from "./types";
 import { parseYaml } from "./yaml";
@@ -73,7 +73,7 @@ export interface LoadedMemory {
 export function loadMemory(cwd?: string): LoadedMemory {
   const loadedConfig = loadConfig({ cwd });
   const repoRoot = loadedConfig.repo.root;
-  const memoryRoot = path.join(repoRoot, loadedConfig.config.memory_root);
+  const memoryRoot = resolveConfiguredPath(repoRoot, loadedConfig.config.memory_root);
 
   return {
     loadedConfig,

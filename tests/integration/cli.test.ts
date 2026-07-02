@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import path from "node:path";
 import { dispatch, runCli } from "../../packages/cli/src/router";
+import { PACKAGE_VERSION } from "../../packages/core/src/version";
+
+const repoRoot = path.resolve(".");
+const rootPackage = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { version: string };
 
 describe("CLI", () => {
   test("renders help", async () => {
@@ -25,6 +31,7 @@ describe("CLI", () => {
     const installHooks = await dispatch(["help", "install-hooks"]);
     const upgrade = await dispatch(["help", "upgrade"]);
     const migrateDocs = await dispatch(["help", "migrate-docs"]);
+    const audit = await dispatch(["help", "audit"]);
 
     expect(init.stdout).toContain("agent-memory init --yes --force");
     expect(init.stdout).toContain("--skill-location .agents");
@@ -33,6 +40,7 @@ describe("CLI", () => {
     expect(installHooks.stdout).toContain("agent-memory install-hooks --json");
     expect(upgrade.stdout).toContain("agent-memory upgrade --write --force");
     expect(migrateDocs.stdout).toContain("lowercase memory namespace");
+    expect(audit.stdout).toContain("agent-memory audit --git-diff --base origin/main");
   });
 
   test("renders inline help for every command", async () => {
@@ -46,6 +54,7 @@ describe("CLI", () => {
       "system",
       "context",
       "coverage",
+      "audit",
       "doctor",
       "sync",
       "upgrade",
@@ -69,7 +78,23 @@ describe("CLI", () => {
     const result = await dispatch(["--version"]);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("agent-memory 0.1.0");
+    expect(result.stdout).toBe(`agent-memory ${rootPackage.version}`);
+  });
+
+  test("keeps CLI version metadata aligned with package metadata", () => {
+    const workspacePackagePaths = [
+      "packages/cli/package.json",
+      "packages/core/package.json",
+      "packages/schemas/package.json",
+      "packages/web/package.json"
+    ];
+
+    expect(PACKAGE_VERSION).toBe(rootPackage.version);
+
+    for (const packagePath of workspacePackagePaths) {
+      const workspacePackage = JSON.parse(fs.readFileSync(path.join(repoRoot, packagePath), "utf8")) as { version: string };
+      expect(workspacePackage.version).toBe(rootPackage.version);
+    }
   });
 
   test("unknown commands return not found", async () => {

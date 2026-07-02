@@ -8,17 +8,26 @@ export interface SqliteDatabase {
   close(): void;
 }
 
-export async function openSqliteDatabase(databasePath: string): Promise<SqliteDatabase> {
-  if (isBunRuntime()) {
-    return openBunSqliteDatabase(databasePath);
-  }
-
-  return openNodeSqliteDatabase(databasePath);
+export interface OpenSqliteDatabaseOptions {
+  readonly?: boolean;
+  busyTimeoutMs?: number;
 }
 
-async function openBunSqliteDatabase(databasePath: string): Promise<SqliteDatabase> {
+export const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 5_000;
+
+export async function openSqliteDatabase(databasePath: string, options: OpenSqliteDatabaseOptions = {}): Promise<SqliteDatabase> {
+  if (isBunRuntime()) {
+    return openBunSqliteDatabase(databasePath, options);
+  }
+
+  return openNodeSqliteDatabase(databasePath, options);
+}
+
+async function openBunSqliteDatabase(databasePath: string, options: OpenSqliteDatabaseOptions): Promise<SqliteDatabase> {
   const sqlite = await import("bun:sqlite");
-  const database = new sqlite.Database(databasePath);
+  const database = options.readonly ? new sqlite.Database(databasePath, { readonly: true }) : new sqlite.Database(databasePath);
+
+  database.exec(`PRAGMA busy_timeout = ${busyTimeoutMs(options)}`);
 
   return {
     exec(sql: string): void {
@@ -39,9 +48,15 @@ async function openBunSqliteDatabase(databasePath: string): Promise<SqliteDataba
   };
 }
 
-async function openNodeSqliteDatabase(databasePath: string): Promise<SqliteDatabase> {
+async function openNodeSqliteDatabase(databasePath: string, options: OpenSqliteDatabaseOptions): Promise<SqliteDatabase> {
   const sqlite = await import("node:sqlite");
-  const DatabaseSync = sqlite.DatabaseSync as new (path: string) => {
+  const DatabaseSync = sqlite.DatabaseSync as new (
+    path: string,
+    options?: {
+      readOnly?: boolean;
+      timeout?: number;
+    }
+  ) => {
     exec(sql: string): void;
     prepare(sql: string): {
       run(...params: SqliteValue[]): void;
@@ -50,7 +65,10 @@ async function openNodeSqliteDatabase(databasePath: string): Promise<SqliteDatab
     };
     close(): void;
   };
-  const database = new DatabaseSync(databasePath);
+  const database = new DatabaseSync(databasePath, {
+    readOnly: options.readonly ?? false,
+    timeout: busyTimeoutMs(options)
+  });
 
   return {
     exec(sql: string): void {
@@ -69,6 +87,10 @@ async function openNodeSqliteDatabase(databasePath: string): Promise<SqliteDatab
       database.close();
     }
   };
+}
+
+function busyTimeoutMs(options: OpenSqliteDatabaseOptions): number {
+  return options.busyTimeoutMs ?? DEFAULT_SQLITE_BUSY_TIMEOUT_MS;
 }
 
 function isBunRuntime(): boolean {
