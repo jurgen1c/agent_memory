@@ -18,6 +18,10 @@ import remarkGfm from "remark-gfm";
 type Mode = "graph" | "files" | "review";
 type Origin = "explicit" | "inferred" | "recipe" | "replacement";
 
+const edgeLabelStyle: CSSProperties = { fill: "#1f2937", fontSize: 13, fontWeight: 700 };
+const edgeLabelBgStyle: CSSProperties = { fill: "#f8fafc", fillOpacity: 0.94 };
+const edgeLabelBgPadding: [number, number] = [8, 5];
+
 interface UiMemoryModel {
   repoRoot: string;
   memoryRoot: string;
@@ -1011,6 +1015,7 @@ export function buildGraph(
   const claimNodeHeight = 58;
   const claimNodeGap = 26;
   const systemOrbitRadius = Math.max(460, systems.length * 170);
+  const graphCenter = { x: systemOrbitRadius, y: systemOrbitRadius };
   const loadedClaims = systems.flatMap((item) => (expandedSystems.has(item.system) ? (systemGraphs[item.system]?.claims ?? []) : []));
   const visibleClaimIds = new Set(loadedClaims.map((claim) => claim.id));
   const loadedClaimSystems = new Map(loadedClaims.map((claim) => [claim.id, claim.system]));
@@ -1060,6 +1065,12 @@ export function buildGraph(
     };
   });
   const hierarchyEdges: Edge[] = [];
+  const occupiedBoxes: LayoutBox[] = nodes.map((node) => ({
+    x: node.position.x,
+    y: node.position.y,
+    width: systemNodeSize,
+    height: systemNodeSize
+  }));
 
   for (const system of systems) {
     if (!expandedSystems.has(system.system)) {
@@ -1075,6 +1086,8 @@ export function buildGraph(
       relations: visibleClaimRelations,
       claimSystems: loadedClaimSystems,
       systemPositions,
+      graphCenter,
+      occupiedBoxes,
       parentSize: systemNodeSize,
       claimWidth: claimNodeWidth,
       claimHeight: claimNodeHeight,
@@ -1087,6 +1100,12 @@ export function buildGraph(
       const relationCount = relationCounts.get(claim.id) ?? 0;
       const claimPosition = claimPositions[index];
 
+      occupiedBoxes.push({
+        x: claimPosition.x,
+        y: claimPosition.y,
+        width: claimNodeWidth,
+        height: claimNodeHeight
+      });
       nodes.push({
         id: claimNodeId(claim.id),
         position: claimPosition,
@@ -1134,18 +1153,23 @@ export function buildGraph(
     .filter((relation) => enabledOrigins.has(relation.origin))
     .filter((relation) => visibleSystemIds.has(relation.source) && visibleSystemIds.has(relation.target))
     .filter((relation) => !(expandedSystems.has(relation.source) && expandedSystems.has(relation.target)))
-    .map((relation) => ({
-      id: relation.id,
-      source: systemNodeId(relation.source),
-      target: systemNodeId(relation.target),
-      label: `${relation.relation} (${relation.count})`,
-      type: "bezier",
-      markerStart: relation.bidirectional ? { type: MarkerType.ArrowClosed } : undefined,
-      markerEnd: { type: MarkerType.ArrowClosed },
-      style: { stroke: originColor(relation.origin), strokeWidth: Math.max(1, Math.round(relation.strength / 42)), opacity: 0.7 },
-      labelStyle: { fill: "#334155", fontSize: 11 },
-      data: { ...relation }
-    }));
+    .reduce(groupSystemRelations, new Map<string, SystemRelationGroup>());
+
+  const groupedSystemEdges = [...systemEdges.values()].map((group) => ({
+    id: group.id,
+    source: systemNodeId(group.source),
+    target: systemNodeId(group.target),
+    label: systemRelationLabel(group),
+    type: "bezier",
+    markerStart: group.bidirectional ? { type: MarkerType.ArrowClosed } : undefined,
+    markerEnd: { type: MarkerType.ArrowClosed },
+    style: { stroke: originColor(group.origin), strokeWidth: Math.max(1, Math.round(group.strength / 42)), opacity: 0.72 },
+    labelStyle: edgeLabelStyle,
+    labelBgStyle: edgeLabelBgStyle,
+    labelBgPadding: edgeLabelBgPadding,
+    labelBgBorderRadius: 4,
+    data: { ...group }
+  }));
 
   const claimEdges = visibleClaimRelations.map((relation) => ({
     id: relation.id,
@@ -1156,11 +1180,65 @@ export function buildGraph(
     markerStart: relation.bidirectional ? { type: MarkerType.ArrowClosed } : undefined,
     markerEnd: { type: MarkerType.ArrowClosed },
     style: { stroke: originColor(relation.origin), strokeWidth: Math.max(1, Math.round(relation.strength / 42)), opacity: 0.72 },
-    labelStyle: { fill: "#334155", fontSize: 11 },
+    labelStyle: edgeLabelStyle,
+    labelBgStyle: edgeLabelBgStyle,
+    labelBgPadding: edgeLabelBgPadding,
+    labelBgBorderRadius: 4,
     data: { ...relation }
   }));
 
-  return { nodes, edges: [...hierarchyEdges, ...systemEdges, ...claimEdges] };
+  return { nodes, edges: [...hierarchyEdges, ...groupedSystemEdges, ...claimEdges] };
+}
+
+interface SystemRelationGroup {
+  id: string;
+  source: string;
+  target: string;
+  origin: Origin;
+  count: number;
+  strength: number;
+  bidirectional: boolean;
+  relations: string[];
+}
+
+function groupSystemRelations(groups: Map<string, SystemRelationGroup>, relation: UiSystemRelation): Map<string, SystemRelationGroup> {
+  const [left, right] = [relation.source, relation.target].sort();
+  const key = `${relation.origin}:${left}:${right}`;
+  const existing = groups.get(key);
+
+  if (!existing) {
+    groups.set(key, {
+      id: relation.id,
+      source: relation.source,
+      target: relation.target,
+      origin: relation.origin,
+      count: relation.count,
+      strength: relation.strength,
+      bidirectional: relation.bidirectional,
+      relations: [relation.relation]
+    });
+    return groups;
+  }
+
+  const hasReverseDirection = existing.source === relation.target && existing.target === relation.source;
+  existing.id = `system:${relation.origin}:${left}:${right}`;
+  existing.count += relation.count;
+  existing.strength = Math.max(existing.strength, relation.strength);
+  existing.bidirectional = existing.bidirectional || relation.bidirectional || hasReverseDirection;
+
+  if (!existing.relations.includes(relation.relation)) {
+    existing.relations.push(relation.relation);
+  }
+
+  return groups;
+}
+
+function systemRelationLabel(group: SystemRelationGroup): string {
+  if (group.relations.length === 1) {
+    return `${group.relations[0]} (${group.count})`;
+  }
+
+  return `${group.count} relations`;
 }
 
 function orderSystemsForGraph(systems: UiSystemNode[], relations: UiSystemRelation[]): UiSystemNode[] {
@@ -1220,6 +1298,8 @@ function clusterClaimPositions(options: {
   relations: UiRelation[];
   claimSystems: Map<string, string>;
   systemPositions: Map<string, { x: number; y: number }>;
+  graphCenter: { x: number; y: number };
+  occupiedBoxes: LayoutBox[];
   parentSize: number;
   claimWidth: number;
   claimHeight: number;
@@ -1229,40 +1309,40 @@ function clusterClaimPositions(options: {
     return [];
   }
 
-  if (options.claims.length === 1) {
-    return [
-      {
-        x: options.parent.x + options.parentSize / 2 - options.claimWidth / 2,
-        y: options.parent.y + options.parentSize + 92
-      }
-    ];
-  }
-
   const center = {
     x: options.parent.x + options.parentSize / 2,
     y: options.parent.y + options.parentSize / 2
   };
-  const radius = Math.max(
-    options.parentSize / 2 + options.claimWidth / 2 + 96,
-    (options.claims.length * (options.claimWidth + options.gap)) / (2 * Math.PI)
-  );
-  const desiredAngles = options.claims.map((claim, index) => ({
+  const columns = Math.min(4, Math.max(1, Math.ceil(Math.sqrt(options.claims.length))));
+  const rowGap = options.gap + 18;
+  const columnGap = options.gap + 18;
+  const outward = unitVector(center.x - options.graphCenter.x, center.y - options.graphCenter.y, 0, 1);
+  const tangent = { x: -outward.y, y: outward.x };
+  const orderedClaims = options.claims.map((claim, index) => ({
     claim,
     index,
     angle: desiredClaimAngle(claim, index, options)
   }));
   const positions: Array<{ x: number; y: number }> = [];
+  const occupied = [...options.occupiedBoxes];
 
-  for (const item of desiredAngles.sort((left, right) => left.angle - right.angle || left.claim.id.localeCompare(right.claim.id))) {
-    positions[item.index] = placeClaimNearAngle({
-      angle: item.angle,
+  for (const [slot, item] of orderedClaims.sort((left, right) => left.angle - right.angle || left.claim.id.localeCompare(right.claim.id)).entries()) {
+    const position = placeClaimInGridSlot({
+      slot,
+      columns,
       center,
-      radius,
-      existing: positions.filter(Boolean),
+      outward,
+      tangent,
+      occupied,
+      parentSize: options.parentSize,
       claimWidth: options.claimWidth,
       claimHeight: options.claimHeight,
-      gap: options.gap
+      rowGap,
+      columnGap
     });
+
+    positions[item.index] = position;
+    occupied.push({ ...position, width: options.claimWidth, height: options.claimHeight });
   }
 
   return positions;
@@ -1313,50 +1393,79 @@ function desiredClaimAngle(
   return ((-90 + (360 * index) / options.claims.length) * Math.PI) / 180;
 }
 
-function placeClaimNearAngle(options: {
-  angle: number;
+interface LayoutBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function placeClaimInGridSlot(options: {
+  slot: number;
+  columns: number;
   center: { x: number; y: number };
-  radius: number;
-  existing: Array<{ x: number; y: number }>;
+  outward: { x: number; y: number };
+  tangent: { x: number; y: number };
+  occupied: LayoutBox[];
+  parentSize: number;
   claimWidth: number;
   claimHeight: number;
-  gap: number;
+  rowGap: number;
+  columnGap: number;
 }): { x: number; y: number } {
-  const angleOffsets = [0, -18, 18, -36, 36, -54, 54, -72, 72].map((degrees) => (degrees * Math.PI) / 180);
+  const row = Math.floor(options.slot / options.columns);
+  const column = options.slot % options.columns;
+  const tangentOffset = (column - (options.columns - 1) / 2) * (options.claimWidth + options.columnGap);
+  const baseDistance = options.parentSize / 2 + options.claimHeight / 2 + 110;
+  const rowDistance = options.claimHeight + options.rowGap;
 
-  for (let ring = 0; ring < 5; ring += 1) {
-    for (const offset of angleOffsets) {
-      const radius = options.radius + ring * (options.claimHeight + options.gap + 18);
-      const candidate = {
-        x: options.center.x + Math.cos(options.angle + offset) * radius - options.claimWidth / 2,
-        y: options.center.y + Math.sin(options.angle + offset) * radius - options.claimHeight / 2
-      };
+  for (let push = 0; push < 24; push += 1) {
+    const distance = baseDistance + (row + push) * rowDistance;
+    const candidateCenter = {
+      x: options.center.x + options.outward.x * distance + options.tangent.x * tangentOffset,
+      y: options.center.y + options.outward.y * distance + options.tangent.y * tangentOffset
+    };
+    const candidate = {
+      x: candidateCenter.x - options.claimWidth / 2,
+      y: candidateCenter.y - options.claimHeight / 2
+    };
 
-      if (!options.existing.some((position) => boxesOverlap(candidate, position, options.claimWidth, options.claimHeight, options.gap))) {
-        return candidate;
-      }
+    if (!options.occupied.some((box) => layoutBoxesOverlap(candidate, box, options.claimWidth, options.claimHeight))) {
+      return candidate;
     }
   }
 
+  const fallbackDistance = baseDistance + (row + options.occupied.length) * rowDistance;
+  const fallbackCenter = {
+    x: options.center.x + options.outward.x * fallbackDistance + options.tangent.x * tangentOffset,
+    y: options.center.y + options.outward.y * fallbackDistance + options.tangent.y * tangentOffset
+  };
+
   return {
-    x: options.center.x + Math.cos(options.angle) * (options.radius + options.existing.length * (options.claimHeight + options.gap)) - options.claimWidth / 2,
-    y: options.center.y + Math.sin(options.angle) * (options.radius + options.existing.length * (options.claimHeight + options.gap)) - options.claimHeight / 2
+    x: fallbackCenter.x - options.claimWidth / 2,
+    y: fallbackCenter.y - options.claimHeight / 2
   };
 }
 
-function boxesOverlap(
-  left: { x: number; y: number },
-  right: { x: number; y: number },
-  width: number,
-  height: number,
-  gap: number
-): boolean {
+function layoutBoxesOverlap(left: { x: number; y: number }, right: LayoutBox, width: number, height: number): boolean {
+  const gap = 22;
+
   return !(
     left.x + width + gap <= right.x ||
-    right.x + width + gap <= left.x ||
+    right.x + right.width + gap <= left.x ||
     left.y + height + gap <= right.y ||
-    right.y + height + gap <= left.y
+    right.y + right.height + gap <= left.y
   );
+}
+
+function unitVector(x: number, y: number, fallbackX: number, fallbackY: number): { x: number; y: number } {
+  const length = Math.hypot(x, y);
+
+  if (length === 0) {
+    return { x: fallbackX, y: fallbackY };
+  }
+
+  return { x: x / length, y: y / length };
 }
 
 function relationCountsByClaim(relations: UiRelation[]): Map<string, number> {
