@@ -1,16 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const repoRoot = process.cwd();
 const rootPackagePath = path.join(repoRoot, "package.json");
 const rootPackage = JSON.parse(fs.readFileSync(rootPackagePath, "utf8"));
 const version = rootPackage.version;
+const shouldStage = process.argv.includes("--stage");
 
 if (typeof version !== "string" || version.length === 0) {
   throw new Error("Root package.json must contain a version string.");
 }
 
 const workspacePackagePaths = workspacePackageJsonPaths(rootPackage.workspaces);
+const updatedPackagePaths = [];
 
 for (const packagePath of workspacePackagePaths) {
   const absolutePath = path.join(repoRoot, packagePath);
@@ -22,7 +25,15 @@ for (const packagePath of workspacePackagePaths) {
 
   packageJson.version = version;
   fs.writeFileSync(absolutePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+  updatedPackagePaths.push(packagePath);
   console.log(`Updated ${packagePath} to ${version}`);
+}
+
+if (shouldStage && updatedPackagePaths.length > 0) {
+  execFileSync("git", ["add", "--", ...updatedPackagePaths], {
+    cwd: repoRoot,
+    stdio: "inherit"
+  });
 }
 
 function workspacePackageJsonPaths(workspaces) {

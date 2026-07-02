@@ -9,8 +9,9 @@ Publishing is triggered by a published GitHub Release. Pushing a `vX.Y.Z` tag by
 - Work from `main` after the release changes have been merged.
 - Make sure `package.json` contains the version you intend to publish.
 - Make sure private workspace package versions match the root package version.
-  The `npm version` lifecycle runs `scripts/sync-workspace-versions.mjs` for
-  future bumps, but manual edits should keep `packages/*/package.json` aligned.
+  The `npm version` lifecycle runs `scripts/sync-workspace-versions.mjs --stage`
+  for future bumps, but manual edits should keep `packages/*/package.json`
+  aligned.
 - Make sure npm Trusted Publishing is configured for `@jurgen1c/agent-memory-cli`.
 - Make sure the GitHub workflow named `Publish package` is active.
 
@@ -46,7 +47,7 @@ npm version patch
 
 Use `minor` or `major` instead of `patch` when appropriate.
 The version lifecycle syncs `packages/*/package.json` to the root package
-version before npm creates the release commit.
+version and stages those workspace files before npm creates the release commit.
 
 Push both the version commit and tag:
 
