@@ -57,6 +57,7 @@
     "lint": "eslint .",
     "test": "bun test",
     "test:coverage": "bun test --coverage",
+    "version": "node scripts/sync-workspace-versions.mjs",
     "dev": "bun packages/cli/src/index.ts",
     "ui:mock": "scripts/run-mock-ui.sh",
     "prepack": "bun run build"
