@@ -410,13 +410,13 @@ function contentType(filePath: string): string {
 
 function listen(server: http.Server, host: string, requestedPort: number): Promise<number> {
   return new Promise((resolve, reject) => {
-    const startPort = requestedPort === 0 ? randomEphemeralPort() : requestedPort;
+    const startPort = requestedPort;
     const scanLimit = PORT_SCAN_LIMIT;
 
     const tryPort = (port: number, attempt: number): void => {
       const onError = (error: NodeJS.ErrnoException): void => {
         if (error.code === "EADDRINUSE" && attempt + 1 < scanLimit) {
-          tryPort(port + 1, attempt + 1);
+          tryPort(port === 0 ? randomEphemeralPort() : port + 1, attempt + 1);
           return;
         }
 
