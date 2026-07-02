@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { AgentMemoryError } from "./errors";
+import { isPathInside } from "./repo";
 
 export interface CanonicalMemoryFilePatterns {
   claims: string[];
@@ -49,7 +51,28 @@ export function toPosix(value: string): string {
 }
 
 export function resolveConfiguredPath(repoRoot: string, configuredPath: string): string {
-  return path.isAbsolute(configuredPath) ? path.normalize(configuredPath) : path.join(repoRoot, configuredPath);
+  if (path.isAbsolute(configuredPath)) {
+    return path.normalize(configuredPath);
+  }
+
+  const resolved = path.resolve(repoRoot, configuredPath);
+
+  if (!isPathInside(repoRoot, resolved)) {
+    throw new AgentMemoryError(`Relative configured path escapes repository root: ${configuredPath}`, {
+      details: ["Use a path inside the repository, or an absolute path when using memory outside the repository is intentional."]
+    });
+  }
+
+  const realRepoRoot = safeRealpath(repoRoot);
+  const realExistingTarget = safeRealpath(nearestExistingTarget(resolved));
+
+  if (!realRepoRoot || !realExistingTarget || !isPathInside(realRepoRoot, realExistingTarget)) {
+    throw new AgentMemoryError(`Relative configured path escapes repository root through a symlink: ${configuredPath}`, {
+      details: ["Use a path inside the repository, or an absolute path when using memory outside the repository is intentional."]
+    });
+  }
+
+  return resolved;
 }
 
 export function configuredPathRelativeToRepo(repoRoot: string, configuredPath: string): string {
@@ -73,6 +96,30 @@ function walkFiles(root: string): string[] {
   }
 
   return files;
+}
+
+function nearestExistingTarget(targetPath: string): string {
+  let candidate = targetPath;
+
+  while (!fs.existsSync(candidate)) {
+    const parent = path.dirname(candidate);
+
+    if (parent === candidate) {
+      return candidate;
+    }
+
+    candidate = parent;
+  }
+
+  return candidate;
+}
+
+function safeRealpath(targetPath: string): string | null {
+  try {
+    return fs.realpathSync(targetPath);
+  } catch {
+    return null;
+  }
 }
 
 function globMatches(pattern: string, value: string): boolean {
