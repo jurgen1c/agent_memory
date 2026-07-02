@@ -14,10 +14,13 @@ describe("UI server", () => {
     const server = await startUiServer({ cwd, port: 0, staticRoot, token: "test-token" });
 
     try {
-      const memory = await getJson<{ claims: Array<{ id: string }>; doctor: { healthy: boolean } }>(`${baseUrl(server.port)}/api/memory`);
+      const memory = await getJson<{ graph: { systems: Array<{ system: string }>; systemRelations: Array<{ relation: string }> }; doctor: { healthy: boolean } }>(
+        `${baseUrl(server.port)}/api/memory`
+      );
       const index = await fetch(`${baseUrl(server.port)}/`);
 
-      expect(memory.claims.some((claim) => claim.id === "auth.student_oauth.uid_is_tenant_scoped")).toBe(true);
+      expect(memory.graph.systems.some((item) => item.system === "auth")).toBe(true);
+      expect(memory.graph.systemRelations.some((relation) => relation.relation === "requires")).toBe(true);
       expect(memory.doctor.healthy).toBe(false);
       expect(await index.text()).toContain("Agent Memory Test UI");
     } finally {
@@ -58,6 +61,47 @@ describe("UI server", () => {
       expect(detail.claim.id).toBe("auth.student_oauth.uid_is_tenant_scoped");
       expect(detail.relations.some((relation) => relation.relation === "requires")).toBe(true);
       expect(detail.relatedClaims.some((claim) => claim.id === "tenancy.current_tenant.required_for_student_auth")).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("serves lazy system graph claims with relations touching that system", async () => {
+    const cwd = copyFixture(mockApp);
+    const staticRoot = makeStaticRoot();
+    const server = await startUiServer({ cwd, port: 0, staticRoot, token: "test-token" });
+
+    try {
+      const graph = await getJson<{
+        system: string;
+        claims: Array<{ id: string; sourcePath: string }>;
+        relations: Array<{ relation: string; target: string }>;
+      }>(`${baseUrl(server.port)}/api/graph/systems/auth`);
+
+      expect(graph.system).toBe("auth");
+      expect(graph.claims).toHaveLength(1);
+      expect(graph.claims[0]).toMatchObject({
+        id: "auth.student_oauth.uid_is_tenant_scoped",
+        sourcePath: "claims/auth/student_oauth_uid_is_tenant_scoped.md"
+      });
+      expect(graph.relations.some((relation) => relation.relation === "requires")).toBe(true);
+      expect(graph.relations.some((relation) => relation.target === "tenancy.current_tenant.required_for_student_auth")).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("returns 404 for unknown system graph", async () => {
+    const cwd = copyFixture(mockApp);
+    const staticRoot = makeStaticRoot();
+    const server = await startUiServer({ cwd, port: 0, staticRoot, token: "test-token" });
+
+    try {
+      const response = await fetch(`${baseUrl(server.port)}/api/graph/systems/missing`);
+      const body = (await response.json()) as { code: string };
+
+      expect(response.status).toBe(404);
+      expect(body.code).toBe("NOT_FOUND");
     } finally {
       await server.close();
     }

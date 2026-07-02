@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { buildUiMemoryModel, reviewClaim } from "../../packages/core/src/ui_model";
+import { buildUiMemoryModel, deterministicSystemColor, reviewClaim } from "../../packages/core/src/ui_model";
 
 const repoRoot = path.resolve(".");
 const mockApp = path.join(repoRoot, "examples/mock-app");
@@ -11,11 +11,31 @@ describe("UI memory model", () => {
   test("projects claims, relations, review queue, and file tree from canonical memory", async () => {
     const cwd = copyFixture(mockApp);
     const model = await buildUiMemoryModel(cwd);
+    const authSystem = model.graph.systems.find((item) => item.system === "auth");
 
-    expect(model.claims.map((claim) => claim.id)).toContain("auth.student_oauth.uid_is_tenant_scoped");
-    expect(model.relations.some((relation) => relation.origin === "explicit" && relation.relation === "requires")).toBe(true);
+    expect(authSystem).toEqual({
+      id: "auth",
+      system: "auth",
+      color: deterministicSystemColor("auth"),
+      claimCount: 1,
+      statusCounts: { current: 1 },
+      severityCounts: { important: 1 },
+      reviewCount: 0
+    });
+    expect(deterministicSystemColor("auth")).toBe(deterministicSystemColor("auth"));
+    expect(model.graph.systemRelations).toContainEqual({
+      id: "system:explicit:requires:auth:tenancy",
+      source: "auth",
+      target: "tenancy",
+      relation: "requires",
+      origin: "explicit",
+      count: 1,
+      strength: 95,
+      bidirectional: false
+    });
     expect(model.files.children?.some((node) => node.name === "claims")).toBe(true);
     expect(model.reviewQueue.length).toBe(0);
+    expect(model.health.healthy).toBe(false);
     expect(model.validation.valid).toBe(true);
     expect(model.doctor.healthy).toBe(false);
     expect(model.doctor.checks.some((check) => check.name === "database_exists" && check.status === "warning")).toBe(true);

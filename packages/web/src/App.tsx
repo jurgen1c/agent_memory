@@ -8,9 +8,10 @@ import {
   applyNodeChanges,
   type Edge,
   type Node,
-  type NodeChange
+  type NodeChange,
+  type OnNodeDrag
 } from "@xyflow/react";
-import { type CSSProperties, type PointerEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type PointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -22,15 +23,21 @@ interface UiMemoryModel {
   memoryRoot: string;
   databasePath: string;
   commandPrefix: string;
-  claims: UiClaim[];
-  relations: UiRelation[];
+  health: UiHealth;
+  graph: UiGraphSummary;
   files: UiFileNode;
   validation: ValidationResult;
   doctor: DoctorResult;
   reviewQueue: UiReviewItem[];
 }
 
-interface UiClaim {
+interface UiHealth {
+  healthy: boolean;
+  validationValid: boolean;
+  doctorHealthy: boolean;
+}
+
+interface UiClaimSummary {
   id: string;
   type: string;
   system: string;
@@ -40,16 +47,19 @@ interface UiClaim {
   title: string;
   claim: string;
   sourcePath: string;
+  tags: string[];
+  reviewPriority: number;
+  reviewReason?: string;
+}
+
+interface UiClaim extends UiClaimSummary {
   sourceFiles: string[];
   relatedFiles: string[];
   symbols: string[];
   routes: string[];
-  tags: string[];
   verification: string[];
   body: string;
   raw: Record<string, unknown>;
-  reviewPriority: number;
-  reviewReason?: string;
 }
 
 interface UiRelation {
@@ -62,6 +72,38 @@ interface UiRelation {
   origin: Origin;
   sourcePath?: string;
   bidirectional: boolean;
+}
+
+interface UiGraphSummary {
+  systems: UiSystemNode[];
+  systemRelations: UiSystemRelation[];
+}
+
+interface UiSystemNode {
+  id: string;
+  system: string;
+  color: string;
+  claimCount: number;
+  statusCounts: Record<string, number>;
+  severityCounts: Record<string, number>;
+  reviewCount: number;
+}
+
+interface UiSystemRelation {
+  id: string;
+  source: string;
+  target: string;
+  relation: string;
+  origin: Origin;
+  count: number;
+  strength: number;
+  bidirectional: boolean;
+}
+
+interface UiSystemGraph {
+  system: string;
+  claims: UiClaimSummary[];
+  relations: UiRelation[];
 }
 
 interface UiFileNode {
@@ -123,6 +165,8 @@ export default function App() {
   const [status, setStatus] = useState("all");
   const [severity, setSeverity] = useState("all");
   const [enabledOrigins, setEnabledOrigins] = useState<Set<Origin>>(new Set(["explicit"]));
+  const [expandedSystems, setExpandedSystems] = useState<Set<string>>(new Set());
+  const [systemGraphs, setSystemGraphs] = useState<Record<string, UiSystemGraph>>({});
   const [focusId, setFocusId] = useState<string | null>(null);
   const [notice, setNotice] = useState("Loading memory...");
   const [busy, setBusy] = useState(false);
@@ -133,6 +177,8 @@ export default function App() {
     try {
       const next = await api<UiMemoryModel>("/api/memory");
       setMemory(next);
+      setExpandedSystems(new Set());
+      setSystemGraphs({});
       setNotice("Memory loaded.");
 
       if (detail) {
@@ -159,28 +205,69 @@ export default function App() {
     }
   }, [detail]);
 
-  const claims = useMemo(() => {
+  const loadedRelations = useMemo(() => compactGraphRelations(Object.values(systemGraphs).flatMap((item) => item.relations)), [systemGraphs]);
+
+  const filteredSystemGraphs = useMemo(() => {
     if (!memory) {
-      return [];
+      return {};
     }
 
-    const byFocus = focusId ? focusedClaimIds(focusId, memory.relations) : null;
+    const byFocus = focusId ? focusedClaimIds(focusId, loadedRelations) : null;
     const normalizedQuery = query.trim().toLowerCase();
+    const next: Record<string, UiSystemGraph> = {};
 
-    return memory.claims.filter((claim) => {
-      if (byFocus && !byFocus.has(claim.id)) {
+    for (const [key, value] of Object.entries(systemGraphs)) {
+      next[key] = {
+        ...value,
+        claims: value.claims.filter((claim) => {
+          if (!expandedSystems.has(claim.system)) {
+            return false;
+          }
+
+          if (byFocus && !byFocus.has(claim.id)) {
+            return false;
+          }
+
+          if (system !== "all" && claim.system !== system) {
+            return false;
+          }
+
+          if (status !== "all" && claim.status !== status) {
+            return false;
+          }
+
+          if (severity !== "all" && claim.severity !== severity) {
+            return false;
+          }
+
+          if (!normalizedQuery) {
+            return true;
+          }
+
+          return searchableText(claim).includes(normalizedQuery);
+        })
+      };
+    }
+
+    return next;
+  }, [expandedSystems, focusId, loadedRelations, memory, query, severity, status, system, systemGraphs]);
+
+  const visibleGraphSummary = useMemo(() => {
+    if (!memory) {
+      return { systems: [], systemRelations: [] };
+    }
+
+    const normalizedQuery = query.trim().toLowerCase();
+    const systems = memory.graph.systems.filter((item) => {
+      if (system !== "all" && item.system !== system) {
         return false;
       }
 
-      if (system !== "all" && claim.system !== system) {
+      if (status !== "all" && !item.statusCounts[status]) {
         return false;
       }
 
-      if (status !== "all" && claim.status !== status) {
-        return false;
-      }
-
-      if (severity !== "all" && claim.severity !== severity) {
+      if (severity !== "all" && !item.severityCounts[severity]) {
         return false;
       }
 
@@ -188,18 +275,57 @@ export default function App() {
         return true;
       }
 
-      return searchableText(claim).includes(normalizedQuery);
+      return (
+        item.system.toLowerCase().includes(normalizedQuery) ||
+        (filteredSystemGraphs[item.system]?.claims ?? []).some((claim) => searchableText(claim).includes(normalizedQuery))
+      );
     });
-  }, [focusId, memory, query, severity, status, system]);
+    const visibleSystems = new Set(systems.map((item) => item.system));
 
-  const claimIds = useMemo(() => new Set(claims.map((claim) => claim.id)), [claims]);
-  const graph = useMemo(() => buildGraph(claims, memory?.relations ?? [], claimIds, enabledOrigins), [claimIds, claims, enabledOrigins, memory]);
-  const systems = useMemo(() => unique(memory?.claims.map((claim) => claim.system) ?? []), [memory]);
-  const severities = useMemo(() => unique(memory?.claims.map((claim) => claim.severity) ?? []), [memory]);
+    return {
+      systems,
+      systemRelations: memory.graph.systemRelations.filter(
+        (relation) => visibleSystems.has(relation.source) && visibleSystems.has(relation.target)
+      )
+    };
+  }, [filteredSystemGraphs, memory, query, severity, status, system]);
+
+  const graph = useMemo(
+    () => buildGraph(visibleGraphSummary, filteredSystemGraphs, expandedSystems, enabledOrigins),
+    [enabledOrigins, expandedSystems, filteredSystemGraphs, visibleGraphSummary]
+  );
+  const systems = useMemo(() => memory?.graph.systems.map((item) => item.system) ?? [], [memory]);
+  const severities = useMemo(() => unique(memory?.graph.systems.flatMap((item) => Object.keys(item.severityCounts)) ?? []), [memory]);
 
   async function selectClaim(id: string) {
     setDetail(await api<ClaimDetail>(`/api/claims/${encodeURIComponent(id)}`));
     setDrawerOpen(true);
+  }
+
+  async function toggleSystem(systemName: string) {
+    if (expandedSystems.has(systemName)) {
+      setExpandedSystems((current) => {
+        const next = new Set(current);
+        next.delete(systemName);
+        return next;
+      });
+      return;
+    }
+
+    if (!systemGraphs[systemName]) {
+      setBusy(true);
+      try {
+        const systemGraph = await api<UiSystemGraph>(`/api/graph/systems/${encodeURIComponent(systemName)}`);
+        setSystemGraphs((current) => ({ ...current, [systemName]: systemGraph }));
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : String(error));
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    setExpandedSystems((current) => new Set(current).add(systemName));
   }
 
   function resizeDrawer(clientX: number) {
@@ -361,7 +487,8 @@ export default function App() {
           <GraphView
             nodes={graph.nodes}
             edges={graph.edges}
-            onSelect={selectClaim}
+            onSelectClaim={selectClaim}
+            onToggleSystem={toggleSystem}
             onFocus={setFocusId}
             focusId={focusId}
             onClearFocus={() => setFocusId(null)}
@@ -399,17 +526,64 @@ export default function App() {
   );
 }
 
+type GraphNodeData = (
+  | {
+      kind: "system";
+      system: string;
+    }
+  | {
+      kind: "claim";
+      claimId: string;
+      system: string;
+    }
+) & {
+  color: string;
+  label: ReactNode;
+};
+
 function GraphView(props: {
   nodes: Node[];
   edges: Edge[];
   focusId: string | null;
-  onSelect(id: string): void;
+  onSelectClaim(id: string): void;
+  onToggleSystem(system: string): void;
   onFocus(id: string): void;
   onClearFocus(): void;
 }) {
   const [nodes, setNodes] = useState(props.nodes);
+  const dragOrigin = useRef<{ id: string; x: number; y: number } | null>(null);
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     setNodes((current) => applyNodeChanges(changes, current));
+  }, []);
+  const onNodeDragStart: OnNodeDrag = useCallback((_event, node) => {
+    const data = node.data as GraphNodeData;
+
+    if (data.kind === "system") {
+      dragOrigin.current = { id: node.id, x: node.position.x, y: node.position.y };
+    }
+  }, []);
+  const onNodeDrag: OnNodeDrag = useCallback((_event, node) => {
+    const data = node.data as GraphNodeData;
+    const origin = dragOrigin.current;
+
+    if (data.kind !== "system" || !origin || origin.id !== node.id) {
+      return;
+    }
+
+    const delta = {
+      x: node.position.x - origin.x,
+      y: node.position.y - origin.y
+    };
+
+    if (delta.x === 0 && delta.y === 0) {
+      return;
+    }
+
+    dragOrigin.current = { id: node.id, x: node.position.x, y: node.position.y };
+    setNodes((current) => moveSystemChildren(current, data.system, delta));
+  }, []);
+  const onNodeDragStop: OnNodeDrag = useCallback(() => {
+    dragOrigin.current = null;
   }, []);
 
   useEffect(() => {
@@ -424,14 +598,31 @@ function GraphView(props: {
         fitView
         minZoom={0.15}
         onNodesChange={onNodesChange}
-        onNodeClick={(_event, node) => void props.onSelect(node.id)}
-        onNodeDoubleClick={(_event, node) => props.onFocus(node.id)}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDrag={onNodeDrag}
+        onNodeDragStop={onNodeDragStop}
+        onNodeClick={(_event, node) => {
+          const data = node.data as GraphNodeData;
+
+          if (data.kind === "system") {
+            void props.onToggleSystem(data.system);
+          } else {
+            void props.onSelectClaim(data.claimId);
+          }
+        }}
+        onNodeDoubleClick={(_event, node) => {
+          const data = node.data as GraphNodeData;
+
+          if (data.kind === "claim") {
+            props.onFocus(data.claimId);
+          }
+        }}
       >
         <Background gap={28} size={1} />
         <Controls showInteractive={false} />
         <MiniMap nodeColor={(node) => String(node.data.color ?? "#94a3b8")} pannable zoomable />
         <Panel position="top-left" className="graph-panel">
-          <strong>{props.nodes.length}</strong> claims · <strong>{props.edges.length}</strong> relations
+          <strong>{props.nodes.length}</strong> nodes · <strong>{props.edges.length}</strong> relations
           {props.focusId && <button onClick={props.onClearFocus}>Clear focus</button>}
         </Panel>
       </ReactFlow>
@@ -445,6 +636,24 @@ function mergeGraphNodes(currentNodes: Node[], nextNodes: Node[]): Node[] {
   return nextNodes.map((node) => {
     const current = currentById.get(node.id);
     return current ? { ...node, position: current.position } : node;
+  });
+}
+
+export function moveSystemChildren(nodes: Node[], system: string, delta: { x: number; y: number }): Node[] {
+  return nodes.map((node) => {
+    const data = node.data as GraphNodeData;
+
+    if (data.kind !== "claim" || data.system !== system) {
+      return node;
+    }
+
+    return {
+      ...node,
+      position: {
+        x: node.position.x + delta.x,
+        y: node.position.y + delta.y
+      }
+    };
   });
 }
 
@@ -789,7 +998,397 @@ function List(props: { values: string[] }) {
 }
 
 export function buildGraph(
-  claims: UiClaim[],
+  graph: UiGraphSummary,
+  systemGraphs: Record<string, UiSystemGraph>,
+  expandedSystems: Set<string>,
+  enabledOrigins: Set<Origin>
+): { nodes: Node[]; edges: Edge[] } {
+  const systems = orderSystemsForGraph(graph.systems, graph.systemRelations);
+  const visibleSystemIds = new Set(systems.map((item) => item.system));
+  const systemIndex = new Map(systems.map((value, index) => [value.system, index]));
+  const systemNodeSize = 128;
+  const claimNodeWidth = 184;
+  const claimNodeHeight = 58;
+  const claimNodeGap = 26;
+  const systemOrbitRadius = Math.max(460, systems.length * 170);
+  const loadedClaims = systems.flatMap((item) => (expandedSystems.has(item.system) ? (systemGraphs[item.system]?.claims ?? []) : []));
+  const visibleClaimIds = new Set(loadedClaims.map((claim) => claim.id));
+  const loadedClaimSystems = new Map(loadedClaims.map((claim) => [claim.id, claim.system]));
+  const visibleClaimRelations = compactGraphRelations(
+    Object.values(systemGraphs)
+      .flatMap((item) => item.relations)
+      .filter((relation) => enabledOrigins.has(relation.origin) && visibleClaimIds.has(relation.source) && visibleClaimIds.has(relation.target))
+  );
+  const relationCounts = relationCountsByClaim(visibleClaimRelations);
+  const systemPositions = new Map(
+    systems.map((item) => {
+      const index = systemIndex.get(item.system) ?? 0;
+      return [item.system, systemPosition(index, systems.length, systemOrbitRadius)] as const;
+    })
+  );
+  const nodes: Node[] = systems.map((item) => {
+    const expanded = expandedSystems.has(item.system);
+    const position = systemPositions.get(item.system) ?? { x: 0, y: 0 };
+
+    return {
+      id: systemNodeId(item.system),
+      position,
+      data: {
+        kind: "system",
+        system: item.system,
+        color: item.color,
+        label: (
+          <div className="system-node" title={`${item.system}\n${item.claimCount} claims\n${formatCounts("status", item.statusCounts)}\n${formatCounts("severity", item.severityCounts)}`}>
+            <strong>{item.system}</strong>
+            <span>
+              {item.claimCount}
+              <small>claims</small>
+            </span>
+            {item.reviewCount > 0 && <em>{item.reviewCount}</em>}
+            <small>{expanded ? "expanded" : "system"}</small>
+          </div>
+        )
+      },
+      style: {
+        borderColor: item.color,
+        background: item.color,
+        borderRadius: "999px",
+        width: systemNodeSize,
+        height: systemNodeSize,
+        boxShadow: "0 14px 34px rgba(15, 23, 42, 0.16)"
+      }
+    };
+  });
+  const hierarchyEdges: Edge[] = [];
+
+  for (const system of systems) {
+    if (!expandedSystems.has(system.system)) {
+      continue;
+    }
+
+    const parent = systemPositions.get(system.system) ?? { x: 0, y: 0 };
+    const claims = systemGraphs[system.system]?.claims ?? [];
+    const claimPositions = clusterClaimPositions({
+      parent,
+      parentSystem: system.system,
+      claims,
+      relations: visibleClaimRelations,
+      claimSystems: loadedClaimSystems,
+      systemPositions,
+      parentSize: systemNodeSize,
+      claimWidth: claimNodeWidth,
+      claimHeight: claimNodeHeight,
+      gap: claimNodeGap
+    });
+
+    for (let index = 0; index < claims.length; index += 1) {
+      const claim = claims[index];
+      const color = statusColor(claim.status);
+      const relationCount = relationCounts.get(claim.id) ?? 0;
+      const claimPosition = claimPositions[index];
+
+      nodes.push({
+        id: claimNodeId(claim.id),
+        position: claimPosition,
+        data: {
+          kind: "claim",
+          claimId: claim.id,
+          system: claim.system,
+          color,
+          label: (
+            <div
+              className="claim-node compact"
+              title={`${claim.title}\n${claim.id}\n${claim.sourcePath}\n${relationCount} visible relations\n${claim.claim}`}
+            >
+              <span className="node-system">{claim.system}</span>
+              <strong>{claim.title}</strong>
+              <span>
+                {claim.status} · {claim.severity} · {relationCount} rel
+              </span>
+            </div>
+          )
+        },
+        style: {
+          borderColor: color,
+          background: "#ffffff",
+          borderRadius: 999,
+          width: claimNodeWidth,
+          minHeight: claimNodeHeight,
+          boxShadow: "0 8px 20px rgba(15, 23, 42, 0.10)"
+        }
+      });
+      hierarchyEdges.push({
+        id: `system-claim:${system.system}:${claim.id}`,
+        source: systemNodeId(system.system),
+        target: claimNodeId(claim.id),
+        type: "straight",
+        selectable: false,
+        focusable: false,
+        style: { stroke: system.color, strokeWidth: 1.1, strokeDasharray: "3 7", opacity: 0.3 },
+        data: { kind: "hierarchy", system: system.system, claimId: claim.id }
+      });
+    }
+  }
+
+  const systemEdges = graph.systemRelations
+    .filter((relation) => enabledOrigins.has(relation.origin))
+    .filter((relation) => visibleSystemIds.has(relation.source) && visibleSystemIds.has(relation.target))
+    .filter((relation) => !(expandedSystems.has(relation.source) && expandedSystems.has(relation.target)))
+    .map((relation) => ({
+      id: relation.id,
+      source: systemNodeId(relation.source),
+      target: systemNodeId(relation.target),
+      label: `${relation.relation} (${relation.count})`,
+      type: "bezier",
+      markerStart: relation.bidirectional ? { type: MarkerType.ArrowClosed } : undefined,
+      markerEnd: { type: MarkerType.ArrowClosed },
+      style: { stroke: originColor(relation.origin), strokeWidth: Math.max(1, Math.round(relation.strength / 42)), opacity: 0.7 },
+      labelStyle: { fill: "#334155", fontSize: 11 },
+      data: { ...relation }
+    }));
+
+  const claimEdges = visibleClaimRelations.map((relation) => ({
+    id: relation.id,
+    source: claimNodeId(relation.source),
+    target: claimNodeId(relation.target),
+    label: relation.relation,
+    type: "bezier",
+    markerStart: relation.bidirectional ? { type: MarkerType.ArrowClosed } : undefined,
+    markerEnd: { type: MarkerType.ArrowClosed },
+    style: { stroke: originColor(relation.origin), strokeWidth: Math.max(1, Math.round(relation.strength / 42)), opacity: 0.72 },
+    labelStyle: { fill: "#334155", fontSize: 11 },
+    data: { ...relation }
+  }));
+
+  return { nodes, edges: [...hierarchyEdges, ...systemEdges, ...claimEdges] };
+}
+
+function orderSystemsForGraph(systems: UiSystemNode[], relations: UiSystemRelation[]): UiSystemNode[] {
+  if (systems.length < 3) {
+    return systems;
+  }
+
+  const bySystem = new Map(systems.map((system) => [system.system, system]));
+  const neighbors = new Map<string, Set<string>>();
+
+  for (const relation of relations) {
+    if (!bySystem.has(relation.source) || !bySystem.has(relation.target)) {
+      continue;
+    }
+
+    neighbors.set(relation.source, (neighbors.get(relation.source) ?? new Set()).add(relation.target));
+    neighbors.set(relation.target, (neighbors.get(relation.target) ?? new Set()).add(relation.source));
+  }
+
+  const remaining = new Set(systems.map((system) => system.system));
+  const ordered: string[] = [];
+  let current = systems
+    .map((system) => system.system)
+    .sort((left, right) => (neighbors.get(right)?.size ?? 0) - (neighbors.get(left)?.size ?? 0) || left.localeCompare(right))[0];
+
+  while (current) {
+    ordered.push(current);
+    remaining.delete(current);
+
+    const next = [...(neighbors.get(current) ?? [])]
+      .filter((system) => remaining.has(system))
+      .sort((left, right) => (neighbors.get(right)?.size ?? 0) - (neighbors.get(left)?.size ?? 0) || left.localeCompare(right))[0];
+
+    current = next ?? [...remaining].sort()[0];
+  }
+
+  return ordered.map((system) => bySystem.get(system)).filter((system): system is UiSystemNode => Boolean(system));
+}
+
+function systemPosition(index: number, total: number, radius: number): { x: number; y: number } {
+  if (total <= 1) {
+    return { x: radius, y: radius };
+  }
+
+  const angle = (-90 + (360 * index) / total) * (Math.PI / 180);
+
+  return {
+    x: radius + Math.cos(angle) * radius,
+    y: radius + Math.sin(angle) * radius
+  };
+}
+
+function clusterClaimPositions(options: {
+  parent: { x: number; y: number };
+  parentSystem: string;
+  claims: UiClaimSummary[];
+  relations: UiRelation[];
+  claimSystems: Map<string, string>;
+  systemPositions: Map<string, { x: number; y: number }>;
+  parentSize: number;
+  claimWidth: number;
+  claimHeight: number;
+  gap: number;
+}): Array<{ x: number; y: number }> {
+  if (options.claims.length === 0) {
+    return [];
+  }
+
+  if (options.claims.length === 1) {
+    return [
+      {
+        x: options.parent.x + options.parentSize / 2 - options.claimWidth / 2,
+        y: options.parent.y + options.parentSize + 92
+      }
+    ];
+  }
+
+  const center = {
+    x: options.parent.x + options.parentSize / 2,
+    y: options.parent.y + options.parentSize / 2
+  };
+  const radius = Math.max(
+    options.parentSize / 2 + options.claimWidth / 2 + 96,
+    (options.claims.length * (options.claimWidth + options.gap)) / (2 * Math.PI)
+  );
+  const desiredAngles = options.claims.map((claim, index) => ({
+    claim,
+    index,
+    angle: desiredClaimAngle(claim, index, options)
+  }));
+  const positions: Array<{ x: number; y: number }> = [];
+
+  for (const item of desiredAngles.sort((left, right) => left.angle - right.angle || left.claim.id.localeCompare(right.claim.id))) {
+    positions[item.index] = placeClaimNearAngle({
+      angle: item.angle,
+      center,
+      radius,
+      existing: positions.filter(Boolean),
+      claimWidth: options.claimWidth,
+      claimHeight: options.claimHeight,
+      gap: options.gap
+    });
+  }
+
+  return positions;
+}
+
+function desiredClaimAngle(
+  claim: UiClaimSummary,
+  index: number,
+  options: {
+    parent: { x: number; y: number };
+    parentSystem: string;
+    claims: UiClaimSummary[];
+    relations: UiRelation[];
+    claimSystems: Map<string, string>;
+    systemPositions: Map<string, { x: number; y: number }>;
+    parentSize: number;
+  }
+): number {
+  const center = {
+    x: options.parent.x + options.parentSize / 2,
+    y: options.parent.y + options.parentSize / 2
+  };
+  let x = 0;
+  let y = 0;
+
+  for (const relation of options.relations) {
+    const otherId = relation.source === claim.id ? relation.target : relation.target === claim.id ? relation.source : null;
+
+    if (!otherId) {
+      continue;
+    }
+
+    const otherSystem = options.claimSystems.get(otherId);
+    const otherPosition = otherSystem ? options.systemPositions.get(otherSystem) : undefined;
+
+    if (!otherPosition || otherSystem === options.parentSystem) {
+      continue;
+    }
+
+    x += otherPosition.x + options.parentSize / 2 - center.x;
+    y += otherPosition.y + options.parentSize / 2 - center.y;
+  }
+
+  if (x !== 0 || y !== 0) {
+    return Math.atan2(y, x);
+  }
+
+  return ((-90 + (360 * index) / options.claims.length) * Math.PI) / 180;
+}
+
+function placeClaimNearAngle(options: {
+  angle: number;
+  center: { x: number; y: number };
+  radius: number;
+  existing: Array<{ x: number; y: number }>;
+  claimWidth: number;
+  claimHeight: number;
+  gap: number;
+}): { x: number; y: number } {
+  const angleOffsets = [0, -18, 18, -36, 36, -54, 54, -72, 72].map((degrees) => (degrees * Math.PI) / 180);
+
+  for (let ring = 0; ring < 5; ring += 1) {
+    for (const offset of angleOffsets) {
+      const radius = options.radius + ring * (options.claimHeight + options.gap + 18);
+      const candidate = {
+        x: options.center.x + Math.cos(options.angle + offset) * radius - options.claimWidth / 2,
+        y: options.center.y + Math.sin(options.angle + offset) * radius - options.claimHeight / 2
+      };
+
+      if (!options.existing.some((position) => boxesOverlap(candidate, position, options.claimWidth, options.claimHeight, options.gap))) {
+        return candidate;
+      }
+    }
+  }
+
+  return {
+    x: options.center.x + Math.cos(options.angle) * (options.radius + options.existing.length * (options.claimHeight + options.gap)) - options.claimWidth / 2,
+    y: options.center.y + Math.sin(options.angle) * (options.radius + options.existing.length * (options.claimHeight + options.gap)) - options.claimHeight / 2
+  };
+}
+
+function boxesOverlap(
+  left: { x: number; y: number },
+  right: { x: number; y: number },
+  width: number,
+  height: number,
+  gap: number
+): boolean {
+  return !(
+    left.x + width + gap <= right.x ||
+    right.x + width + gap <= left.x ||
+    left.y + height + gap <= right.y ||
+    right.y + height + gap <= left.y
+  );
+}
+
+function relationCountsByClaim(relations: UiRelation[]): Map<string, number> {
+  const counts = new Map<string, number>();
+
+  for (const relation of relations) {
+    counts.set(relation.source, (counts.get(relation.source) ?? 0) + 1);
+    counts.set(relation.target, (counts.get(relation.target) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
+function systemNodeId(system: string): string {
+  return `system:${system}`;
+}
+
+function claimNodeId(id: string): string {
+  return `claim:${id}`;
+}
+
+function formatCounts(label: string, counts: Record<string, number>): string {
+  const values = Object.entries(counts).map(([key, value]) => `${key}: ${value}`);
+  return `${label}: ${values.length > 0 ? values.join(", ") : "none"}`;
+}
+
+/*
+ * The helpers below are retained for stable graph-layout tests that exercise
+ * related-claim placement independently of the collapsed system renderer.
+ */
+export function buildExpandedClaimGraph(
+  claims: UiClaimSummary[],
   relations: UiRelation[],
   claimIds: Set<string>,
   enabledOrigins: Set<Origin>
@@ -807,9 +1406,11 @@ export function buildGraph(
     const color = statusColor(claim.status);
 
     return {
-      id: claim.id,
+      id: claimNodeId(claim.id),
       position: positions.get(claim.id) ?? { x: 0, y: 0 },
       data: {
+        kind: "claim",
+        claimId: claim.id,
         color,
         label: (
           <div className="claim-node">
@@ -832,8 +1433,8 @@ export function buildGraph(
 
   const edges = visibleRelations.map((relation) => ({
     id: relation.id,
-    source: relation.source,
-    target: relation.target,
+    source: claimNodeId(relation.source),
+    target: claimNodeId(relation.target),
     label: relation.relation,
     markerStart: relation.bidirectional ? { type: MarkerType.ArrowClosed } : undefined,
     markerEnd: { type: MarkerType.ArrowClosed },
@@ -846,7 +1447,7 @@ export function buildGraph(
 }
 
 function layoutGraphClaims(
-  claims: UiClaim[],
+  claims: UiClaimSummary[],
   relations: UiRelation[],
   systemIndex: Map<string, number>,
   nodeWidth: number,
@@ -1010,7 +1611,7 @@ function focusedClaimIds(id: string, relations: UiRelation[]): Set<string> {
   return ids;
 }
 
-function searchableText(claim: UiClaim): string {
+function searchableText(claim: UiClaimSummary): string {
   return [
     claim.id,
     claim.title,
@@ -1019,10 +1620,7 @@ function searchableText(claim: UiClaim): string {
     claim.status,
     claim.severity,
     ...claim.tags,
-    ...claim.sourceFiles,
-    ...claim.relatedFiles,
-    ...claim.symbols,
-    ...claim.routes
+    claim.sourcePath
   ]
     .join(" ")
     .toLowerCase();

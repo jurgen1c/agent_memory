@@ -252,17 +252,21 @@ select {
   background: rgba(248, 250, 252, 0.96);
 }
 
+.system-node,
 .claim-node {
   display: grid;
-  gap: 5px;
-  text-align: left;
+  gap: 4px;
+  text-align: center;
 }
 
+.system-node strong,
 .claim-node strong {
   font-size: 13px;
   line-height: 1.25;
 }
 
+.system-node span,
+.system-node small,
 .claim-node span {
   color: #64748b;
   font-size: 11px;
@@ -272,6 +276,87 @@ select {
   color: #0f766e;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.system-node {
+  position: relative;
+  place-items: center;
+  align-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.system-node strong {
+  max-width: 88px;
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 18px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.24);
+}
+
+.system-node span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 22px;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.22);
+}
+
+.system-node span small {
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 600;
+  font-size: 10px;
+}
+
+.system-node > small {
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.system-node em {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #be123c;
+  color: #ffffff;
+  font-style: normal;
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.claim-node.compact {
+  gap: 4px;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.claim-node.compact strong {
+  overflow: hidden;
+  color: #172033;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.claim-node.compact span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-view,
