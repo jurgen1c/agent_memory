@@ -448,7 +448,9 @@ function validateClaimFilePaths(
 function expectedClaimRelativePath(claim: LoadedClaim): string {
   const idPrefix = `${claim.system}.`;
   const idRemainder = claim.id.startsWith(idPrefix) ? claim.id.slice(idPrefix.length) : claim.id;
-  return toPosix(path.join("claims", claim.system, `${idRemainder.replace(/\./g, "_")}.md`));
+  const currentDirectory = path.posix.dirname(toPosix(claim.relativePath));
+  const baseDirectory = path.posix.dirname(currentDirectory);
+  return path.posix.join(baseDirectory, claim.system, `${idRemainder.replace(/\./g, "_")}.md`);
 }
 
 function normalizeIdentifierPart(value: string): string {

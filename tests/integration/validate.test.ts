@@ -150,6 +150,20 @@ describe("validate command", () => {
     expect(strictResult.stdout).toContain("claim.file_path");
   });
 
+  test("strict mode supports relocated claim globs", async () => {
+    const cwd = copyFixture(mockApp);
+    updateMemoryRootToRepoRoot(cwd);
+    const claimPath = "docs/agent-memory/claims/auth/relocated_strict_path.md";
+    writeClaim(cwd, claimPath, {
+      id: "auth.relocated.strict_path",
+      title: "Relocated strict path claim"
+    });
+
+    const result = await dispatch(["validate", "--strict", "--changed-files", claimPath], { cwd });
+
+    expect(result.exitCode).toBe(0);
+  });
+
   test("rejects claim file references that escape the repository", async () => {
     const cwd = copyFixture(mockApp);
     writeClaim(cwd, "docs/agent-memory/claims/auth/outside_reference.md", {
@@ -289,6 +303,19 @@ function copyFixture(source: string): string {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-validate-"));
   fs.cpSync(source, target, { recursive: true });
   return target;
+}
+
+function updateMemoryRootToRepoRoot(cwd: string): void {
+  const configPath = path.join(cwd, "agent-memory.config.yaml");
+  const config = fs
+    .readFileSync(configPath, "utf8")
+    .replace("memory_root: docs/agent-memory", "memory_root: .")
+    .replace("  - claims/**/*.md", "  - docs/agent-memory/claims/**/*.md")
+    .replace("  - graph/**/*.yaml", "  - docs/agent-memory/graph/**/*.yaml")
+    .replace("  - indexes/**/*.yaml", "  - docs/agent-memory/indexes/**/*.yaml")
+    .replace("  - recipes/**/*.yaml", "  - docs/agent-memory/recipes/**/*.yaml")
+    .replace("  - waivers/**/*.yaml", "  - docs/agent-memory/waivers/**/*.yaml");
+  fs.writeFileSync(configPath, config);
 }
 
 function writeClaim(
