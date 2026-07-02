@@ -91,6 +91,7 @@ interface UiSystemNode {
   statusCounts: Record<string, number>;
   severityCounts: Record<string, number>;
   reviewCount: number;
+  searchText: string;
 }
 
 interface UiSystemRelation {
@@ -281,6 +282,7 @@ export default function App() {
 
       return (
         item.system.toLowerCase().includes(normalizedQuery) ||
+        item.searchText.includes(normalizedQuery) ||
         (filteredSystemGraphs[item.system]?.claims ?? []).some((claim) => searchableText(claim).includes(normalizedQuery))
       );
     });

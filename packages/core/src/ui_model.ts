@@ -116,6 +116,7 @@ export interface UiSystemNode {
   statusCounts: Record<string, number>;
   severityCounts: Record<string, number>;
   reviewCount: number;
+  searchText: string;
 }
 
 export interface UiSystemRelation {
@@ -323,7 +324,8 @@ export function buildUiGraphSummary(claims: UiClaimSummary[], relations: UiRelat
         claimCount: systemClaims.length,
         statusCounts: countBy(systemClaims, (claim) => claim.status),
         severityCounts: countBy(systemClaims, (claim) => claim.severity),
-        reviewCount: systemClaims.filter((claim) => claim.reviewPriority > 0).length
+        reviewCount: systemClaims.filter((claim) => claim.reviewPriority > 0).length,
+        searchText: systemSearchText(systemClaims)
       }))
       .sort((left, right) => left.system.localeCompare(right.system)),
     systemRelations: buildSystemRelations(claims, relations)
@@ -355,6 +357,7 @@ export function deterministicSystemColor(system: string): string {
 function buildSystemRelations(claims: UiClaimSummary[], relations: UiRelation[]): UiSystemRelation[] {
   const claimSystems = new Map(claims.map((claim) => [claim.id, claim.system]));
   const aggregates = new Map<string, UiSystemRelation>();
+  const seenRelationIds = new Map<string, Set<string>>();
 
   for (const relation of relations) {
     const sourceSystem = claimSystems.get(relation.source);
@@ -372,9 +375,23 @@ function buildSystemRelations(claims: UiClaimSummary[], relations: UiRelation[])
         ].join(":")
       : [relation.origin, relation.relation, sourceSystem, targetSystem].join(":");
     const existing = aggregates.get(key);
+    const relationInstanceKey = relation.bidirectional
+      ? [
+          relation.origin,
+          relation.relation,
+          ...[relation.source, relation.target].sort()
+        ].join(":")
+      : relation.id;
+    const seenForAggregate = seenRelationIds.get(key) ?? new Set<string>();
+    const firstSeenForAggregate = !seenForAggregate.has(relationInstanceKey);
+    seenForAggregate.add(relationInstanceKey);
+    seenRelationIds.set(key, seenForAggregate);
 
     if (existing) {
-      existing.count += 1;
+      if (firstSeenForAggregate) {
+        existing.count += 1;
+      }
+
       existing.strength = Math.max(existing.strength, relation.strength);
       existing.bidirectional = existing.bidirectional || relation.bidirectional;
       continue;
@@ -399,6 +416,22 @@ function buildSystemRelations(claims: UiClaimSummary[], relations: UiRelation[])
       left.relation.localeCompare(right.relation) ||
       left.origin.localeCompare(right.origin)
   );
+}
+
+function systemSearchText(claims: UiClaimSummary[]): string {
+  return claims
+    .flatMap((claim) => [
+      claim.id,
+      claim.title,
+      claim.claim,
+      claim.system,
+      claim.status,
+      claim.severity,
+      ...claim.tags,
+      claim.sourcePath
+    ])
+    .join(" ")
+    .toLowerCase();
 }
 
 function countBy<T>(items: T[], keyForItem: (item: T) => string): Record<string, number> {
