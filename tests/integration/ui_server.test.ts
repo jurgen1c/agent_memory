@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isAddressInUse, startUiServer } from "../../packages/core/src/ui_server";
+import { isAddressInUse, startBunUiServer, startUiServer, type BunRuntime } from "../../packages/core/src/ui_server";
 
 const repoRoot = path.resolve(".");
 const mockApp = path.join(repoRoot, "examples/mock-app");
@@ -179,6 +179,37 @@ describe("UI server", () => {
   test("does not treat unrelated Bun startup errors as address conflicts", async () => {
     expect(isAddressInUse(new Error("Failed to start server. Is port 45984 in use?"))).toBe(true);
     expect(isAddressInUse(new Error("port configuration is in use by an invalid runtime option"))).toBe(false);
+  });
+
+  test("keeps scanning fallback ports for Bun port 0 after busy ranges", async () => {
+    const cwd = copyFixture(mockApp);
+    const staticRoot = makeStaticRoot();
+    let attempts = 0;
+    const fakeBun: BunRuntime = {
+      serve(options: { port: number }) {
+        attempts += 1;
+
+        if (attempts <= 101) {
+          const error = new Error(`port ${options.port} in use`) as NodeJS.ErrnoException;
+          error.code = "EADDRINUSE";
+          throw error;
+        }
+
+        return {
+          port: options.port,
+          stop() {}
+        };
+      }
+    };
+
+    const server = await startBunUiServer(fakeBun, { cwd, port: 0, staticRoot, token: "test-token" });
+
+    try {
+      expect(attempts).toBe(102);
+      expect(server.port).toBeGreaterThan(0);
+    } finally {
+      await server.close();
+    }
   });
 
   test("review update writes claim, validates, and recompiles", async () => {

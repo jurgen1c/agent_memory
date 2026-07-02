@@ -3,7 +3,7 @@ import path from "node:path";
 import { normalizeChangedFiles } from "./changes";
 import { ConfigError } from "./errors";
 import { loadConfig } from "./config";
-import { discoverFiles, resolveConfiguredPath, toPosix } from "./files";
+import { discoverFiles, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
 import { parseMarkdownFile, extractMarkdownSection } from "./markdown";
 import { isPathInside } from "./repo";
 import type { AgentMemoryConfig } from "./types";
@@ -113,9 +113,10 @@ export function validateRepository(options: ValidateRepositoryOptions = {}): Val
   const allRecipeFiles = discoverFiles(memoryRoot, loaded.config.recipes);
 
   const claimFiles = scoped ? selectChangedFiles(allClaimFiles, changedFiles, repoRoot) : allClaimFiles;
-  const graphFiles = scoped ? selectChangedFiles(allGraphFiles, changedFiles, repoRoot) : allGraphFiles;
+  const deletedClaimChanged = scoped && changedCanonicalFileWasDeleted(changedFiles, repoRoot, memoryRoot, allClaimFiles, loaded.config.claims);
+  const graphFiles = scoped && !deletedClaimChanged ? selectChangedFiles(allGraphFiles, changedFiles, repoRoot) : allGraphFiles;
   const indexFiles = scoped ? selectChangedFiles(allIndexFiles, changedFiles, repoRoot) : allIndexFiles;
-  const recipeFiles = scoped ? selectChangedFiles(allRecipeFiles, changedFiles, repoRoot) : allRecipeFiles;
+  const recipeFiles = scoped && !deletedClaimChanged ? selectChangedFiles(allRecipeFiles, changedFiles, repoRoot) : allRecipeFiles;
 
   const claims = loadClaims(pathContext, memoryRoot, claimFiles, loaded.config.validation, issues);
   const recipes = loadRecipes(memoryRoot, recipeFiles, issues);
@@ -748,6 +749,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function selectChangedFiles(files: string[], changedFiles: Set<string>, repoRoot: string): string[] {
   return files.filter((filePath) => changedFiles.has(toPosix(path.relative(repoRoot, filePath))));
+}
+
+function changedCanonicalFileWasDeleted(changedFiles: Set<string>, repoRoot: string, memoryRoot: string, existingFiles: string[], patterns: string[]): boolean {
+  const existingRelativeFiles = new Set(existingFiles.map((filePath) => toPosix(path.relative(repoRoot, filePath))));
+
+  for (const changedFile of changedFiles) {
+    if (existingRelativeFiles.has(changedFile)) {
+      continue;
+    }
+
+    const memoryRelativePath = toPosix(path.relative(memoryRoot, path.resolve(repoRoot, changedFile)));
+
+    if (!memoryRelativePath.startsWith("..") && !path.isAbsolute(memoryRelativePath) && patterns.some((pattern) => pathMatchesPattern(pattern, memoryRelativePath))) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function createRepoPathValidationContext(repoRoot: string): RepoPathValidationContext {

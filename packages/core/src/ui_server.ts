@@ -26,13 +26,15 @@ export interface UiServerHandle {
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4317;
 const PORT_SCAN_LIMIT = 100;
+const MIN_FALLBACK_PORT = 1024;
+const MAX_FALLBACK_PORT = 65535;
 
-type BunServer = {
+export type BunServer = {
   port: number;
   stop(force?: boolean): void | Promise<void>;
 };
 
-type BunRuntime = {
+export type BunRuntime = {
   serve(options: {
     hostname: string;
     port: number;
@@ -85,17 +87,17 @@ async function startNodeUiServer(options: UiServerOptions = {}): Promise<UiServe
   };
 }
 
-async function startBunUiServer(bun: BunRuntime, options: UiServerOptions): Promise<UiServerHandle> {
+export async function startBunUiServer(bun: BunRuntime, options: UiServerOptions): Promise<UiServerHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const requestedPort = options.port ?? DEFAULT_PORT;
   const token = options.token ?? crypto.randomBytes(18).toString("base64url");
   const staticRoot = options.staticRoot ?? defaultStaticRoot();
   const startPort = requestedPort === 0 ? randomEphemeralPort() : requestedPort;
-  const scanLimit = PORT_SCAN_LIMIT;
+  const scanLimit = requestedPort === 0 ? MAX_FALLBACK_PORT - MIN_FALLBACK_PORT + 1 : PORT_SCAN_LIMIT;
   let lastError: unknown;
 
   for (let offset = 0; offset < scanLimit; offset += 1) {
-    const port = startPort + offset;
+    const port = nextFallbackPort(startPort, offset);
 
     try {
       const server = bun.serve({
@@ -398,7 +400,7 @@ function contentType(filePath: string): string {
 
 function listen(server: http.Server, host: string, requestedPort: number): Promise<number> {
   return new Promise((resolve, reject) => {
-    const startPort = requestedPort === 0 ? randomEphemeralPort() : requestedPort;
+    const startPort = requestedPort === 0 ? 0 : requestedPort;
     const scanLimit = PORT_SCAN_LIMIT;
 
     const tryPort = (port: number, attempt: number): void => {
@@ -426,6 +428,16 @@ function listen(server: http.Server, host: string, requestedPort: number): Promi
 
 function randomEphemeralPort(): number {
   return 45000 + Math.floor(Math.random() * 1000);
+}
+
+function nextFallbackPort(startPort: number, offset: number): number {
+  const candidate = startPort + offset;
+
+  if (candidate <= MAX_FALLBACK_PORT) {
+    return candidate;
+  }
+
+  return MIN_FALLBACK_PORT + ((candidate - MAX_FALLBACK_PORT - 1) % (MAX_FALLBACK_PORT - MIN_FALLBACK_PORT + 1));
 }
 
 export function isAddressInUse(error: unknown): boolean {

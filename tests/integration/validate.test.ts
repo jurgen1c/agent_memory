@@ -92,6 +92,19 @@ describe("validate command", () => {
     expect(result.stdout).toContain("auth.missing_claim");
   });
 
+  test("checks unchanged graph and recipe references when a changed claim file was deleted", async () => {
+    const cwd = copyFixture(mockApp);
+    const claimPath = "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md";
+    fs.unlinkSync(path.join(cwd, claimPath));
+
+    const result = await dispatch(["validate", "--changed-files", claimPath], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("graph.edge.missing_claim");
+    expect(result.stdout).toContain("recipe.required_claim.missing");
+    expect(result.stdout).toContain("auth.student_oauth.uid_is_tenant_scoped");
+  });
+
   test("does not check unchanged claim source paths when loading scoped references", async () => {
     const cwd = copyFixture(mockApp);
     const missingReference = path.join(cwd, "src/reference-missing.js");
