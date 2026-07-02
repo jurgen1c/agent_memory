@@ -50,8 +50,8 @@ describe("UI memory model", () => {
       claim("billing.first", "billing", "First billing claim")
     ];
     const graph = buildUiGraphSummary(claims, [
-      relation("explicit:auth.first:same_area:billing.first", "auth.first", "billing.first", true),
-      relation("explicit:billing.first:same_area:auth.first", "billing.first", "auth.first", true)
+      relation("explicit:billing.first:same_area:auth.first", "billing.first", "auth.first", true),
+      relation("explicit:auth.first:same_area:billing.first", "auth.first", "billing.first", true)
     ]);
 
     expect(graph.systemRelations).toEqual([

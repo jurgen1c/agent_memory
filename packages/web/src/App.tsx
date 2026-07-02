@@ -175,6 +175,7 @@ export default function App() {
   const [focusId, setFocusId] = useState<string | null>(null);
   const [notice, setNotice] = useState("Loading memory...");
   const [busy, setBusy] = useState(false);
+  const systemGraphLoads = useRef(new Map<string, Promise<UiSystemGraph>>());
   const token = useMemo(() => new URLSearchParams(window.location.search).get("token") ?? "", []);
 
   const refresh = useCallback(async () => {
@@ -184,6 +185,7 @@ export default function App() {
       setMemory(next);
       setExpandedSystems(new Set());
       setSystemGraphs({});
+      systemGraphLoads.current.clear();
       setNotice("Memory loaded.");
 
       if (detail) {
@@ -321,12 +323,17 @@ export default function App() {
     if (!systemGraphs[systemName]) {
       setBusy(true);
       try {
-        const systemGraph = await api<UiSystemGraph>(`/api/graph/systems/${encodeURIComponent(systemName)}`);
-        setSystemGraphs((current) => ({ ...current, [systemName]: systemGraph }));
+        const load =
+          systemGraphLoads.current.get(systemName) ?? api<UiSystemGraph>(`/api/graph/systems/${encodeURIComponent(systemName)}`);
+        systemGraphLoads.current.set(systemName, load);
+
+        const systemGraph = await load;
+        setSystemGraphs((current) => (current[systemName] ? current : { ...current, [systemName]: systemGraph }));
       } catch (error) {
         setNotice(error instanceof Error ? error.message : String(error));
         return;
       } finally {
+        systemGraphLoads.current.delete(systemName);
         setBusy(false);
       }
     }

@@ -397,10 +397,12 @@ function buildSystemRelations(claims: UiClaimSummary[], relations: UiRelation[])
       continue;
     }
 
+    const [aggregateSource, aggregateTarget] = relation.bidirectional ? [sourceSystem, targetSystem].sort() : [sourceSystem, targetSystem];
+
     aggregates.set(key, {
       id: `system:${key}`,
-      source: sourceSystem,
-      target: targetSystem,
+      source: aggregateSource,
+      target: aggregateTarget,
       relation: relation.relation,
       origin: relation.origin,
       count: 1,
