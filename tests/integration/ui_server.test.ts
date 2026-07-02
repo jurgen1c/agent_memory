@@ -152,6 +152,30 @@ describe("UI server", () => {
     }
   });
 
+  test("treats whitespace-only review payloads as empty JSON objects", async () => {
+    const cwd = copyFixture(mockApp);
+    const staticRoot = makeStaticRoot();
+    const server = await startUiServer({ cwd, port: 0, staticRoot, token: "test-token" });
+
+    try {
+      const response = await fetch(`${baseUrl(server.port)}/api/claims/auth.student_oauth.uid_is_tenant_scoped/review`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-agent-memory-token": "test-token"
+        },
+        body: "\n  \t"
+      });
+      const result = (await response.json()) as { validation: { valid: boolean }; compile?: { counts: { claims: number } } };
+
+      expect(response.status).toBe(200);
+      expect(result.validation.valid).toBe(true);
+      expect(result.compile?.counts.claims).toBe(2);
+    } finally {
+      await server.close();
+    }
+  });
+
   test("does not treat unrelated Bun startup errors as address conflicts", async () => {
     expect(isAddressInUse(new Error("Failed to start server. Is port 45984 in use?"))).toBe(true);
     expect(isAddressInUse(new Error("port configuration is in use by an invalid runtime option"))).toBe(false);

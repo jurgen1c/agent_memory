@@ -300,7 +300,7 @@ async function readRequestJson<T>(request: Request): Promise<T> {
 }
 
 function parseJsonBody(raw: string): unknown {
-  if (raw.length === 0) {
+  if (raw.trim().length === 0) {
     return {};
   }
 

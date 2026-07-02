@@ -63,6 +63,11 @@ interface LoadedRecipe {
   relativePath: string;
 }
 
+interface RepoPathValidationContext {
+  repoRoot: string;
+  repoRootRealPath: string | null;
+}
+
 type ValidationConfig = AgentMemoryConfig["validation"];
 
 const CLAIM_STATUSES = [
@@ -97,6 +102,7 @@ export function validateRepository(options: ValidateRepositoryOptions = {}): Val
   const loaded = loadConfig({ cwd: options.cwd });
   const repoRoot = loaded.repo.root;
   const memoryRoot = path.join(repoRoot, loaded.config.memory_root);
+  const pathContext = createRepoPathValidationContext(repoRoot);
   const issues: ValidationIssue[] = [];
   const changedFiles = new Set(normalizeChangedFiles(options.changedFiles ?? [], repoRoot));
   const scoped = changedFiles.size > 0;
@@ -111,7 +117,7 @@ export function validateRepository(options: ValidateRepositoryOptions = {}): Val
   const indexFiles = scoped ? selectChangedFiles(allIndexFiles, changedFiles, repoRoot) : allIndexFiles;
   const recipeFiles = scoped ? selectChangedFiles(allRecipeFiles, changedFiles, repoRoot) : allRecipeFiles;
 
-  const claims = loadClaims(repoRoot, memoryRoot, claimFiles, loaded.config.validation, issues);
+  const claims = loadClaims(pathContext, memoryRoot, claimFiles, loaded.config.validation, issues);
   const recipes = loadRecipes(memoryRoot, recipeFiles, issues);
   const graphs = loadYamlArtifacts(memoryRoot, graphFiles, "graph", issues);
   const indexes = loadYamlArtifacts(memoryRoot, indexFiles, "index", issues);
@@ -125,7 +131,7 @@ export function validateRepository(options: ValidateRepositoryOptions = {}): Val
   validateClaimFilePaths(claims, loaded.config.validation, Boolean(options.strict), issues);
   validateUniqueRecipes(recipes, issues, allRecipes);
   validateGraphs(graphs, new Set(allClaims.map((claim) => claim.id)), issues);
-  validateIndexes(indexes, repoRoot, issues);
+  validateIndexes(indexes, pathContext, issues);
   validateRecipeReferences(recipes, claimsById, issues);
 
   const errors = issues.filter((issue) => issue.severity === "error");
@@ -145,7 +151,7 @@ export function validateRepository(options: ValidateRepositoryOptions = {}): Val
 }
 
 function loadClaims(
-  repoRoot: string,
+  pathContext: RepoPathValidationContext,
   memoryRoot: string,
   files: string[],
   validationConfig: ValidationConfig,
@@ -171,7 +177,7 @@ function loadClaims(
         continue;
       }
 
-      validateClaimFields(claim, repoRoot, validationConfig, issues);
+      validateClaimFields(claim, pathContext, validationConfig, issues);
       claims.push({ ...claim, path: filePath });
     } catch (error) {
       addError(issues, "claim.parse", formatCaughtError(error), relativePath);
@@ -268,7 +274,7 @@ function normalizeClaim(raw: Record<string, unknown>, relativePath: string, issu
 
 function validateClaimFields(
   claim: LoadedClaim,
-  repoRoot: string,
+  pathContext: RepoPathValidationContext,
   validationConfig: Pick<ValidationConfig, "require_source_files" | "require_verification">,
   issues: ValidationIssue[]
 ): void {
@@ -304,8 +310,8 @@ function validateClaimFields(
     }
   }
 
-  validateRepoPathReferences(claim.sourceFiles, "claim.source_files", repoRoot, claim.relativePath, claim.id, true, issues);
-  validateRepoPathReferences(claim.relatedFiles, "claim.related_files", repoRoot, claim.relativePath, claim.id, true, issues);
+  validateRepoPathReferences(claim.sourceFiles, "claim.source_files", pathContext, claim.relativePath, claim.id, true, issues);
+  validateRepoPathReferences(claim.relatedFiles, "claim.related_files", pathContext, claim.relativePath, claim.id, true, issues);
 }
 
 function validateOneClaimPerFile(
@@ -546,7 +552,7 @@ function readSourceTargetClaims(edge: Record<string, unknown>, relativePath: str
   return refs;
 }
 
-function validateIndexes(indexes: Array<{ relativePath: string; data: unknown }>, repoRoot: string, issues: ValidationIssue[]): void {
+function validateIndexes(indexes: Array<{ relativePath: string; data: unknown }>, pathContext: RepoPathValidationContext, issues: ValidationIssue[]): void {
   for (const index of indexes) {
     if (!isRecord(index.data)) {
       addError(issues, "index.schema", "Index file must be a mapping.", index.relativePath);
@@ -561,7 +567,7 @@ function validateIndexes(indexes: Array<{ relativePath: string; data: unknown }>
         const values = readStringArray(index.data, field, index.relativePath, issues);
 
         if (field === "watched_files") {
-          validateRepoPathReferences(values, "index.watched_files", repoRoot, index.relativePath, undefined, false, issues);
+          validateRepoPathReferences(values, "index.watched_files", pathContext, index.relativePath, undefined, false, issues);
         }
       }
     }
@@ -742,19 +748,26 @@ function selectChangedFiles(files: string[], changedFiles: Set<string>, repoRoot
   return files.filter((filePath) => changedFiles.has(toPosix(path.relative(repoRoot, filePath))));
 }
 
+function createRepoPathValidationContext(repoRoot: string): RepoPathValidationContext {
+  return {
+    repoRoot,
+    repoRootRealPath: safeRealpath(repoRoot)
+  };
+}
+
 function validateRepoPathReferences(
   references: string[],
   fieldCode: string,
-  repoRoot: string,
+  pathContext: RepoPathValidationContext,
   relativePath: string,
   id: string | undefined,
   requireExists: boolean,
   issues: ValidationIssue[]
 ): void {
   for (const reference of references) {
-    const resolved = resolveRepoReference(repoRoot, reference);
+    const resolved = resolveRepoReference(pathContext.repoRoot, reference);
 
-    if (!isPathInside(repoRoot, resolved) || existingParentEscapesRepo(repoRoot, resolved)) {
+    if (!isPathInside(pathContext.repoRoot, resolved) || existingParentEscapesRepo(pathContext, resolved)) {
       addError(issues, `${fieldCode}.outside_repo`, `Referenced path escapes repository root or cannot be validated safely: ${reference}`, relativePath, id);
       continue;
     }
@@ -786,13 +799,22 @@ function resolveRepoReference(repoRoot: string, reference: string): string {
   return path.isAbsolute(normalizedReference) ? path.normalize(normalizedReference) : path.resolve(repoRoot, normalizedReference);
 }
 
-function existingParentEscapesRepo(repoRoot: string, resolvedPath: string): boolean {
+function existingParentEscapesRepo(pathContext: RepoPathValidationContext, resolvedPath: string): boolean {
   const existingParent = nearestExistingParent(resolvedPath);
+  const existingParentRealPath = safeRealpath(existingParent);
 
-  try {
-    return !isPathInside(fs.realpathSync(repoRoot), fs.realpathSync(existingParent));
-  } catch {
+  if (!pathContext.repoRootRealPath || !existingParentRealPath) {
     return true;
+  }
+
+  return !isPathInside(pathContext.repoRootRealPath, existingParentRealPath);
+}
+
+function safeRealpath(filePath: string): string | null {
+  try {
+    return fs.realpathSync(filePath);
+  } catch {
+    return null;
   }
 }
 
