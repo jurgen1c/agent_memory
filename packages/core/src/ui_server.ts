@@ -4,7 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentMemoryError, formatError, toAgentMemoryError } from "./errors";
-import { buildUiMemoryModel, getUiClaimDetail, reviewClaim, syncUiMemory } from "./ui_model";
+import { buildUiMemoryModel, getUiClaimDetail, getUiSystemGraph, reviewClaim, syncUiMemory } from "./ui_model";
 
 export interface UiServerOptions {
   cwd?: string;
@@ -139,6 +139,11 @@ async function handleBunRequest(
       return jsonResponse(200, await buildUiMemoryModel(context.cwd));
     }
 
+    if (url.pathname.startsWith("/api/graph/systems/") && request.method === "GET") {
+      const system = decodeURIComponent(url.pathname.slice("/api/graph/systems/".length));
+      return jsonResponse(200, getUiSystemGraph(context.cwd, system));
+    }
+
     if (url.pathname.startsWith("/api/claims/") && request.method === "GET") {
       const id = decodeURIComponent(url.pathname.slice("/api/claims/".length));
       return jsonResponse(200, getUiClaimDetail(context.cwd, id));
@@ -185,6 +190,11 @@ async function handleRequest(
 
     if (url.pathname === "/api/memory" && request.method === "GET") {
       return sendJson(response, 200, await buildUiMemoryModel(context.cwd));
+    }
+
+    if (url.pathname.startsWith("/api/graph/systems/") && request.method === "GET") {
+      const system = decodeURIComponent(url.pathname.slice("/api/graph/systems/".length));
+      return sendJson(response, 200, getUiSystemGraph(context.cwd, system));
     }
 
     if (url.pathname.startsWith("/api/claims/") && request.method === "GET") {
@@ -400,13 +410,13 @@ function contentType(filePath: string): string {
 
 function listen(server: http.Server, host: string, requestedPort: number): Promise<number> {
   return new Promise((resolve, reject) => {
-    const startPort = requestedPort === 0 ? 0 : requestedPort;
+    const startPort = requestedPort;
     const scanLimit = PORT_SCAN_LIMIT;
 
     const tryPort = (port: number, attempt: number): void => {
       const onError = (error: NodeJS.ErrnoException): void => {
         if (error.code === "EADDRINUSE" && attempt + 1 < scanLimit) {
-          tryPort(port + 1, attempt + 1);
+          tryPort(port === 0 ? randomEphemeralPort() : port + 1, attempt + 1);
           return;
         }
 

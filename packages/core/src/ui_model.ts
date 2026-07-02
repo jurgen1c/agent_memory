@@ -32,15 +32,21 @@ export interface UiMemoryModel {
   memoryRoot: string;
   databasePath: string;
   commandPrefix: string;
-  claims: UiClaim[];
-  relations: UiRelation[];
+  health: UiHealth;
+  graph: UiGraphSummary;
   files: UiFileNode;
   validation: ValidationResult;
   doctor: DoctorResult;
   reviewQueue: UiReviewItem[];
 }
 
-export interface UiClaim {
+export interface UiHealth {
+  healthy: boolean;
+  validationValid: boolean;
+  doctorHealthy: boolean;
+}
+
+export interface UiClaimSummary {
   id: string;
   type: string;
   system: string;
@@ -50,16 +56,19 @@ export interface UiClaim {
   title: string;
   claim: string;
   sourcePath: string;
+  tags: string[];
+  reviewPriority: number;
+  reviewReason?: string;
+}
+
+export interface UiClaim extends UiClaimSummary {
   sourceFiles: string[];
   relatedFiles: string[];
   symbols: string[];
   routes: string[];
-  tags: string[];
   verification: string[];
   body: string;
   raw: Record<string, unknown>;
-  reviewPriority: number;
-  reviewReason?: string;
 }
 
 export interface UiRelation {
@@ -94,6 +103,39 @@ export interface UiReviewItem {
   reason: string;
 }
 
+export interface UiGraphSummary {
+  systems: UiSystemNode[];
+  systemRelations: UiSystemRelation[];
+}
+
+export interface UiSystemNode {
+  id: string;
+  system: string;
+  color: string;
+  claimCount: number;
+  statusCounts: Record<string, number>;
+  severityCounts: Record<string, number>;
+  reviewCount: number;
+  searchText: string;
+}
+
+export interface UiSystemRelation {
+  id: string;
+  source: string;
+  target: string;
+  relation: string;
+  origin: UiRelationOrigin;
+  count: number;
+  strength: number;
+  bidirectional: boolean;
+}
+
+export interface UiSystemGraph {
+  system: string;
+  claims: UiClaimSummary[];
+  relations: UiRelation[];
+}
+
 export interface UiClaimDetail {
   claim: UiClaim;
   relations: UiRelation[];
@@ -122,7 +164,7 @@ export async function buildUiMemoryModel(cwd?: string): Promise<UiMemoryModel> {
   const databasePath = path.isAbsolute(loaded.config.database_path) ? loaded.config.database_path : path.join(repoRoot, loaded.config.database_path);
   const validation = validateRepository({ cwd });
   const doctor = await doctorMemory({ cwd });
-  const claims = memory.claims.map((claim) => toUiClaim(memoryRoot, claim));
+  const claims = memory.claims.map(toUiClaimSummary);
   const relations = buildUiRelations(memory);
 
   return {
@@ -130,8 +172,12 @@ export async function buildUiMemoryModel(cwd?: string): Promise<UiMemoryModel> {
     memoryRoot: loaded.config.memory_root,
     databasePath,
     commandPrefix: commandPrefixForRepo(repoRoot),
-    claims,
-    relations,
+    health: {
+      healthy: validation.valid && doctor.healthy,
+      validationValid: validation.valid,
+      doctorHealthy: doctor.healthy
+    },
+    graph: buildUiGraphSummary(claims, relations),
     files: buildFileTree(repoRoot, memoryRoot, loaded.config, claims),
     validation,
     doctor,
@@ -157,6 +203,24 @@ export function getUiClaimDetail(cwd: string | undefined, id: string): UiClaimDe
     claim,
     relations,
     relatedClaims: claims.filter((candidate) => relatedIds.has(candidate.id))
+  };
+}
+
+export function getUiSystemGraph(cwd: string | undefined, system: string): UiSystemGraph {
+  const memory = loadMemory(cwd);
+  const claims = memory.claims.map(toUiClaimSummary);
+  const systemClaims = claims.filter((claim) => claim.system === system);
+
+  if (systemClaims.length === 0) {
+    throw new NotFoundError(`System not found: ${system}`);
+  }
+
+  const systemClaimIds = new Set(systemClaims.map((claim) => claim.id));
+
+  return {
+    system,
+    claims: systemClaims,
+    relations: buildUiRelations(memory).filter((relation) => systemClaimIds.has(relation.source) || systemClaimIds.has(relation.target))
   };
 }
 
@@ -208,8 +272,7 @@ export async function syncUiMemory(cwd?: string): Promise<{ compile: CompileResu
   };
 }
 
-function toUiClaim(memoryRoot: string, claim: MemoryClaim): UiClaim {
-  const parsed = parseMarkdown(fs.readFileSync(path.join(memoryRoot, claim.sourcePath), "utf8"));
+function toUiClaimSummary(claim: MemoryClaim): UiClaimSummary {
   const review = reviewPriorityForClaim(claim);
 
   return {
@@ -222,20 +285,169 @@ function toUiClaim(memoryRoot: string, claim: MemoryClaim): UiClaim {
     title: claim.title,
     claim: claim.claim,
     sourcePath: toPosix(claim.sourcePath),
-    sourceFiles: claim.sourceFiles,
-    relatedFiles: claim.relatedFiles,
-    symbols: claim.symbols,
-    routes: claim.routes,
     tags: claim.tags,
-    verification: claim.verification,
-    body: parsed.body,
-    raw: claim.raw,
     reviewPriority: review.priority,
     reviewReason: review.reason
   };
 }
 
-function buildUiRelations(memory: LoadedMemory): UiRelation[] {
+function toUiClaim(memoryRoot: string, claim: MemoryClaim): UiClaim {
+  const parsed = parseMarkdown(fs.readFileSync(path.join(memoryRoot, claim.sourcePath), "utf8"));
+
+  return {
+    ...toUiClaimSummary(claim),
+    sourceFiles: claim.sourceFiles,
+    relatedFiles: claim.relatedFiles,
+    symbols: claim.symbols,
+    routes: claim.routes,
+    verification: claim.verification,
+    body: parsed.body,
+    raw: claim.raw
+  };
+}
+
+export function buildUiGraphSummary(claims: UiClaimSummary[], relations: UiRelation[]): UiGraphSummary {
+  const claimsBySystem = new Map<string, UiClaimSummary[]>();
+
+  for (const claim of claims) {
+    const systemClaims = claimsBySystem.get(claim.system) ?? [];
+    systemClaims.push(claim);
+    claimsBySystem.set(claim.system, systemClaims);
+  }
+
+  return {
+    systems: [...claimsBySystem]
+      .map(([system, systemClaims]) => ({
+        id: system,
+        system,
+        color: deterministicSystemColor(system),
+        claimCount: systemClaims.length,
+        statusCounts: countBy(systemClaims, (claim) => claim.status),
+        severityCounts: countBy(systemClaims, (claim) => claim.severity),
+        reviewCount: systemClaims.filter((claim) => claim.reviewPriority > 0).length,
+        searchText: systemSearchText(systemClaims)
+      }))
+      .sort((left, right) => left.system.localeCompare(right.system)),
+    systemRelations: buildSystemRelations(claims, relations)
+  };
+}
+
+export function deterministicSystemColor(system: string): string {
+  const palette = [
+    "#0f766e",
+    "#2563eb",
+    "#7c3aed",
+    "#be123c",
+    "#b45309",
+    "#15803d",
+    "#9333ea",
+    "#0369a1",
+    "#c2410c",
+    "#4f46e5"
+  ];
+  let hash = 0;
+
+  for (const character of system) {
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  }
+
+  return palette[hash % palette.length];
+}
+
+function buildSystemRelations(claims: UiClaimSummary[], relations: UiRelation[]): UiSystemRelation[] {
+  const claimSystems = new Map(claims.map((claim) => [claim.id, claim.system]));
+  const aggregates = new Map<string, UiSystemRelation>();
+  const seenRelationIds = new Map<string, Set<string>>();
+
+  for (const relation of relations) {
+    const sourceSystem = claimSystems.get(relation.source);
+    const targetSystem = claimSystems.get(relation.target);
+
+    if (!sourceSystem || !targetSystem || sourceSystem === targetSystem) {
+      continue;
+    }
+
+    const key = relation.bidirectional
+      ? [
+          relation.origin,
+          relation.relation,
+          ...[sourceSystem, targetSystem].sort()
+        ].join(":")
+      : [relation.origin, relation.relation, sourceSystem, targetSystem].join(":");
+    const existing = aggregates.get(key);
+    const relationInstanceKey = relation.bidirectional
+      ? [
+          relation.origin,
+          relation.relation,
+          ...[relation.source, relation.target].sort()
+        ].join(":")
+      : relation.id;
+    const seenForAggregate = seenRelationIds.get(key) ?? new Set<string>();
+    const firstSeenForAggregate = !seenForAggregate.has(relationInstanceKey);
+    seenForAggregate.add(relationInstanceKey);
+    seenRelationIds.set(key, seenForAggregate);
+
+    if (existing) {
+      if (firstSeenForAggregate) {
+        existing.count += 1;
+      }
+
+      existing.strength = Math.max(existing.strength, relation.strength);
+      existing.bidirectional = existing.bidirectional || relation.bidirectional;
+      continue;
+    }
+
+    const [aggregateSource, aggregateTarget] = relation.bidirectional ? [sourceSystem, targetSystem].sort() : [sourceSystem, targetSystem];
+
+    aggregates.set(key, {
+      id: `system:${key}`,
+      source: aggregateSource,
+      target: aggregateTarget,
+      relation: relation.relation,
+      origin: relation.origin,
+      count: 1,
+      strength: relation.strength,
+      bidirectional: relation.bidirectional
+    });
+  }
+
+  return [...aggregates.values()].sort(
+    (left, right) =>
+      left.source.localeCompare(right.source) ||
+      left.target.localeCompare(right.target) ||
+      left.relation.localeCompare(right.relation) ||
+      left.origin.localeCompare(right.origin)
+  );
+}
+
+function systemSearchText(claims: UiClaimSummary[]): string {
+  return claims
+    .flatMap((claim) => [
+      claim.id,
+      claim.title,
+      claim.claim,
+      claim.system,
+      claim.status,
+      claim.severity,
+      ...claim.tags,
+      claim.sourcePath
+    ])
+    .join(" ")
+    .toLowerCase();
+}
+
+function countBy<T>(items: T[], keyForItem: (item: T) => string): Record<string, number> {
+  const counts: Record<string, number> = {};
+
+  for (const item of items) {
+    const key = keyForItem(item);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+
+  return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+export function buildUiRelations(memory: LoadedMemory): UiRelation[] {
   const relations = [
     ...buildExplicitRelations(memory),
     ...buildInferredRelations(memory.claims),
@@ -438,7 +650,7 @@ function buildFileTree(
     recipes: string[];
     waivers: string[];
   },
-  claims: UiClaim[]
+  claims: Array<Pick<UiClaimSummary, "id" | "sourcePath">>
 ): UiFileNode {
   const root: UiFileNode = { name: path.basename(memoryRoot), path: "", kind: "directory", children: [] };
   const claimByPath = new Map(claims.map((claim) => [claim.sourcePath, claim]));
@@ -527,7 +739,7 @@ function sortFileTree(node: UiFileNode): void {
   }
 }
 
-function buildReviewQueue(claims: UiClaim[]): UiReviewItem[] {
+function buildReviewQueue(claims: UiClaimSummary[]): UiReviewItem[] {
   return claims
     .filter((claim) => claim.reviewPriority > 0)
     .map((claim) => ({
