@@ -100,6 +100,23 @@ describe("workspace version sync script", () => {
     expect(result.exitCode).toBe(1);
     expect(fs.readFileSync(generatedPath, "utf8")).toBe(before);
   });
+
+  test("reports unparseable generated version metadata", () => {
+    const workspaceRoot = makeWorkspace({
+      version: "6.0.0",
+      workspaces: ["packages/*"],
+      packages: {
+        "packages/alpha": "6.0.0"
+      }
+    });
+    const generatedPath = path.join(workspaceRoot, "packages/core/src/generated_version.ts");
+    fs.writeFileSync(generatedPath, "export const OTHER_VERSION = \"6.0.0\";\n");
+
+    const result = runScript(workspaceRoot, ["--check"]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("packages/core/src/generated_version.ts: unparseable");
+  });
 });
 
 function makeWorkspace(input: {
@@ -129,19 +146,27 @@ function makeWorkspace(input: {
 }
 
 function runScript(cwd: string, args: string[] = []): { exitCode: number; stdout: string; stderr: string } {
+  const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-version-sync-output-"));
+  const stdoutPath = path.join(outputDir, "stdout");
+  const stderrPath = path.join(outputDir, "stderr");
+  const stdoutFd = fs.openSync(stdoutPath, "w");
+  const stderrFd = fs.openSync(stderrPath, "w");
   const result = spawnSync("node", [scriptPath, ...args], {
     cwd,
     encoding: "utf8",
+    stdio: ["ignore", stdoutFd, stderrFd],
     env: {
       ...process.env,
       ASDF_NODEJS_VERSION: process.env.ASDF_NODEJS_VERSION ?? localNodeVersion()
     }
   });
+  fs.closeSync(stdoutFd);
+  fs.closeSync(stderrFd);
 
   return {
     exitCode: result.status ?? 1,
-    stdout: result.stdout,
-    stderr: result.stderr
+    stdout: fs.readFileSync(stdoutPath, "utf8"),
+    stderr: fs.readFileSync(stderrPath, "utf8")
   };
 }
 
@@ -161,7 +186,7 @@ function readVersion(workspaceRoot: string, packagePath: string): string {
 
 function readGeneratedVersion(workspaceRoot: string): string {
   const content = fs.readFileSync(path.join(workspaceRoot, "packages/core/src/generated_version.ts"), "utf8");
-  return content.match(/"([^"]+)"/)?.[1] ?? "";
+  return content.match(/GENERATED_PACKAGE_VERSION\s*=\s*["']([^"']+)["']/)?.[1] ?? "";
 }
 
 function writeJson(filePath: string, value: unknown): void {

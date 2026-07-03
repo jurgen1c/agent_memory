@@ -42,7 +42,7 @@ for (const packagePath of workspacePackagePaths) {
 if (generatedVersion !== version) {
   mismatchedPackagePaths.push({
     path: path.relative(repoRoot, generatedVersionPath),
-    version: generatedVersion ?? "missing"
+    version: generatedVersion === null ? "missing" : generatedVersion ?? "unparseable"
   });
 
   if (!shouldCheck) {
@@ -121,5 +121,5 @@ function readGeneratedVersion(filePath) {
 
   const content = fs.readFileSync(filePath, "utf8");
   const match = content.match(/GENERATED_PACKAGE_VERSION\s*=\s*["']([^"']+)["']/);
-  return match ? match[1] : null;
+  return match ? match[1] : undefined;
 }
