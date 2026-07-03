@@ -72,6 +72,35 @@ describe("upgrade command", () => {
     expect(wrapper).toContain("bunx @jurgen1c/agent-memory-cli");
   });
 
+  test("does not chmod current generated wrappers during dry runs", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
+    fs.writeFileSync(wrapperPath, wrapperTemplate("npm"));
+    fs.chmodSync(wrapperPath, 0o644);
+
+    const result = await dispatch(["upgrade"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("would_update");
+    expect(result.stdout).toContain("make wrapper executable");
+    expect(fs.statSync(wrapperPath).mode & 0o777).toBe(0o644);
+  });
+
+  test("chmods current generated wrappers when upgrade writes", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
+    fs.writeFileSync(wrapperPath, wrapperTemplate("npm"));
+    fs.chmodSync(wrapperPath, 0o644);
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("made wrapper executable");
+    expect(fs.statSync(wrapperPath).mode & 0o111).toBeGreaterThan(0);
+  });
+
   test("skips custom wrappers during upgrade", async () => {
     const repoRoot = makeRepo(oldConfig());
     const wrapperPath = path.join(repoRoot, "bin/memory");

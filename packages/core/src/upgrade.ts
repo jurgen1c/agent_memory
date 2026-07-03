@@ -142,8 +142,18 @@ function upgradeMemoryWrapper(repoRoot: string, options: UpgradeOptions, actions
   const next = wrapperTemplate(packageManager);
 
   if (existing === next) {
+    if (!isExecutable(absolutePath)) {
+      if (options.write) {
+        fs.chmodSync(absolutePath, 0o755);
+        actions.push({ path: relativePath, status: "updated", detail: "made wrapper executable" });
+        return;
+      }
+
+      actions.push({ path: relativePath, status: "would_update", detail: "make wrapper executable" });
+      return;
+    }
+
     actions.push({ path: relativePath, status: "skipped", detail: "already current" });
-    ensureExecutable(absolutePath);
     return;
   }
 
@@ -166,10 +176,8 @@ function upgradeMemoryWrapper(repoRoot: string, options: UpgradeOptions, actions
   });
 }
 
-function ensureExecutable(filePath: string): void {
-  if (fs.existsSync(filePath)) {
-    fs.chmodSync(filePath, 0o755);
-  }
+function isExecutable(filePath: string): boolean {
+  return (fs.statSync(filePath).mode & 0o111) !== 0;
 }
 
 function upgradeConfigFile(options: {
