@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 
 const repoRoot = process.cwd();
 const rootPackagePath = path.join(repoRoot, "package.json");
+const generatedVersionPath = path.join(repoRoot, "packages/core/src/generated_version.ts");
 const rootPackage = JSON.parse(fs.readFileSync(rootPackagePath, "utf8"));
 const version = rootPackage.version;
 const shouldStage = process.argv.includes("--stage");
@@ -16,6 +17,7 @@ if (typeof version !== "string" || version.length === 0) {
 const workspacePackagePaths = workspacePackageJsonPaths(rootPackage.workspaces);
 const updatedPackagePaths = [];
 const mismatchedPackagePaths = [];
+const generatedVersion = readGeneratedVersion(generatedVersionPath);
 
 for (const packagePath of workspacePackagePaths) {
   const absolutePath = path.join(repoRoot, packagePath);
@@ -37,8 +39,22 @@ for (const packagePath of workspacePackagePaths) {
   console.log(`Updated ${packagePath} to ${version}`);
 }
 
+if (generatedVersion !== version) {
+  mismatchedPackagePaths.push({
+    path: path.relative(repoRoot, generatedVersionPath),
+    version: generatedVersion ?? "missing"
+  });
+
+  if (!shouldCheck) {
+    fs.mkdirSync(path.dirname(generatedVersionPath), { recursive: true });
+    fs.writeFileSync(generatedVersionPath, `export const GENERATED_PACKAGE_VERSION = ${JSON.stringify(version)};\n`);
+    updatedPackagePaths.push(path.relative(repoRoot, generatedVersionPath));
+    console.log(`Updated ${path.relative(repoRoot, generatedVersionPath)} to ${version}`);
+  }
+}
+
 if (shouldCheck && mismatchedPackagePaths.length > 0) {
-  console.error(`Workspace package versions must match root package.json version ${version}.`);
+  console.error(`Workspace package versions and generated metadata must match root package.json version ${version}.`);
 
   for (const mismatch of mismatchedPackagePaths) {
     console.error(`- ${mismatch.path}: ${mismatch.version}`);
@@ -96,4 +112,14 @@ function packageJsonPathIfPresent(workspacePath) {
   const absolutePackagePath = path.join(repoRoot, packagePath);
 
   return fs.existsSync(absolutePackagePath) ? [packagePath] : [];
+}
+
+function readGeneratedVersion(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  const content = fs.readFileSync(filePath, "utf8");
+  const match = content.match(/GENERATED_PACKAGE_VERSION\s*=\s*["']([^"']+)["']/);
+  return match ? match[1] : null;
 }

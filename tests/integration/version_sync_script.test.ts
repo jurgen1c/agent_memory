@@ -36,13 +36,15 @@ describe("workspace version sync script", () => {
     expect(readVersion(workspaceRoot, "packages/alpha/package.json")).toBe("2.0.0");
     expect(readVersion(workspaceRoot, "packages/bravo/package.json")).toBe("2.0.0");
     expect(readVersion(workspaceRoot, "tools/standalone/package.json")).toBe("2.0.0");
+    expect(readGeneratedVersion(workspaceRoot)).toBe("2.0.0");
 
-    const stagedFiles = git(workspaceRoot, ["diff", "--cached", "--name-only"]).stdout.trim().split(/\r?\n/).filter(Boolean);
+    const stagedFiles = git(workspaceRoot, ["diff", "--cached", "--name-only"]).stdout.trim().split(/\r?\n/).filter(Boolean).sort();
     expect(stagedFiles).toEqual([
+      "packages/core/src/generated_version.ts",
       "packages/alpha/package.json",
       "packages/bravo/package.json",
       "tools/standalone/package.json"
-    ]);
+    ].sort());
   });
 
   test("supports object-form workspace config and is idempotent when versions already match", () => {
@@ -80,10 +82,29 @@ describe("workspace version sync script", () => {
     expect(result.exitCode).toBe(1);
     expect(fs.readFileSync(packagePath, "utf8")).toBe(before);
   });
+
+  test("checks generated version metadata without rewriting files", () => {
+    const workspaceRoot = makeWorkspace({
+      version: "5.0.0",
+      generatedVersion: "4.9.0",
+      workspaces: ["packages/*"],
+      packages: {
+        "packages/alpha": "5.0.0"
+      }
+    });
+    const generatedPath = path.join(workspaceRoot, "packages/core/src/generated_version.ts");
+    const before = fs.readFileSync(generatedPath, "utf8");
+
+    const result = runScript(workspaceRoot, ["--check"]);
+
+    expect(result.exitCode).toBe(1);
+    expect(fs.readFileSync(generatedPath, "utf8")).toBe(before);
+  });
 });
 
 function makeWorkspace(input: {
   version: string;
+  generatedVersion?: string;
   workspaces: string[] | { packages: string[] };
   packages: Record<string, string>;
 }): string {
@@ -101,6 +122,8 @@ function makeWorkspace(input: {
       private: true
     });
   }
+
+  writeGeneratedVersion(workspaceRoot, input.generatedVersion ?? input.version);
 
   return workspaceRoot;
 }
@@ -136,9 +159,20 @@ function readVersion(workspaceRoot: string, packagePath: string): string {
   return JSON.parse(fs.readFileSync(path.join(workspaceRoot, packagePath), "utf8")).version as string;
 }
 
+function readGeneratedVersion(workspaceRoot: string): string {
+  const content = fs.readFileSync(path.join(workspaceRoot, "packages/core/src/generated_version.ts"), "utf8");
+  return content.match(/"([^"]+)"/)?.[1] ?? "";
+}
+
 function writeJson(filePath: string, value: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function writeGeneratedVersion(workspaceRoot: string, version: string): void {
+  const filePath = path.join(workspaceRoot, "packages/core/src/generated_version.ts");
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `export const GENERATED_PACKAGE_VERSION = "${version}";\n`);
 }
 
 function localNodeVersion(): string {

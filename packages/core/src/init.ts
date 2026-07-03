@@ -309,7 +309,49 @@ Update targets:
 <!-- agent-memory:end -->`;
 }
 
-function wrapperTemplate(packageManager: PackageManager): string {
+export function wrapperTemplate(packageManager: PackageManager): string {
+  const fallback = packageManager === "bun" ? "bunx @jurgen1c/agent-memory-cli" : "npx -y @jurgen1c/agent-memory-cli";
+
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "\${AGENT_MEMORY_CLI:-}" ]; then
+  exec "\${AGENT_MEMORY_CLI}" "$@"
+fi
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "\${SCRIPT_DIR}/.." && pwd)"
+LOCAL_CLI="\${REPO_ROOT}/node_modules/.bin/agent-memory"
+
+if [ -x "\${LOCAL_CLI}" ]; then
+  exec "\${LOCAL_CLI}" "$@"
+fi
+
+if command -v agent-memory >/dev/null 2>&1; then
+  exec agent-memory "$@"
+fi
+
+exec ${fallback} "$@"
+`;
+}
+
+export function detectGeneratedWrapperPackageManager(content: string): PackageManager | null {
+  const normalized = normalizeWrapperContent(content);
+
+  for (const packageManager of ["npm", "bun"] satisfies PackageManager[]) {
+    if (normalized === normalizeWrapperContent(wrapperTemplate(packageManager))) {
+      return packageManager;
+    }
+
+    if (normalized === normalizeWrapperContent(legacyWrapperTemplate(packageManager))) {
+      return packageManager;
+    }
+  }
+
+  return null;
+}
+
+function legacyWrapperTemplate(packageManager: PackageManager): string {
   const fallback = packageManager === "bun" ? "bunx agent-memory" : "npx agent-memory";
 
   return `#!/usr/bin/env bash
@@ -325,6 +367,10 @@ fi
 
 exec ${fallback} "$@"
 `;
+}
+
+function normalizeWrapperContent(content: string): string {
+  return content.replace(/\r\n/g, "\n");
 }
 
 export function parseInitPackageManager(value: string): PackageManager {
