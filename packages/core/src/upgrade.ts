@@ -45,6 +45,8 @@ const CONFIG_SCHEMA: ConfigSchema = {
   graphs: true,
   indexes: true,
   recipes: true,
+  plans: true,
+  profiles: true,
   waivers: true,
   agent_skills: {
     codex: {
@@ -73,6 +75,12 @@ const CONFIG_SCHEMA: ConfigSchema = {
     default_budget: true,
     default_depth: true,
     include_inferred_edges_by_default: true,
+    recipe_match_limit: true,
+    profile_trait_limit: true,
+    plan_template_suggestion_limit: true,
+    include_profile_traits: true,
+    include_recipe_diagnostics: true,
+    include_profile_diagnostics: true,
     include_inferred_edges: true
   }
 };

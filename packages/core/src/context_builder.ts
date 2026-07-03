@@ -4,6 +4,8 @@ import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
 import { loadConfig } from "./config";
 import { NotFoundError } from "./errors";
 import { pathMatchesPattern } from "./files";
+import { resolvePlanStageContext, type PlanRunStageDetail } from "./plans";
+import { getRecipe, searchRecipeMatches, type Recipe, type RecipeMatch, type RecipeMatchReason } from "./recipes";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
 
 export type ContextBudget = "small" | "medium" | "full";
@@ -16,6 +18,9 @@ export interface BuildContextOptions {
   budget?: ContextBudget;
   depth?: number;
   includeInferred?: boolean;
+  recipeIds?: string[];
+  planId?: string;
+  stageId?: string;
 }
 
 export interface AgentContext {
@@ -27,10 +32,27 @@ export interface AgentContext {
   criticalRules: ContextClaim[];
   matchedClaims: ContextClaim[];
   relatedClaims: ContextRelatedClaim[];
+  planStage?: ContextPlanStage;
   relevantFiles: string[];
   recipes: ContextRecipe[];
+  matchedRecipes: ContextRecipeMatch[];
   verificationSteps: string[];
   warnings: string[];
+}
+
+export interface ContextPlanStage {
+  planId: string;
+  id: string;
+  title: string;
+  goal: string;
+  status: string;
+  claimRefs: string[];
+  recipeRefs: string[];
+  profileTraits: string[];
+  sourceFiles: string[];
+  verification: string[];
+  doneWhen: string[];
+  memoryUpdates: string[];
 }
 
 export interface ContextClaim {
@@ -66,9 +88,17 @@ export interface ContextRecipe {
   title: string;
   status: string;
   requiredClaims: string[];
+  optionalClaims: string[];
   relevantFiles: string[];
+  intentTriggers: string[];
   steps: string[];
   verification: string[];
+  memoryUpdates: string[];
+}
+
+export interface ContextRecipeMatch extends ContextRecipe {
+  score: number;
+  reasons: RecipeMatchReason[];
 }
 
 interface OpenDatabase {
@@ -101,20 +131,43 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
     changedFiles.push(...normalizeChangedFiles(readGitDiffFiles(opened.repoRoot), opened.repoRoot));
   }
 
-  const uniqueChangedFiles = Array.from(new Set(changedFiles));
-
   try {
+    const planContext = options.planId ? await resolvePlanStageContext({ cwd: options.cwd, planId: options.planId, stageId: options.stageId }) : undefined;
+    if (planContext) {
+      changedFiles.push(...normalizeChangedFiles(planContext.stage.sourceFiles, opened.repoRoot));
+    }
+
+    const uniqueChangedFiles = Array.from(new Set(changedFiles));
+    const explicitRecipeIds = Array.from(new Set([...(options.recipeIds ?? []), ...(planContext?.stage.recipeRefs ?? [])]));
     const limits = BUDGET_LIMITS[budget];
-    const matched = rankClaims(opened.database, {
+    const initialMatched = rankClaims(opened.database, {
       task: options.task,
       changedFiles: uniqueChangedFiles,
-      limit: limits.matched
+      limit: limits.matched,
+      allowFallback: Boolean(options.task || uniqueChangedFiles.length > 0)
     });
+    const recipeMatches = searchRecipeMatches(opened.database, {
+      query: options.task,
+      changedFiles: uniqueChangedFiles,
+      claimIds: initialMatched.map((claim) => claim.id),
+      recipeIds: explicitRecipeIds,
+      limit: limits.recipes
+    });
+    const matched = expandExplicitClaims(
+      opened.database,
+      expandRecipeRequiredClaims(opened.database, initialMatched, recipeMatches, limits.matched),
+      planContext?.stage.claimRefs ?? []
+    );
     const criticalRules = criticalRulesForClaims(opened.database, matched).slice(0, limits.matched);
     const related = relatedClaims(opened.database, matched, depth, includeInferred).slice(0, limits.related);
-    const recipes = relatedRecipes(opened.database, matched, uniqueChangedFiles).slice(0, limits.recipes);
+    const recipes = mergeRecipeMatches(opened.database, recipeMatches, relatedRecipes(opened.database, matched, uniqueChangedFiles), limits.recipes);
     const claimsById = new Map([...criticalRules, ...matched, ...related.map((item) => item.claim)].map((claim) => [claim.id, claim]));
-    const warnings = warningLines([...claimsById.values()]);
+    const warnings = [
+      ...(planContext?.warnings ?? []),
+      ...warningLines([...claimsById.values()]),
+      ...recipeWarningLines(opened.database, recipes),
+      ...planStageWarningLines(opened.database, planContext?.stage)
+    ];
 
     return {
       databasePath: opened.databasePath,
@@ -125,14 +178,34 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
       criticalRules,
       matchedClaims: matched,
       relatedClaims: related,
+      planStage: planContext ? toContextPlanStage(planContext.planId, planContext.stage) : undefined,
       relevantFiles: collectRelevantFiles([...claimsById.values()], recipes, uniqueChangedFiles),
       recipes,
-      verificationSteps: collectVerificationSteps([...claimsById.values()], recipes),
+      matchedRecipes: recipes,
+      verificationSteps: collectVerificationSteps([...claimsById.values()], recipes, planContext?.stage),
       warnings
     };
   } finally {
     opened.database.close();
   }
+}
+
+function expandExplicitClaims(database: SqliteDatabase, claims: ContextClaim[], claimIds: string[]): ContextClaim[] {
+  const claimsById = new Map(claims.map((claim) => [claim.id, claim]));
+
+  for (const claimId of claimIds) {
+    if (claimsById.has(claimId)) {
+      continue;
+    }
+
+    const claim = hydrateClaim(database, claimId);
+
+    if (claim) {
+      claimsById.set(claim.id, claim);
+    }
+  }
+
+  return Array.from(claimsById.values());
 }
 
 async function openConfiguredDatabase(cwd?: string): Promise<OpenDatabase> {
@@ -155,7 +228,7 @@ async function openConfiguredDatabase(cwd?: string): Promise<OpenDatabase> {
   };
 }
 
-function rankClaims(database: SqliteDatabase, options: { task?: string; changedFiles: string[]; limit: number }): ContextClaim[] {
+function rankClaims(database: SqliteDatabase, options: { task?: string; changedFiles: string[]; limit: number; allowFallback?: boolean }): ContextClaim[] {
   const scores = new Map<string, number>();
 
   if (options.task?.trim()) {
@@ -170,7 +243,7 @@ function rankClaims(database: SqliteDatabase, options: { task?: string; changedF
     }
   }
 
-  if (scores.size === 0) {
+  if (scores.size === 0 && options.allowFallback !== false) {
     for (const row of database.all<{ id: string }>(
       `SELECT id FROM claims WHERE status IN (${ACTIVE_STATUSES.map(() => "?").join(",")}) ORDER BY severity = 'critical' DESC, id LIMIT ?`,
       [...ACTIVE_STATUSES, options.limit]
@@ -345,6 +418,55 @@ function relatedRecipes(database: SqliteDatabase, claims: ContextClaim[], change
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
+function expandRecipeRequiredClaims(database: SqliteDatabase, claims: ContextClaim[], recipes: RecipeMatch[], limit: number): ContextClaim[] {
+  const claimsById = new Map(claims.map((claim) => [claim.id, claim]));
+
+  for (const match of recipes) {
+    for (const claimId of match.recipe.requiredClaims) {
+      if (claimsById.has(claimId)) {
+        continue;
+      }
+
+      const claim = hydrateClaim(database, claimId);
+
+      if (claim) {
+        claimsById.set(claim.id, claim);
+      }
+    }
+  }
+
+  return Array.from(claimsById.values()).slice(0, Math.max(limit, claimsById.size));
+}
+
+function mergeRecipeMatches(database: SqliteDatabase, matches: RecipeMatch[], related: ContextRecipe[], limit: number): ContextRecipeMatch[] {
+  const byId = new Map<string, ContextRecipeMatch>();
+
+  for (const match of matches) {
+    byId.set(match.recipe.id, {
+      ...toContextRecipe(match.recipe),
+      score: match.score,
+      reasons: match.reasons
+    });
+  }
+
+  for (const recipe of related) {
+    if (byId.has(recipe.id)) {
+      continue;
+    }
+
+    const hydrated = getRecipe(database, recipe.id);
+    byId.set(recipe.id, {
+      ...(hydrated ? toContextRecipe(hydrated) : recipe),
+      score: 1,
+      reasons: [{ code: "required_claim_already_matched", detail: recipe.requiredClaims[0] ?? recipe.id }]
+    });
+  }
+
+  return Array.from(byId.values())
+    .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id))
+    .slice(0, limit);
+}
+
 function hydrateClaim(database: SqliteDatabase, id: string): ContextClaim | null {
   const row = database.get<ClaimRow>("SELECT * FROM claims WHERE id = ?", [id]);
 
@@ -385,9 +507,28 @@ function hydrateRecipe(database: SqliteDatabase, id: string): ContextRecipe | nu
     title: row.title,
     status: row.status,
     requiredClaims: readStringArray(metadata, "required_claims"),
+    optionalClaims: readStringArray(metadata, "optional_claims"),
     relevantFiles: readStringArray(metadata, "relevant_files"),
+    intentTriggers: readStringArray(metadata, "intent_triggers"),
     steps: readStringArray(metadata, "steps"),
-    verification: readStringArray(metadata, "verification")
+    verification: readStringArray(metadata, "verification"),
+    memoryUpdates: readStringArray(metadata, "memory_updates")
+  };
+}
+
+function toContextRecipe(recipe: Recipe): ContextRecipe {
+  return {
+    id: recipe.id,
+    system: recipe.system,
+    title: recipe.title,
+    status: recipe.status,
+    requiredClaims: recipe.requiredClaims,
+    optionalClaims: recipe.optionalClaims,
+    relevantFiles: recipe.relevantFiles,
+    intentTriggers: recipe.intentTriggers,
+    steps: recipe.steps,
+    verification: recipe.verification,
+    memoryUpdates: recipe.memoryUpdates
   };
 }
 
@@ -409,7 +550,7 @@ function collectRelevantFiles(claims: ContextClaim[], recipes: ContextRecipe[], 
   return Array.from(files).sort();
 }
 
-function collectVerificationSteps(claims: ContextClaim[], recipes: ContextRecipe[]): string[] {
+function collectVerificationSteps(claims: ContextClaim[], recipes: ContextRecipe[], planStage?: PlanRunStageDetail): string[] {
   const steps = new Set<string>();
 
   for (const claim of claims) {
@@ -424,13 +565,77 @@ function collectVerificationSteps(claims: ContextClaim[], recipes: ContextRecipe
     }
   }
 
+  if (planStage) {
+    for (const step of planStage.verification) {
+      steps.add(step);
+    }
+  }
+
   return Array.from(steps);
+}
+
+function toContextPlanStage(planId: string, stage: PlanRunStageDetail): ContextPlanStage {
+  return {
+    planId,
+    id: stage.id,
+    title: stage.title,
+    goal: stage.goal,
+    status: stage.status,
+    claimRefs: stage.claimRefs,
+    recipeRefs: stage.recipeRefs,
+    profileTraits: stage.profileTraits,
+    sourceFiles: stage.sourceFiles,
+    verification: stage.verification,
+    doneWhen: stage.doneWhen,
+    memoryUpdates: stage.memoryUpdates
+  };
 }
 
 function warningLines(claims: ContextClaim[]): string[] {
   return claims
     .filter((claim) => ["stale", "deprecated", "needs_verification", "proposed", "needs_review"].includes(claim.status))
     .map((claim) => `${claim.id} has status ${claim.status}.`);
+}
+
+function recipeWarningLines(database: SqliteDatabase, recipes: ContextRecipe[]): string[] {
+  const warnings: string[] = [];
+
+  for (const recipe of recipes) {
+    if (["stale", "deprecated", "needs_verification", "proposed", "needs_review"].includes(recipe.status)) {
+      warnings.push(`${recipe.id} has status ${recipe.status}.`);
+    }
+
+    for (const claimId of recipe.requiredClaims) {
+      if (!hydrateClaim(database, claimId)) {
+        warnings.push(`${recipe.id} references missing required claim ${claimId}.`);
+      }
+    }
+  }
+
+  return warnings;
+}
+
+function planStageWarningLines(database: SqliteDatabase, stage?: PlanRunStageDetail): string[] {
+  if (!stage) {
+    return [];
+  }
+
+  const warnings: string[] = [];
+
+  for (const claimId of stage.claimRefs) {
+    if (!hydrateClaim(database, claimId)) {
+      warnings.push(`Plan stage ${stage.id} references missing claim ${claimId}.`);
+    }
+  }
+
+  for (const recipeId of stage.recipeRefs) {
+    const recipe = getRecipe(database, recipeId);
+    if (!recipe) {
+      warnings.push(`Plan stage ${stage.id} references missing recipe ${recipeId}.`);
+    }
+  }
+
+  return warnings;
 }
 
 function toFtsQuery(query: string): string {

@@ -58,6 +58,23 @@ describe("doctor command", () => {
     expect(result.stdout).toContain("inventory changed");
   });
 
+  test("warns when canonical plan or profile files are added after compile", async () => {
+    const cwd = copyFixture(mockApp);
+    await dispatch(["compile"], { cwd });
+    const planPath = path.join(cwd, "docs/agent-memory/plans/auth/new_plan.yaml");
+    const profilePath = path.join(cwd, "docs/agent-memory/profiles/review/new_trait.yaml");
+    fs.mkdirSync(path.dirname(planPath), { recursive: true });
+    fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+    fs.writeFileSync(planPath, "id: plan_template.auth.new_plan\n");
+    fs.writeFileSync(profilePath, "id: profile_trait.review.new_trait\n");
+
+    const result = await dispatch(["doctor"], { cwd });
+
+    expect(result.exitCode).toBe(5);
+    expect(result.stdout).toContain("file_inventory");
+    expect(result.stdout).toContain("inventory changed");
+  });
+
   test("warns when git commit changed after compile", async () => {
     const cwd = copyFixture(mockApp);
     initGitHistory(cwd);

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Memory Profile Trait",
+  "type": "object",
+  "required": ["id", "title", "status", "category", "priority", "applies_when", "snippet"],
+  "additionalProperties": true,
+  "properties": {
+    "id": { "type": "string" },
+    "title": { "type": "string" },
+    "status": { "enum": ["current", "proposed", "needs_review", "deprecated", "stale", "rejected"] },
+    "category": { "enum": ["retrieval_bias", "output_contract", "verification_bias", "risk_lens", "scope_control"] },
+    "priority": { "enum": ["low", "normal", "high", "critical"] },
+    "applies_when": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "task_triggers": { "type": "array", "items": { "type": "string" } },
+        "systems": { "type": "array", "items": { "type": "string" } },
+        "changed_files": { "type": "array", "items": { "type": "string" } },
+        "recipes": { "type": "array", "items": { "type": "string" } },
+        "plan_stages": { "type": "array", "items": { "type": "string" } },
+        "tags": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "snippet": { "type": "string", "maxLength": 1200 },
+    "conflicts_with": { "type": "array", "items": { "type": "string" } },
+    "metadata": { "type": "object" }
+  }
+}

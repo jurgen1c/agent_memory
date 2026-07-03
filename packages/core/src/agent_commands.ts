@@ -54,6 +54,22 @@ export function buildAgentCommands(commandPrefix: string): AgentCommandDescripti
       examples: [`${commandPrefix} system auth`]
     },
     {
+      name: "recipes",
+      purpose: "List, search, and show reusable workflow recipes.",
+      whenToUse: "Use when you need a workflow package with required claims, steps, files, and verification.",
+      examples: [`${commandPrefix} recipes search "student oauth"`, `${commandPrefix} recipes show recipe.auth.modify_student_oauth`]
+    },
+    {
+      name: "plans",
+      purpose: "Search plan templates and manage local generated plan runs.",
+      whenToUse: "Use for multi-stage work where an agent should follow explicit stages, gather stage context, and close out local state.",
+      examples: [
+        `${commandPrefix} plans suggest --task "change student oauth provider"`,
+        `${commandPrefix} plans new --template plan_template.auth.oauth_change --task "change student oauth provider"`,
+        `${commandPrefix} context --plan plan_run.20260702.oauth_change.1234abcd --stage inspect`
+      ]
+    },
+    {
       name: "templates",
       purpose: "List and show claim templates.",
       whenToUse: "Use before creating claims so new memory follows the supported shape.",

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, resolveConfiguredPath } from "./files";
-import { loadMemory, type LoadedMemory, type MemoryClaim, type MemoryGraphEdge } from "./memory";
+import { loadMemory, type LoadedMemory, type MemoryClaim, type MemoryGraphEdge, type MemoryPlanTemplate, type MemoryProfileTrait } from "./memory";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
 import { validateRepository, type ValidationResult } from "./validator";
 import { PACKAGE_VERSION } from "./version";
@@ -26,7 +26,13 @@ export interface CompileResult {
     indexes: number;
     recipes: number;
     recipeClaims: number;
+    plans: number;
+    planStages: number;
+    profiles: number;
     ftsRows: number;
+    recipeFtsRows: number;
+    planFtsRows: number;
+    profileFtsRows: number;
   };
 }
 
@@ -73,7 +79,11 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
       const explicitRelations = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claim_relations WHERE origin = 'explicit'")?.count ?? 0;
       const inferredRelations = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claim_relations WHERE origin = 'inferred'")?.count ?? 0;
       const recipeClaims = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM recipe_claims")?.count ?? 0;
+      const planStages = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM plan_stages")?.count ?? 0;
       const ftsRows = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claims_fts")?.count ?? 0;
+      const recipeFtsRows = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM recipes_fts")?.count ?? 0;
+      const planFtsRows = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM plan_templates_fts")?.count ?? 0;
+      const profileFtsRows = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM profile_traits_fts")?.count ?? 0;
 
       result = {
         databasePath,
@@ -86,7 +96,13 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
           indexes: memory.indexes.length,
           recipes: memory.recipes.length,
           recipeClaims,
-          ftsRows
+          plans: memory.plans.length,
+          planStages,
+          profiles: memory.profiles.length,
+          ftsRows,
+          recipeFtsRows,
+          planFtsRows,
+          profileFtsRows
         }
       };
     } finally {
@@ -192,6 +208,62 @@ CREATE TABLE recipe_claims (
   relation TEXT NOT NULL
 );
 
+CREATE TABLE profile_traits (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL,
+  category TEXT NOT NULL,
+  priority TEXT NOT NULL,
+  source_path TEXT NOT NULL,
+  applies_when_json TEXT NOT NULL,
+  metadata_json TEXT NOT NULL,
+  snippet TEXT NOT NULL
+);
+
+CREATE VIRTUAL TABLE profile_traits_fts USING fts5(
+  id,
+  title,
+  category,
+  snippet
+);
+
+CREATE TABLE plan_templates (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  system TEXT NOT NULL,
+  status TEXT NOT NULL,
+  source_path TEXT NOT NULL,
+  metadata_json TEXT NOT NULL
+);
+
+CREATE TABLE plan_stages (
+  plan_id TEXT NOT NULL,
+  stage_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  sequence INTEGER NOT NULL,
+  metadata_json TEXT NOT NULL,
+  PRIMARY KEY (plan_id, stage_id)
+);
+
+CREATE VIRTUAL TABLE plan_templates_fts USING fts5(
+  id,
+  title,
+  system,
+  stage_titles,
+  stage_goals,
+  intent_triggers
+);
+
+CREATE VIRTUAL TABLE recipes_fts USING fts5(
+  id,
+  title,
+  system,
+  triggers,
+  steps,
+  verification
+);
+
 CREATE TABLE compile_metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -231,9 +303,22 @@ function insertMemory(database: SqliteDatabase, memory: LoadedMemory): void {
         [recipe.id, recipe.system, recipe.title, recipe.status, recipe.sourcePath, JSON.stringify(recipe.raw)]
       );
 
+      database.run(
+        "INSERT INTO recipes_fts (id, title, system, triggers, steps, verification) VALUES (?, ?, ?, ?, ?, ?)",
+        [recipe.id, recipe.title, recipe.system, recipe.intentTriggers.join(" "), recipe.steps.join(" "), recipe.verification.join(" ")]
+      );
+
       for (const claimId of recipe.requiredClaims) {
         database.run("INSERT INTO recipe_claims (recipe_id, claim_id, relation) VALUES (?, ?, ?)", [recipe.id, claimId, "required"]);
       }
+    }
+
+    for (const plan of memory.plans) {
+      insertPlan(database, plan);
+    }
+
+    for (const profile of memory.profiles) {
+      insertProfile(database, profile);
     }
 
     for (const relation of buildRelations(memory)) {
@@ -260,6 +345,60 @@ function insertMemory(database: SqliteDatabase, memory: LoadedMemory): void {
     database.exec("ROLLBACK");
     throw error;
   }
+}
+
+function insertPlan(database: SqliteDatabase, plan: MemoryPlanTemplate): void {
+  database.run(
+    "INSERT INTO plan_templates (id, title, system, status, source_path, metadata_json) VALUES (?, ?, ?, ?, ?, ?)",
+    [plan.id, plan.title, plan.system, plan.status, plan.sourcePath, JSON.stringify(plan.raw)]
+  );
+
+  for (const stage of plan.stages) {
+    database.run(
+      `INSERT INTO plan_stages
+        (plan_id, stage_id, title, goal, sequence, metadata_json)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [plan.id, stage.id, stage.title, stage.goal, stage.sequence, JSON.stringify(stage.raw)]
+    );
+  }
+
+  database.run(
+    "INSERT INTO plan_templates_fts (id, title, system, stage_titles, stage_goals, intent_triggers) VALUES (?, ?, ?, ?, ?, ?)",
+    [
+      plan.id,
+      plan.title,
+      plan.system,
+      plan.stages.map((stage) => stage.title).join(" "),
+      plan.stages.map((stage) => stage.goal).join(" "),
+      plan.intentTriggers.join(" ")
+    ]
+  );
+}
+
+function insertProfile(database: SqliteDatabase, profile: MemoryProfileTrait): void {
+  database.run(
+    `INSERT INTO profile_traits
+      (id, title, status, category, priority, source_path, applies_when_json, metadata_json, snippet)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      profile.id,
+      profile.title,
+      profile.status,
+      profile.category,
+      profile.priority,
+      profile.sourcePath,
+      JSON.stringify(profile.appliesWhen),
+      JSON.stringify(profile.raw),
+      profile.snippet
+    ]
+  );
+
+  database.run("INSERT INTO profile_traits_fts (id, title, category, snippet) VALUES (?, ?, ?, ?)", [
+    profile.id,
+    profile.title,
+    profile.category,
+    profile.snippet
+  ]);
 }
 
 function insertClaim(database: SqliteDatabase, claim: MemoryClaim): void {

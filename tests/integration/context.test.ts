@@ -20,8 +20,9 @@ describe("context command", () => {
     expect(result.stdout).toContain("auth.student_oauth.uid_is_tenant_scoped");
     expect(result.stdout).toContain("## Related Claims");
     expect(result.stdout).toContain("tenancy.current_tenant.required_for_student_auth");
-    expect(result.stdout).toContain("## Related Recipes");
+    expect(result.stdout).toContain("## Matched Recipes");
     expect(result.stdout).toContain("recipe.auth.modify_student_oauth");
+    expect(result.stdout).toContain("Matched because:");
     expect(result.stdout).toContain("## Verification");
     expect(result.stdout).toContain("bun test");
   });
@@ -89,6 +90,24 @@ describe("context command", () => {
     expect(result.exitCode).toBe(0);
     expect(parsed.matchedClaims.some((claim: { id: string }) => claim.id === "auth.student_oauth.uid_is_tenant_scoped")).toBe(true);
     expect(parsed.relatedClaims.some((related: { claim: { id: string } }) => related.claim.id === "tenancy.current_tenant.required_for_student_auth")).toBe(true);
+    expect(parsed.matchedRecipes[0].id).toBe("recipe.auth.modify_student_oauth");
+    expect(parsed.matchedRecipes[0].reasons.length).toBeGreaterThan(0);
+    expect(parsed.verificationSteps).toContain("bun test");
+  });
+
+  test("expands explicit recipe context with required claims", async () => {
+    const cwd = await compiledMockApp();
+    const result = await dispatch(["context", "--recipe", "recipe.auth.modify_student_oauth", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.matchedRecipes[0].id).toBe("recipe.auth.modify_student_oauth");
+    expect(parsed.matchedRecipes[0].reasons).toContainEqual({
+      code: "explicit_recipe",
+      detail: "recipe.auth.modify_student_oauth"
+    });
+    expect(parsed.matchedClaims.map((claim: { id: string }) => claim.id)).toContain("auth.student_oauth.uid_is_tenant_scoped");
+    expect(parsed.matchedClaims.map((claim: { id: string }) => claim.id)).toContain("tenancy.current_tenant.required_for_student_auth");
     expect(parsed.verificationSteps).toContain("bun test");
   });
 

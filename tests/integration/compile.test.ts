@@ -32,6 +32,7 @@ describe("compile command", () => {
       expect(count(database, "recipes")).toBe(1);
       expect(count(database, "recipe_claims")).toBe(2);
       expect(count(database, "claims_fts")).toBe(2);
+      expect(count(database, "recipes_fts")).toBe(1);
 
       const explicitRelation = database
         .query("SELECT source_claim_id, target_claim_id, relation, origin FROM claim_relations WHERE origin = 'explicit'")
@@ -61,8 +62,86 @@ describe("compile command", () => {
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout);
     expect(parsed.counts.claims).toBe(2);
+    expect(parsed.counts.plans).toBe(0);
+    expect(parsed.counts.profiles).toBe(0);
     expect(parsed.databasePath).toBe(path.join(cwd, "tmp/custom-memory.sqlite"));
     expect(fs.existsSync(path.join(cwd, "tmp/custom-memory.sqlite"))).toBe(true);
+  });
+
+  test("compiles plan templates, profile traits, and workflow FTS rows", async () => {
+    const cwd = copyFixture(mockApp);
+    writeProfile(cwd, "docs/agent-memory/profiles/review/security_sensitive.yaml", {
+      id: "profile_trait.review.security_sensitive",
+      snippet: "Treat OAuth implementation as security sensitive and verify tenant boundaries."
+    });
+    writePlan(cwd, "docs/agent-memory/plans/auth/oauth_change.yaml", {
+      id: "plan_template.auth.oauth_change",
+      stageId: "inspect_current_contract",
+      profileTrait: "profile_trait.review.security_sensitive"
+    });
+
+    const result = await dispatch(["compile", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+    const database = new Database(path.join(cwd, ".agent-memory/memory.sqlite"), { readonly: true });
+
+    try {
+      expect(result.exitCode).toBe(0);
+      expect(parsed.counts.plans).toBe(1);
+      expect(parsed.counts.planStages).toBe(1);
+      expect(parsed.counts.profiles).toBe(1);
+      expect(parsed.counts.recipeFtsRows).toBe(1);
+      expect(parsed.counts.planFtsRows).toBe(1);
+      expect(parsed.counts.profileFtsRows).toBe(1);
+      expect(count(database, "plan_templates")).toBe(1);
+      expect(count(database, "plan_stages")).toBe(1);
+      expect(count(database, "profile_traits")).toBe(1);
+
+      const stage = database.query("SELECT plan_id, stage_id, title, sequence FROM plan_stages").get() as {
+        plan_id: string;
+        stage_id: string;
+        title: string;
+        sequence: number;
+      };
+      expect(stage).toEqual({
+        plan_id: "plan_template.auth.oauth_change",
+        stage_id: "inspect_current_contract",
+        title: "Inspect current contract",
+        sequence: 0
+      });
+
+      const planMatch = database.query("SELECT id FROM plan_templates_fts WHERE plan_templates_fts MATCH 'callback'").get() as { id: string };
+      const profileMatch = database.query("SELECT id FROM profile_traits_fts WHERE profile_traits_fts MATCH 'security'").get() as { id: string };
+      const recipeMatch = database.query("SELECT id FROM recipes_fts WHERE recipes_fts MATCH 'overlapping'").get() as { id: string };
+
+      expect(planMatch.id).toBe("plan_template.auth.oauth_change");
+      expect(profileMatch.id).toBe("profile_trait.review.security_sensitive");
+      expect(recipeMatch.id).toBe("recipe.auth.modify_student_oauth");
+    } finally {
+      database.close();
+    }
+  });
+
+  test("does not compile generated plan runs under .agent-memory", async () => {
+    const cwd = copyFixture(mockApp);
+    fs.mkdirSync(path.join(cwd, ".agent-memory/plans"), { recursive: true });
+    fs.writeFileSync(
+      path.join(cwd, ".agent-memory/plans/plan_run.20260702.local.yaml"),
+      `id: plan_run.20260702.local
+task: Local generated state
+status: active
+current_stage: inspect
+stages:
+  - id: inspect
+    status: active
+`
+    );
+
+    const result = await dispatch(["compile", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.counts.plans).toBe(0);
+    expect(parsed.counts.planStages).toBe(0);
   });
 
   test("rebuilds deterministically without duplicating rows", async () => {
@@ -201,9 +280,79 @@ function readCounts(databasePath: string): Record<string, number> {
       indexes: count(database, "indexes"),
       recipes: count(database, "recipes"),
       recipe_claims: count(database, "recipe_claims"),
-      claims_fts: count(database, "claims_fts")
+      claims_fts: count(database, "claims_fts"),
+      recipes_fts: count(database, "recipes_fts"),
+      plan_templates: count(database, "plan_templates"),
+      plan_stages: count(database, "plan_stages"),
+      plan_templates_fts: count(database, "plan_templates_fts"),
+      profile_traits: count(database, "profile_traits"),
+      profile_traits_fts: count(database, "profile_traits_fts")
     };
   } finally {
     database.close();
   }
+}
+
+function writePlan(
+  cwd: string,
+  relativePath: string,
+  options: {
+    id: string;
+    stageId: string;
+    profileTrait: string;
+  }
+): void {
+  const planPath = path.join(cwd, relativePath);
+  fs.mkdirSync(path.dirname(planPath), { recursive: true });
+  fs.writeFileSync(
+    planPath,
+    `id: ${options.id}
+title: OAuth provider behavior change
+system: auth
+status: current
+intent_triggers:
+  - change student oauth provider
+recipes:
+  - recipe.auth.modify_student_oauth
+stages:
+  - id: ${options.stageId}
+    title: Inspect current contract
+    goal: Identify provider callback behavior and tenant boundaries.
+    claim_refs:
+      - auth.student_oauth.uid_is_tenant_scoped
+    recipe_refs:
+      - recipe.auth.modify_student_oauth
+    profile_traits:
+      - ${options.profileTrait}
+    source_files:
+      - src/auth.js
+    verification:
+      - bun test
+`
+  );
+}
+
+function writeProfile(
+  cwd: string,
+  relativePath: string,
+  options: {
+    id: string;
+    snippet: string;
+  }
+): void {
+  const profilePath = path.join(cwd, relativePath);
+  fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+  fs.writeFileSync(
+    profilePath,
+    `id: ${options.id}
+title: Security sensitive review
+status: current
+category: risk_lens
+priority: high
+applies_when:
+  systems:
+    - auth
+snippet: ${JSON.stringify(options.snippet)}
+`
+  );
 }

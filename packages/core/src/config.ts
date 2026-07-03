@@ -13,6 +13,8 @@ const DEFAULT_CONFIG: AgentMemoryConfig = {
   graphs: ["graph/**/*.yaml"],
   indexes: ["indexes/**/*.yaml"],
   recipes: ["recipes/**/*.yaml"],
+  plans: ["plans/**/*.yaml"],
+  profiles: ["profiles/**/*.yaml"],
   waivers: ["waivers/**/*.yaml"],
   agent_skills: {
     codex: {
@@ -40,7 +42,13 @@ const DEFAULT_CONFIG: AgentMemoryConfig = {
   context: {
     default_budget: "medium",
     default_depth: 1,
-    include_inferred_edges_by_default: false
+    include_inferred_edges_by_default: false,
+    recipe_match_limit: 3,
+    profile_trait_limit: 5,
+    plan_template_suggestion_limit: 3,
+    include_profile_traits: true,
+    include_recipe_diagnostics: true,
+    include_profile_diagnostics: true
   }
 };
 
@@ -105,6 +113,12 @@ ${renderStringArrayField("indexes", config.indexes)}
 # Recipe YAML files. Use these for repeatable workflows agents should follow.
 ${renderStringArrayField("recipes", config.recipes)}
 
+# Plan template YAML files. Use these for reusable staged workflows.
+${renderStringArrayField("plans", config.plans)}
+
+# Profile trait YAML files. Use these for small composable retrieval and output guidance.
+${renderStringArrayField("profiles", config.profiles)}
+
 # Coverage waiver YAML files. Use these for intentional memory coverage exceptions.
 ${renderStringArrayField("waivers", config.waivers)}
 
@@ -137,6 +151,12 @@ context:
   default_budget: ${config.context.default_budget}
   default_depth: ${config.context.default_depth}
   include_inferred_edges_by_default: ${config.context.include_inferred_edges_by_default}
+  recipe_match_limit: ${config.context.recipe_match_limit}
+  profile_trait_limit: ${config.context.profile_trait_limit}
+  plan_template_suggestion_limit: ${config.context.plan_template_suggestion_limit}
+  include_profile_traits: ${config.context.include_profile_traits}
+  include_recipe_diagnostics: ${config.context.include_recipe_diagnostics}
+  include_profile_diagnostics: ${config.context.include_profile_diagnostics}
 `;
 }
 
@@ -173,6 +193,8 @@ function normalizeConfig(value: unknown): AgentMemoryConfig {
     graphs: readStringArray(value, "graphs", DEFAULT_CONFIG.graphs),
     indexes: readStringArray(value, "indexes", DEFAULT_CONFIG.indexes),
     recipes: readStringArray(value, "recipes", DEFAULT_CONFIG.recipes),
+    plans: readStringArray(value, "plans", DEFAULT_CONFIG.plans),
+    profiles: readStringArray(value, "profiles", DEFAULT_CONFIG.profiles),
     waivers: readStringArray(value, "waivers", DEFAULT_CONFIG.waivers),
     agent_skills: {
       codex: readAgentSkill(value, "codex", DEFAULT_CONFIG.agent_skills.codex),
@@ -257,8 +279,28 @@ function readContext(root: Record<string, unknown>) {
       value,
       "include_inferred_edges_by_default",
       DEFAULT_CONFIG.context.include_inferred_edges_by_default
-    )
+    ),
+    recipe_match_limit: readPositiveInteger(value, "recipe_match_limit", DEFAULT_CONFIG.context.recipe_match_limit),
+    profile_trait_limit: readPositiveInteger(value, "profile_trait_limit", DEFAULT_CONFIG.context.profile_trait_limit),
+    plan_template_suggestion_limit: readPositiveInteger(
+      value,
+      "plan_template_suggestion_limit",
+      DEFAULT_CONFIG.context.plan_template_suggestion_limit
+    ),
+    include_profile_traits: readBoolean(value, "include_profile_traits", DEFAULT_CONFIG.context.include_profile_traits),
+    include_recipe_diagnostics: readBoolean(value, "include_recipe_diagnostics", DEFAULT_CONFIG.context.include_recipe_diagnostics),
+    include_profile_diagnostics: readBoolean(value, "include_profile_diagnostics", DEFAULT_CONFIG.context.include_profile_diagnostics)
   };
+}
+
+function readPositiveInteger(root: Record<string, unknown>, key: string, fallback: number): number {
+  const value = readNumber(root, key, fallback);
+
+  if (!Number.isInteger(value) || value < 1) {
+    throw new ConfigError(`Invalid context.${key} value: ${value}. Expected a positive integer.`);
+  }
+
+  return value;
 }
 
 function readRecord(root: Record<string, unknown>, key: string, fallback: Record<string, unknown>): Record<string, unknown> {

@@ -11,6 +11,8 @@
     "graphs": { "type": "array", "items": { "type": "string" } },
     "indexes": { "type": "array", "items": { "type": "string" } },
     "recipes": { "type": "array", "items": { "type": "string" } },
+    "plans": { "type": "array", "items": { "type": "string" } },
+    "profiles": { "type": "array", "items": { "type": "string" } },
     "waivers": { "type": "array", "items": { "type": "string" } }
   }
 }

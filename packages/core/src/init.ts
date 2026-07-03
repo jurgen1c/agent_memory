@@ -64,6 +64,8 @@ export function initRepository(options: InitOptions): InitResult {
     "docs/agent-memory/graph/.gitkeep",
     "docs/agent-memory/indexes/.gitkeep",
     "docs/agent-memory/recipes/.gitkeep",
+    "docs/agent-memory/plans/.gitkeep",
+    "docs/agent-memory/profiles/.gitkeep",
     "docs/agent-memory/waivers/.gitkeep"
   ]) {
     writeFile(repo.root, gitkeepPath, "", options.force, actions);

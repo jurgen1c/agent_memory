@@ -29,6 +29,8 @@ export interface ValidationResult {
     graphs: number;
     indexes: number;
     recipes: number;
+    plans: number;
+    profiles: number;
   };
 }
 
@@ -63,6 +65,33 @@ interface LoadedRecipe {
   relativePath: string;
 }
 
+interface LoadedPlanTemplate {
+  id: string;
+  status: string;
+  recipes: string[];
+  stages: LoadedPlanTemplateStage[];
+  path: string;
+  relativePath: string;
+}
+
+interface LoadedPlanTemplateStage {
+  id: string;
+  claimRefs: string[];
+  recipeRefs: string[];
+  profileTraits: string[];
+  sourceFiles: string[];
+}
+
+interface LoadedProfileTrait {
+  id: string;
+  status: string;
+  category: string;
+  priority: string;
+  conflictsWith: string[];
+  path: string;
+  relativePath: string;
+}
+
 interface RepoPathValidationContext {
   repoRoot: string;
   repoRootRealPath: string | null;
@@ -80,8 +109,17 @@ const CLAIM_STATUSES = [
   "needs_review",
   "rejected"
 ];
+const WORKFLOW_STATUSES = ["current", "proposed", "needs_review", "deprecated", "stale", "rejected"];
 const CONFIDENCE_VALUES = ["low", "medium", "high", "verified"];
 const SEVERITIES = ["info", "normal", "important", "critical"];
+const PROFILE_TRAIT_CATEGORIES = ["retrieval_bias", "output_contract", "verification_bias", "risk_lens", "scope_control"];
+const PROFILE_TRAIT_PRIORITIES = ["low", "normal", "high", "critical"];
+const MAX_PROFILE_SNIPPET_LENGTH = 1200;
+const DANGEROUS_PROFILE_SNIPPET_PATTERNS = [
+  /ignore\s+(?:all\s+)?(?:previous|system|developer)\s+instructions?/i,
+  /override\s+(?:higher[-\s]?priority|system|developer)\s+instructions?/i,
+  /disregard\s+(?:higher[-\s]?priority|system|developer)\s+instructions?/i
+];
 const RELATIONS = [
   "requires",
   "constrains",
@@ -111,29 +149,43 @@ export function validateRepository(options: ValidateRepositoryOptions = {}): Val
   const allGraphFiles = discoverFiles(memoryRoot, loaded.config.graphs);
   const allIndexFiles = discoverFiles(memoryRoot, loaded.config.indexes);
   const allRecipeFiles = discoverFiles(memoryRoot, loaded.config.recipes);
+  const allPlanFiles = discoverFiles(memoryRoot, loaded.config.plans);
+  const allProfileFiles = discoverFiles(memoryRoot, loaded.config.profiles);
 
   const claimFiles = scoped ? selectChangedFiles(allClaimFiles, changedFiles, repoRoot) : allClaimFiles;
   const deletedClaimChanged = scoped && changedCanonicalFileWasDeleted(changedFiles, repoRoot, memoryRoot, allClaimFiles, loaded.config.claims);
   const graphFiles = scoped && !deletedClaimChanged ? selectChangedFiles(allGraphFiles, changedFiles, repoRoot) : allGraphFiles;
   const indexFiles = scoped ? selectChangedFiles(allIndexFiles, changedFiles, repoRoot) : allIndexFiles;
   const recipeFiles = scoped && !deletedClaimChanged ? selectChangedFiles(allRecipeFiles, changedFiles, repoRoot) : allRecipeFiles;
+  const planFiles = scoped && !deletedClaimChanged ? selectChangedFiles(allPlanFiles, changedFiles, repoRoot) : allPlanFiles;
+  const profileFiles = scoped ? selectChangedFiles(allProfileFiles, changedFiles, repoRoot) : allProfileFiles;
 
   const claims = loadClaims(pathContext, memoryRoot, claimFiles, loaded.config.validation, issues);
   const recipes = loadRecipes(memoryRoot, recipeFiles, issues);
+  const plans = loadPlans(memoryRoot, planFiles, pathContext, issues);
+  const profiles = loadProfiles(memoryRoot, profileFiles, issues);
   const graphs = loadYamlArtifacts(memoryRoot, graphFiles, "graph", issues);
   const indexes = loadYamlArtifacts(memoryRoot, indexFiles, "index", issues);
 
   const allClaims = scoped ? loadClaimReferences(memoryRoot, allClaimFiles) : claims;
   const allRecipes = scoped ? loadRecipeReferences(memoryRoot, allRecipeFiles) : recipes;
+  const allPlans = scoped ? loadPlanReferences(memoryRoot, allPlanFiles) : plans;
+  const allProfiles = scoped ? loadProfileReferences(memoryRoot, allProfileFiles) : profiles;
   const claimsById = new Map(allClaims.map((claim) => [claim.id, claim]));
+  const recipesById = new Map(allRecipes.map((recipe) => [recipe.id, recipe]));
+  const profileIds = new Set(allProfiles.map((profile) => profile.id));
 
   validateUniqueClaims(claims, issues, allClaims);
   validateUniqueClaimTitles(claims, allClaims, loaded.config.validation, Boolean(options.strict), issues);
   validateClaimFilePaths(claims, loaded.config.validation, Boolean(options.strict), issues);
   validateUniqueRecipes(recipes, issues, allRecipes);
+  validateUniquePlans(plans, issues, allPlans);
+  validateUniqueProfiles(profiles, issues, allProfiles);
   validateGraphs(graphs, new Set(allClaims.map((claim) => claim.id)), issues);
   validateIndexes(indexes, pathContext, issues);
   validateRecipeReferences(recipes, claimsById, issues);
+  validatePlanReferences(plans, claimsById, recipesById, profileIds, Boolean(options.strict), issues);
+  validateProfileReferences(profiles, profileIds, issues);
 
   const errors = issues.filter((issue) => issue.severity === "error");
   const warnings = issues.filter((issue) => issue.severity === "warning");
@@ -146,7 +198,9 @@ export function validateRepository(options: ValidateRepositoryOptions = {}): Val
       claims: claims.length,
       graphs: graphs.length,
       indexes: indexes.length,
-      recipes: recipes.length
+      recipes: recipes.length,
+      plans: plans.length,
+      profiles: profiles.length
     }
   };
 }
@@ -691,6 +745,399 @@ function validateRecipeReferences(recipes: LoadedRecipe[], claimsById: Map<strin
   }
 }
 
+function loadPlans(
+  memoryRoot: string,
+  files: string[],
+  pathContext: RepoPathValidationContext,
+  issues: ValidationIssue[]
+): LoadedPlanTemplate[] {
+  const plans: LoadedPlanTemplate[] = [];
+  const artifacts = loadYamlArtifacts(memoryRoot, files, "plan", issues);
+
+  for (const artifact of artifacts) {
+    if (!isRecord(artifact.data)) {
+      addError(issues, "plan.schema", "Plan template file must be a mapping.", artifact.relativePath);
+      continue;
+    }
+
+    validateStringField(artifact.data, "id", artifact.relativePath, "plan.id", issues);
+    validateStringField(artifact.data, "title", artifact.relativePath, "plan.title", issues);
+    validateStringField(artifact.data, "system", artifact.relativePath, "plan.system", issues);
+    validateStringField(artifact.data, "status", artifact.relativePath, "plan.status", issues);
+
+    if (typeof artifact.data.status === "string" && !WORKFLOW_STATUSES.includes(artifact.data.status)) {
+      addError(issues, "plan.status", `Invalid plan status: ${artifact.data.status}`, artifact.relativePath);
+    }
+
+    if (artifact.data.intent_triggers !== undefined) {
+      readStringArray(artifact.data, "intent_triggers", artifact.relativePath, issues);
+    }
+
+    const recipes = readOptionalStringArray(artifact.data, "recipes", artifact.relativePath, issues);
+    const stages = readPlanStages(artifact.data, artifact.relativePath, pathContext, issues);
+
+    if (typeof artifact.data.id !== "string" || typeof artifact.data.status !== "string") {
+      continue;
+    }
+
+    plans.push({
+      id: artifact.data.id,
+      status: artifact.data.status,
+      recipes,
+      stages,
+      path: artifact.path,
+      relativePath: artifact.relativePath
+    });
+  }
+
+  return plans;
+}
+
+function readPlanStages(
+  data: Record<string, unknown>,
+  relativePath: string,
+  pathContext: RepoPathValidationContext,
+  issues: ValidationIssue[]
+): LoadedPlanTemplateStage[] {
+  const stages = data.stages;
+
+  if (!Array.isArray(stages) || stages.length === 0) {
+    addError(issues, "plan.stages.required", "Plan template must include at least one stage.", relativePath);
+    return [];
+  }
+
+  const loadedStages: LoadedPlanTemplateStage[] = [];
+  const seenStageIds = new Set<string>();
+
+  for (const stage of stages) {
+    if (!isRecord(stage)) {
+      addError(issues, "plan.stage.schema", "Plan stage must be a mapping.", relativePath);
+      continue;
+    }
+
+    validateStringField(stage, "id", relativePath, "plan.stage.id", issues);
+    validateStringField(stage, "title", relativePath, "plan.stage.title", issues);
+    validateStringField(stage, "goal", relativePath, "plan.stage.goal", issues);
+
+    const stageId = typeof stage.id === "string" ? stage.id : "";
+
+    if (stageId) {
+      if (seenStageIds.has(stageId)) {
+        addError(issues, "plan.stage.id.duplicate", `Duplicate plan stage ID ${stageId}.`, relativePath, stageId);
+      }
+
+      seenStageIds.add(stageId);
+    }
+
+    const sourceFiles = readOptionalStringArray(stage, "source_files", relativePath, issues);
+    validateRepoPathReferences(sourceFiles, "plan.stage.source_files", pathContext, relativePath, stageId || undefined, false, issues);
+
+    loadedStages.push({
+      id: stageId,
+      claimRefs: readOptionalStringArray(stage, "claim_refs", relativePath, issues),
+      recipeRefs: readOptionalStringArray(stage, "recipe_refs", relativePath, issues),
+      profileTraits: readOptionalStringArray(stage, "profile_traits", relativePath, issues),
+      sourceFiles
+    });
+
+    for (const field of ["verification", "done_when", "memory_updates"]) {
+      if (stage[field] !== undefined) {
+        readStringArray(stage, field, relativePath, issues);
+      }
+    }
+  }
+
+  return loadedStages;
+}
+
+function loadPlanReferences(memoryRoot: string, files: string[]): LoadedPlanTemplate[] {
+  const plans: LoadedPlanTemplate[] = [];
+
+  for (const filePath of files) {
+    const relativePath = toPosix(path.relative(memoryRoot, filePath));
+
+    try {
+      const data = parseYaml(fs.readFileSync(filePath, "utf8"));
+
+      if (!isRecord(data) || typeof data.id !== "string") {
+        continue;
+      }
+
+      plans.push({
+        id: data.id,
+        status: typeof data.status === "string" ? data.status : "",
+        recipes: [],
+        stages: [],
+        path: filePath,
+        relativePath
+      });
+    } catch {
+      // Scoped reference loading is best effort; changed files still receive full validation.
+    }
+  }
+
+  return plans;
+}
+
+function validateUniquePlans(plans: LoadedPlanTemplate[], issues: ValidationIssue[], referencePlans: LoadedPlanTemplate[] = plans): void {
+  const byId = new Map<string, LoadedPlanTemplate[]>();
+
+  for (const plan of referencePlans) {
+    byId.set(plan.id, [...(byId.get(plan.id) ?? []), plan]);
+  }
+
+  const selectedPaths = new Set(plans.map((plan) => plan.relativePath));
+
+  for (const [id, matchingPlans] of byId.entries()) {
+    if (matchingPlans.length > 1) {
+      const selectedPlan = matchingPlans.find((plan) => selectedPaths.has(plan.relativePath));
+
+      if (!selectedPlan && referencePlans !== plans) {
+        continue;
+      }
+
+      addError(
+        issues,
+        "plan.id.duplicate",
+        `Duplicate plan template ID ${id} appears in ${matchingPlans.map((plan) => plan.relativePath).join(", ")}.`,
+        selectedPlan?.relativePath ?? matchingPlans[0].relativePath,
+        id
+      );
+    }
+  }
+}
+
+function validatePlanReferences(
+  plans: LoadedPlanTemplate[],
+  claimsById: Map<string, LoadedClaim>,
+  recipesById: Map<string, LoadedRecipe>,
+  profileIds: Set<string>,
+  strict: boolean,
+  issues: ValidationIssue[]
+): void {
+  for (const plan of plans) {
+    for (const recipeId of plan.recipes) {
+      validatePlanRecipeReference(recipeId, plan, recipesById, issues);
+    }
+
+    for (const stage of plan.stages) {
+      if (stage.claimRefs.length === 0 && stage.recipeRefs.length === 0) {
+        addSeverity(
+          issues,
+          strict ? "error" : "warning",
+          "plan.stage.low_value",
+          `Plan stage ${stage.id || "(missing id)"} has no claim_refs or recipe_refs.`,
+          plan.relativePath,
+          stage.id || undefined
+        );
+      }
+
+      for (const claimId of stage.claimRefs) {
+        const claim = claimsById.get(claimId);
+
+        if (!claim) {
+          addError(issues, "plan.stage.claim_ref.missing", `Plan stage references missing claim: ${claimId}`, plan.relativePath, claimId);
+          continue;
+        }
+
+        if (["stale", "deprecated", "rejected"].includes(claim.status)) {
+          addWarning(issues, "plan.stage.claim_ref.inactive", `Plan stage references ${claim.status} claim: ${claimId}`, plan.relativePath, claimId);
+        }
+      }
+
+      for (const recipeId of stage.recipeRefs) {
+        validatePlanRecipeReference(recipeId, plan, recipesById, issues);
+      }
+
+      for (const profileId of stage.profileTraits) {
+        if (!profileIds.has(profileId)) {
+          addSeverity(
+            issues,
+            strict ? "error" : "warning",
+            "plan.stage.profile_trait.missing",
+            `Plan stage references missing profile trait: ${profileId}`,
+            plan.relativePath,
+            profileId
+          );
+        }
+      }
+    }
+  }
+}
+
+function validatePlanRecipeReference(
+  recipeId: string,
+  plan: LoadedPlanTemplate,
+  recipesById: Map<string, LoadedRecipe>,
+  issues: ValidationIssue[]
+): void {
+  const recipe = recipesById.get(recipeId);
+
+  if (!recipe) {
+    addError(issues, "plan.recipe_ref.missing", `Plan template references missing recipe: ${recipeId}`, plan.relativePath, recipeId);
+    return;
+  }
+
+  if (plan.status === "current" && ["stale", "deprecated", "rejected"].includes(recipe.status)) {
+    addWarning(issues, "plan.recipe_ref.inactive", `Current plan template references ${recipe.status} recipe: ${recipeId}`, plan.relativePath, recipeId);
+  }
+}
+
+function loadProfiles(memoryRoot: string, files: string[], issues: ValidationIssue[]): LoadedProfileTrait[] {
+  const profiles: LoadedProfileTrait[] = [];
+  const artifacts = loadYamlArtifacts(memoryRoot, files, "profile", issues);
+
+  for (const artifact of artifacts) {
+    if (!isRecord(artifact.data)) {
+      addError(issues, "profile.schema", "Profile trait file must be a mapping.", artifact.relativePath);
+      continue;
+    }
+
+    validateStringField(artifact.data, "id", artifact.relativePath, "profile.id", issues);
+    validateStringField(artifact.data, "title", artifact.relativePath, "profile.title", issues);
+    validateStringField(artifact.data, "status", artifact.relativePath, "profile.status", issues);
+    validateStringField(artifact.data, "category", artifact.relativePath, "profile.category", issues);
+    validateStringField(artifact.data, "priority", artifact.relativePath, "profile.priority", issues);
+    validateStringField(artifact.data, "snippet", artifact.relativePath, "profile.snippet", issues);
+    validateProfileAppliesWhen(artifact.data.applies_when, artifact.relativePath, issues);
+
+    if (typeof artifact.data.status === "string" && !WORKFLOW_STATUSES.includes(artifact.data.status)) {
+      addError(issues, "profile.status", `Invalid profile status: ${artifact.data.status}`, artifact.relativePath);
+    }
+
+    if (typeof artifact.data.category === "string" && !PROFILE_TRAIT_CATEGORIES.includes(artifact.data.category)) {
+      addError(issues, "profile.category", `Invalid profile category: ${artifact.data.category}`, artifact.relativePath);
+    }
+
+    if (typeof artifact.data.priority === "string" && !PROFILE_TRAIT_PRIORITIES.includes(artifact.data.priority)) {
+      addError(issues, "profile.priority", `Invalid profile priority: ${artifact.data.priority}`, artifact.relativePath);
+    }
+
+    if (typeof artifact.data.snippet === "string") {
+      validateProfileSnippet(artifact.data.snippet, artifact.relativePath, issues);
+    }
+
+    const conflictsWith = readOptionalStringArray(artifact.data, "conflicts_with", artifact.relativePath, issues);
+
+    if (typeof artifact.data.id !== "string" || typeof artifact.data.status !== "string") {
+      continue;
+    }
+
+    profiles.push({
+      id: artifact.data.id,
+      status: artifact.data.status,
+      category: typeof artifact.data.category === "string" ? artifact.data.category : "",
+      priority: typeof artifact.data.priority === "string" ? artifact.data.priority : "",
+      conflictsWith,
+      path: artifact.path,
+      relativePath: artifact.relativePath
+    });
+  }
+
+  return profiles;
+}
+
+function validateProfileAppliesWhen(value: unknown, relativePath: string, issues: ValidationIssue[]): void {
+  if (!isRecord(value)) {
+    addError(issues, "profile.applies_when", "Profile trait must include applies_when as a mapping.", relativePath);
+    return;
+  }
+
+  for (const field of ["task_triggers", "systems", "changed_files", "recipes", "plan_stages", "tags"]) {
+    if (value[field] !== undefined) {
+      readStringArray(value, field, relativePath, issues);
+    }
+  }
+}
+
+function validateProfileSnippet(snippet: string, relativePath: string, issues: ValidationIssue[]): void {
+  if (snippet.length > MAX_PROFILE_SNIPPET_LENGTH) {
+    addError(
+      issues,
+      "profile.snippet.too_long",
+      `Profile trait snippet is longer than ${MAX_PROFILE_SNIPPET_LENGTH} characters.`,
+      relativePath
+    );
+  }
+
+  if (DANGEROUS_PROFILE_SNIPPET_PATTERNS.some((pattern) => pattern.test(snippet))) {
+    addError(issues, "profile.snippet.dangerous", "Profile trait snippet must not override higher-priority instructions.", relativePath);
+  }
+}
+
+function loadProfileReferences(memoryRoot: string, files: string[]): LoadedProfileTrait[] {
+  const profiles: LoadedProfileTrait[] = [];
+
+  for (const filePath of files) {
+    const relativePath = toPosix(path.relative(memoryRoot, filePath));
+
+    try {
+      const data = parseYaml(fs.readFileSync(filePath, "utf8"));
+
+      if (!isRecord(data) || typeof data.id !== "string") {
+        continue;
+      }
+
+      profiles.push({
+        id: data.id,
+        status: typeof data.status === "string" ? data.status : "",
+        category: typeof data.category === "string" ? data.category : "",
+        priority: typeof data.priority === "string" ? data.priority : "",
+        conflictsWith: [],
+        path: filePath,
+        relativePath
+      });
+    } catch {
+      // Scoped reference loading is best effort; changed files still receive full validation.
+    }
+  }
+
+  return profiles;
+}
+
+function validateUniqueProfiles(profiles: LoadedProfileTrait[], issues: ValidationIssue[], referenceProfiles: LoadedProfileTrait[] = profiles): void {
+  const byId = new Map<string, LoadedProfileTrait[]>();
+
+  for (const profile of referenceProfiles) {
+    byId.set(profile.id, [...(byId.get(profile.id) ?? []), profile]);
+  }
+
+  const selectedPaths = new Set(profiles.map((profile) => profile.relativePath));
+
+  for (const [id, matchingProfiles] of byId.entries()) {
+    if (matchingProfiles.length > 1) {
+      const selectedProfile = matchingProfiles.find((profile) => selectedPaths.has(profile.relativePath));
+
+      if (!selectedProfile && referenceProfiles !== profiles) {
+        continue;
+      }
+
+      addError(
+        issues,
+        "profile.id.duplicate",
+        `Duplicate profile trait ID ${id} appears in ${matchingProfiles.map((profile) => profile.relativePath).join(", ")}.`,
+        selectedProfile?.relativePath ?? matchingProfiles[0].relativePath,
+        id
+      );
+    }
+  }
+}
+
+function validateProfileReferences(profiles: LoadedProfileTrait[], profileIds: Set<string>, issues: ValidationIssue[]): void {
+  for (const profile of profiles) {
+    for (const conflictId of profile.conflictsWith) {
+      if (conflictId === profile.id) {
+        addError(issues, "profile.conflicts_with.self", `Profile trait conflicts with itself: ${conflictId}`, profile.relativePath, conflictId);
+        continue;
+      }
+
+      if (!profileIds.has(conflictId)) {
+        addError(issues, "profile.conflicts_with.missing", `Profile trait references missing conflict: ${conflictId}`, profile.relativePath, conflictId);
+      }
+    }
+  }
+}
+
 function validateStringField(data: Record<string, unknown>, field: string, relativePath: string, code: string, issues: ValidationIssue[]): void {
   if (typeof data[field] !== "string" || String(data[field]).trim().length === 0) {
     addError(issues, code, `Missing or invalid required field: ${field}`, relativePath);
@@ -722,8 +1169,23 @@ function readOptionalStringArray(data: Record<string, unknown>, field: string, r
 }
 
 function addError(issues: ValidationIssue[], code: string, message: string, filePath?: string, id?: string): void {
+  addSeverity(issues, "error", code, message, filePath, id);
+}
+
+function addWarning(issues: ValidationIssue[], code: string, message: string, filePath?: string, id?: string): void {
+  addSeverity(issues, "warning", code, message, filePath, id);
+}
+
+function addSeverity(
+  issues: ValidationIssue[],
+  severity: ValidationSeverity,
+  code: string,
+  message: string,
+  filePath?: string,
+  id?: string
+): void {
   issues.push({
-    severity: "error",
+    severity,
     code,
     message,
     path: filePath,
