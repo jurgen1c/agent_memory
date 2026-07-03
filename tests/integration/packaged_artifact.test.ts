@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 const repoRoot = path.resolve(".");
+const rootPackage = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { version: string };
 
 describe("packaged artifact", () => {
   test("runs the installed CLI, generated wrapper, and UI static asset path", async () => {
@@ -12,14 +13,14 @@ describe("packaged artifact", () => {
     const cliPath = path.join(appRoot, "node_modules/.bin/agent-memory");
     const packageRoot = path.join(appRoot, "node_modules/@jurgen1c/agent-memory-cli");
 
-    expect(runCommand(cliPath, ["--version"], appRoot).stdout).toContain("agent-memory 0.1.9");
+    expect(runCommand(cliPath, ["--version"], appRoot).stdout).toContain(`agent-memory ${rootPackage.version}`);
     expect(runCommand(cliPath, ["upgrade", "--write"], appRoot).stdout).toContain("upgrade applied");
     expect(runCommand(cliPath, ["compile"], appRoot).stdout).toContain("Agent Memory compiled.");
 
     const query = JSON.parse(runCommand(cliPath, ["query", "oauth", "--json"], appRoot).stdout) as { matches: Array<{ id: string }> };
     expect(query.matches.some((match) => match.id === "auth.student_oauth.uid_is_tenant_scoped")).toBe(true);
 
-    expect(runCommand(path.join(appRoot, "bin/memory"), ["--version"], appRoot).stdout).toContain("agent-memory 0.1.9");
+    expect(runCommand(path.join(appRoot, "bin/memory"), ["--version"], appRoot).stdout).toContain(`agent-memory ${rootPackage.version}`);
     expect(runCommand(path.join(appRoot, "bin/memory"), ["upgrade"], appRoot).stdout).toContain("dry run");
 
     await expectUiStaticRoot(cliPath, appRoot, packageRoot);
@@ -97,7 +98,8 @@ function runCommand(command: string, args: string[], cwd: string, timeout = 3000
   const stdout = fs.readFileSync(stdoutPath, "utf8");
   const stderr = fs.readFileSync(stderrPath, "utf8");
 
-  expect(result.status, `${command} ${args.join(" ")}\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`).toBe(0);
+  const errorMessage = result.error ? `\nERROR:\n${result.error.message}` : "";
+  expect(result.status, `${command} ${args.join(" ")}${errorMessage}\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`).toBe(0);
 
   return {
     stdout,

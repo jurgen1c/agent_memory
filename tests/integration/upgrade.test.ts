@@ -72,6 +72,19 @@ describe("upgrade command", () => {
     expect(wrapper).toContain("bunx @jurgen1c/agent-memory-cli");
   });
 
+  test("refreshes generated wrappers with EOF whitespace drift", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
+    fs.writeFileSync(wrapperPath, wrapperTemplate("bun").trimEnd());
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("refreshed bun wrapper");
+    expect(fs.readFileSync(wrapperPath, "utf8")).toBe(wrapperTemplate("bun"));
+  });
+
   test("does not chmod current generated wrappers during dry runs", async () => {
     const repoRoot = makeRepo(oldConfig());
     const wrapperPath = path.join(repoRoot, "bin/memory");

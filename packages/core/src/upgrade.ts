@@ -130,7 +130,7 @@ function upgradeMemoryWrapper(repoRoot: string, options: UpgradeOptions, actions
   const relativePath = "bin/memory";
   const absolutePath = path.join(repoRoot, relativePath);
   const existing = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : null;
-  const detectedPackageManager = existing === null ? "npm" : detectGeneratedWrapperPackageManager(existing);
+  const detectedPackageManager = existing === null ? null : detectGeneratedWrapperPackageManager(existing);
 
   if (existing !== null && detectedPackageManager === null) {
     warnings.push("bin/memory does not look generated; skipping to avoid overwriting user content.");

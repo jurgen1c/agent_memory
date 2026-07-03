@@ -370,7 +370,7 @@ exec ${fallback} "$@"
 }
 
 function normalizeWrapperContent(content: string): string {
-  return content.replace(/\r\n/g, "\n");
+  return content.replace(/\r\n/g, "\n").trimEnd();
 }
 
 export function parseInitPackageManager(value: string): PackageManager {
