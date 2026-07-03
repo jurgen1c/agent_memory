@@ -50,6 +50,10 @@ describe("init command", () => {
     expect(agents).toContain("bin/memory audit --git-diff");
     expect(agents).toContain("Recipes for new or changed repeatable workflows.");
     expect(agents).toContain("Waivers for intentional coverage exceptions with a reason and expiration.");
+    const wrapper = fs.readFileSync(path.join(repoRoot, "bin/memory"), "utf8");
+    expect(wrapper).toContain('LOCAL_CLI="${REPO_ROOT}/node_modules/.bin/agent-memory"');
+    expect(wrapper).toContain("exec npx -y @jurgen1c/agent-memory-cli");
+    expect(wrapper).not.toContain("npx agent-memory");
     expect(fs.statSync(path.join(repoRoot, "bin/memory")).mode & 0o111).toBeGreaterThan(0);
 
     const second = await dispatch(["init", "--yes"], { cwd: repoRoot });
@@ -236,6 +240,16 @@ Keep this footer too.
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("agent-memory");
+  });
+
+  test("writes a bun wrapper with the scoped package fallback", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes", "--package-manager", "bun"], { cwd: repoRoot });
+
+    const wrapper = fs.readFileSync(path.join(repoRoot, "bin/memory"), "utf8");
+
+    expect(wrapper).toContain("exec bunx @jurgen1c/agent-memory-cli");
+    expect(wrapper).not.toContain("bunx agent-memory");
   });
 
   test("can install non-blocking git hooks during init", async () => {

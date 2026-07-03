@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { dispatch } from "../../packages/cli/src/router";
 import { loadConfig } from "../../packages/core/src/config";
+import { wrapperTemplate } from "../../packages/core/src/init";
 
 describe("upgrade command", () => {
   test("dry-runs support file updates without writing files", async () => {
@@ -47,12 +48,83 @@ describe("upgrade command", () => {
     expect(agents).toContain("Keep local instructions.");
     expect(agents).toContain("### Agent-Memory-First Workflow");
     expect(agents).not.toContain("Old managed text");
+    expect(fs.readFileSync(path.join(repoRoot, "bin/memory"), "utf8")).toBe(wrapperTemplate("npm"));
     expect(skill).toContain("## Available Commands");
     expect(skill).toContain("memory audit --git-diff");
     expect(skill).toContain("memory/claims/**/*.md");
     expect(skill).toContain("references/claims.md");
     expect(claimsReference).toContain("<!-- agent-memory:generated-reference repo-memory/claims.md -->");
     expect(coverageReference).toContain("## Stale Review");
+  });
+
+  test("refreshes known generated wrappers while preserving their package manager fallback", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
+    fs.writeFileSync(wrapperPath, oldGeneratedWrapper("bun"));
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+    const wrapper = fs.readFileSync(wrapperPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("refreshed bun wrapper");
+    expect(wrapper).toBe(wrapperTemplate("bun"));
+    expect(wrapper).toContain("bunx @jurgen1c/agent-memory-cli");
+  });
+
+  test("refreshes generated wrappers with EOF whitespace drift", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
+    fs.writeFileSync(wrapperPath, wrapperTemplate("bun").trimEnd());
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("refreshed bun wrapper");
+    expect(fs.readFileSync(wrapperPath, "utf8")).toBe(wrapperTemplate("bun"));
+  });
+
+  test("does not chmod current generated wrappers during dry runs", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
+    fs.writeFileSync(wrapperPath, wrapperTemplate("npm"));
+    fs.chmodSync(wrapperPath, 0o644);
+
+    const result = await dispatch(["upgrade"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("would_update");
+    expect(result.stdout).toContain("make wrapper executable");
+    expect(fs.statSync(wrapperPath).mode & 0o777).toBe(0o644);
+  });
+
+  test("chmods current generated wrappers when upgrade writes", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
+    fs.writeFileSync(wrapperPath, wrapperTemplate("npm"));
+    fs.chmodSync(wrapperPath, 0o644);
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("made wrapper executable");
+    expect(fs.statSync(wrapperPath).mode & 0o111).toBeGreaterThan(0);
+  });
+
+  test("skips custom wrappers during upgrade", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
+    fs.writeFileSync(wrapperPath, "#!/usr/bin/env bash\necho custom memory wrapper\n");
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("bin/memory does not look generated");
+    expect(fs.readFileSync(wrapperPath, "utf8")).toBe("#!/usr/bin/env bash\necho custom memory wrapper\n");
   });
 
   test("is idempotent after writing the current support files", async () => {
@@ -414,5 +486,23 @@ This repository uses \`agent-memory\`.
 ## Available Commands
 
 - old
+`;
+}
+
+function oldGeneratedWrapper(packageManager: "npm" | "bun"): string {
+  const fallback = packageManager === "bun" ? "bunx agent-memory" : "npx agent-memory";
+
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "\${AGENT_MEMORY_CLI:-}" ]; then
+  exec "\${AGENT_MEMORY_CLI}" "$@"
+fi
+
+if command -v agent-memory >/dev/null 2>&1; then
+  exec agent-memory "$@"
+fi
+
+exec ${fallback} "$@"
 `;
 }

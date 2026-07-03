@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig, renderConfigTemplate } from "./config";
-import { buildAgentsMemoryContent } from "./init";
+import { buildAgentsMemoryContent, detectGeneratedWrapperPackageManager, wrapperTemplate } from "./init";
 import { findRepoRoot, resolveRepoOutputPath } from "./repo";
 import {
   codexSkillReferenceFiles,
@@ -114,6 +114,7 @@ export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
     actions
   });
   upgradeAgentsFile(repo.root, options, actions);
+  upgradeMemoryWrapper(repo.root, options, actions, warnings);
   upgradeSkillFiles(repo.root, config, options, actions, warnings);
 
   return {
@@ -123,6 +124,60 @@ export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
     actions,
     warnings
   };
+}
+
+function upgradeMemoryWrapper(repoRoot: string, options: UpgradeOptions, actions: UpgradeAction[], warnings: string[]): void {
+  const relativePath = "bin/memory";
+  const absolutePath = path.join(repoRoot, relativePath);
+  const existing = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : null;
+  const detectedPackageManager = existing === null ? null : detectGeneratedWrapperPackageManager(existing);
+
+  if (existing !== null && detectedPackageManager === null) {
+    warnings.push("bin/memory does not look generated; skipping to avoid overwriting user content.");
+    actions.push({ path: relativePath, status: "skipped", detail: "custom wrapper requires manual review" });
+    return;
+  }
+
+  const packageManager = detectedPackageManager ?? "npm";
+  const next = wrapperTemplate(packageManager);
+
+  if (existing === next) {
+    if (!isExecutable(absolutePath)) {
+      if (options.write) {
+        fs.chmodSync(absolutePath, 0o755);
+        actions.push({ path: relativePath, status: "updated", detail: "made wrapper executable" });
+        return;
+      }
+
+      actions.push({ path: relativePath, status: "would_update", detail: "make wrapper executable" });
+      return;
+    }
+
+    actions.push({ path: relativePath, status: "skipped", detail: "already current" });
+    return;
+  }
+
+  if (options.write) {
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.writeFileSync(absolutePath, next);
+    fs.chmodSync(absolutePath, 0o755);
+    actions.push({
+      path: relativePath,
+      status: existing === null ? "created" : "updated",
+      detail: existing === null ? "installed wrapper" : `refreshed ${packageManager} wrapper`
+    });
+    return;
+  }
+
+  actions.push({
+    path: relativePath,
+    status: existing === null ? "would_create" : "would_update",
+    detail: existing === null ? "install wrapper" : `refresh ${packageManager} wrapper`
+  });
+}
+
+function isExecutable(filePath: string): boolean {
+  return (fs.statSync(filePath).mode & 0o111) !== 0;
 }
 
 function upgradeConfigFile(options: {
