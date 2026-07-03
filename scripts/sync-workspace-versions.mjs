@@ -7,6 +7,7 @@ const rootPackagePath = path.join(repoRoot, "package.json");
 const rootPackage = JSON.parse(fs.readFileSync(rootPackagePath, "utf8"));
 const version = rootPackage.version;
 const shouldStage = process.argv.includes("--stage");
+const shouldCheck = process.argv.includes("--check");
 
 if (typeof version !== "string" || version.length === 0) {
   throw new Error("Root package.json must contain a version string.");
@@ -14,6 +15,7 @@ if (typeof version !== "string" || version.length === 0) {
 
 const workspacePackagePaths = workspacePackageJsonPaths(rootPackage.workspaces);
 const updatedPackagePaths = [];
+const mismatchedPackagePaths = [];
 
 for (const packagePath of workspacePackagePaths) {
   const absolutePath = path.join(repoRoot, packagePath);
@@ -23,10 +25,27 @@ for (const packagePath of workspacePackagePaths) {
     continue;
   }
 
+  mismatchedPackagePaths.push({ path: packagePath, version: packageJson.version });
+
+  if (shouldCheck) {
+    continue;
+  }
+
   packageJson.version = version;
   fs.writeFileSync(absolutePath, `${JSON.stringify(packageJson, null, 2)}\n`);
   updatedPackagePaths.push(packagePath);
   console.log(`Updated ${packagePath} to ${version}`);
+}
+
+if (shouldCheck && mismatchedPackagePaths.length > 0) {
+  console.error(`Workspace package versions must match root package.json version ${version}.`);
+
+  for (const mismatch of mismatchedPackagePaths) {
+    console.error(`- ${mismatch.path}: ${mismatch.version}`);
+  }
+
+  console.error("Run `npm version <version>` or `node scripts/sync-workspace-versions.mjs --stage` before tagging a release.");
+  process.exit(1);
 }
 
 if (shouldStage && updatedPackagePaths.length > 0) {

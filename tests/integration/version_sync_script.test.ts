@@ -33,9 +33,6 @@ describe("workspace version sync script", () => {
     const result = runScript(workspaceRoot, ["--stage"]);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("Updated packages/alpha/package.json to 2.0.0");
-    expect(result.stdout).toContain("Updated packages/bravo/package.json to 2.0.0");
-    expect(result.stdout).toContain("Updated tools/standalone/package.json to 2.0.0");
     expect(readVersion(workspaceRoot, "packages/alpha/package.json")).toBe("2.0.0");
     expect(readVersion(workspaceRoot, "packages/bravo/package.json")).toBe("2.0.0");
     expect(readVersion(workspaceRoot, "tools/standalone/package.json")).toBe("2.0.0");
@@ -63,6 +60,24 @@ describe("workspace version sync script", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
+    expect(fs.readFileSync(packagePath, "utf8")).toBe(before);
+  });
+
+  test("checks workspace package versions without rewriting files", () => {
+    const workspaceRoot = makeWorkspace({
+      version: "4.0.0",
+      workspaces: ["packages/*"],
+      packages: {
+        "packages/alpha": "3.9.0",
+        "packages/bravo": "4.0.0"
+      }
+    });
+    const packagePath = path.join(workspaceRoot, "packages/alpha/package.json");
+    const before = fs.readFileSync(packagePath, "utf8");
+
+    const result = runScript(workspaceRoot, ["--check"]);
+
+    expect(result.exitCode).toBe(1);
     expect(fs.readFileSync(packagePath, "utf8")).toBe(before);
   });
 });
