@@ -150,10 +150,10 @@ export async function showPlanTemplate(options: { cwd?: string; id: string }): P
 }
 
 export async function suggestPlans(options: { cwd?: string; task: string; limit?: number }): Promise<PlanSuggestResult> {
-  const { database, databasePath } = await openConfiguredDatabase(options.cwd);
+  const { database, databasePath, planTemplateSuggestionLimit } = await openConfiguredDatabase(options.cwd);
 
   try {
-    const matches = searchPlanTemplates(database, options.task, options.limit ?? 3);
+    const matches = searchPlanTemplates(database, options.task, options.limit ?? planTemplateSuggestionLimit);
     return {
       databasePath,
       task: options.task,
@@ -438,7 +438,7 @@ function searchPlanTemplates(database: SqliteDatabase, task: string, limit: numb
     }));
 }
 
-async function openConfiguredDatabase(cwd?: string): Promise<{ database: SqliteDatabase; databasePath: string }> {
+async function openConfiguredDatabase(cwd?: string): Promise<{ database: SqliteDatabase; databasePath: string; planTemplateSuggestionLimit: number }> {
   const loaded = loadConfig({ cwd });
   const databasePath = path.isAbsolute(loaded.config.database_path)
     ? loaded.config.database_path
@@ -450,7 +450,11 @@ async function openConfiguredDatabase(cwd?: string): Promise<{ database: SqliteD
     });
   }
 
-  return { database: await openSqliteDatabase(databasePath, { readonly: true }), databasePath };
+  return {
+    database: await openSqliteDatabase(databasePath, { readonly: true }),
+    databasePath,
+    planTemplateSuggestionLimit: loaded.config.context.plan_template_suggestion_limit
+  };
 }
 
 function hydratePlanTemplate(database: SqliteDatabase, id: string): PlanTemplateDetail | null {

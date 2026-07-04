@@ -39,6 +39,7 @@ describe("upgrade command", () => {
     const plansReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/plans.md"), "utf8");
     const profilesReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/profiles.md"), "utf8");
     const coverageReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/coverage-and-validation.md"), "utf8");
+    const delegationReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/delegation.md"), "utf8");
     const loaded = loadConfig({ repoRoot });
 
     expect(result.exitCode).toBe(0);
@@ -59,12 +60,14 @@ describe("upgrade command", () => {
     expect(skill).toContain("If context includes matched recipes");
     expect(skill).toContain("references/claims.md");
     expect(skill).toContain("references/contextual-workflows.md");
+    expect(skill).toContain("references/delegation.md");
     expect(claimsReference).toContain("<!-- agent-memory:generated-reference repo-memory/claims.md -->");
     expect(contextualReference).toContain("<!-- agent-memory:generated-reference repo-memory/contextual-workflows.md -->");
     expect(contextualReference).toContain("Selected Profile Traits");
     expect(plansReference).toContain("plans finish");
     expect(profilesReference).toContain("profiles match");
     expect(coverageReference).toContain("## Stale Review");
+    expect(delegationReference).toContain("Subagent prompt contract");
   });
 
   test("preserves custom skill references unless forced", async () => {

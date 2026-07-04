@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -278,6 +278,27 @@ describe("UI memory model", () => {
       priority: "high",
       snippet: "Keep scope tied to selected auth claims."
     });
+  });
+
+  test("writes workflow artifact patches through atomic rename", async () => {
+    const cwd = copyFixture(mockApp);
+    const rename = spyOn(fs, "renameSync");
+
+    try {
+      updateUiWorkflowArtifact({
+        cwd,
+        kind: "recipe",
+        id: "recipe.auth.modify_student_oauth",
+        patch: {
+          status: "needs_review"
+        }
+      });
+
+      expect(rename).toHaveBeenCalled();
+      expect(fs.readdirSync(path.join(cwd, "docs/agent-memory/recipes/auth")).filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
+    } finally {
+      rename.mockRestore();
+    }
   });
 });
 

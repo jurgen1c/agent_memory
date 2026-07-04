@@ -149,6 +149,25 @@ describe("context command", () => {
     expect(parsed.matchedClaims.map((claim: { id: string }) => claim.id)).toEqual(requiredClaimIds.slice(0, 3));
   });
 
+  test("uses configured recipe match limit", async () => {
+    const cwd = copyFixture(mockApp);
+    const configPath = path.join(cwd, "agent-memory.config.yaml");
+    fs.writeFileSync(
+      configPath,
+      fs.readFileSync(configPath, "utf8").replace("include_inferred_edges_by_default: false", "include_inferred_edges_by_default: false\n  recipe_match_limit: 1")
+    );
+    writeSimpleRecipe(cwd, "recipe.auth.recipe_limit_extra", "recipe_limit_extra.yaml");
+
+    const compile = await dispatch(["compile"], { cwd });
+    expect(compile.exitCode).toBe(0);
+
+    const result = await dispatch(["context", "--task", "student oauth tenant", "--budget", "full", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.matchedRecipes).toHaveLength(1);
+  });
+
   test("uses configured context defaults when command flags are omitted", async () => {
     const cwd = await compiledMockAppWithConfig((config) =>
       config.replace("default_budget: medium", "default_budget: small").replace("default_depth: 1", "default_depth: 0")
@@ -329,6 +348,33 @@ relevant_files:
 
 steps:
   - Keep required claims within the selected context budget.
+
+verification:
+  - bun test
+`
+  );
+}
+
+function writeSimpleRecipe(cwd: string, id: string, fileName: string): void {
+  const targetPath = path.join(cwd, "docs/agent-memory/recipes/auth", fileName);
+  fs.writeFileSync(
+    targetPath,
+    `id: ${id}
+title: Student OAuth tenant recipe
+system: auth
+status: current
+
+required_claims:
+  - auth.student_oauth.uid_is_tenant_scoped
+
+intent_triggers:
+  - student oauth tenant
+
+relevant_files:
+  - src/auth.js
+
+steps:
+  - Review tenant-scoped OAuth behavior.
 
 verification:
   - bun test

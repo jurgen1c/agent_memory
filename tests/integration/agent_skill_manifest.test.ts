@@ -38,12 +38,14 @@ user-invocable: false
     expect(content).toContain("references/contextual-workflows.md");
     expect(content).toContain("references/plans.md");
     expect(content).toContain("references/profiles.md");
+    expect(content).toContain("references/delegation.md");
     expect(content).toContain("If context includes matched recipes");
     expect(content).toContain("plans finish <id>");
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"))).toBe(true);
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/contextual-workflows.md"))).toBe(true);
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/plans.md"))).toBe(true);
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/profiles.md"))).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/delegation.md"))).toBe(true);
     expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"), "utf8")).toContain(
       "<!-- agent-memory:generated-reference repo-memory/claims.md -->"
     );
@@ -58,6 +60,9 @@ user-invocable: false
     );
     expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/coverage-and-validation.md"), "utf8")).toContain(
       "## Stale Review"
+    );
+    expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/delegation.md"), "utf8")).toContain(
+      "lower-effort subagent"
     );
   });
 

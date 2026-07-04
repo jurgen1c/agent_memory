@@ -28,6 +28,23 @@ describe("plans command", () => {
     expect(fs.existsSync(path.join(cwd, ".agent-memory/plans"))).toBe(false);
   });
 
+  test("uses configured plan suggestion limit", async () => {
+    const cwd = await compiledMockAppWithPlan(
+      (config) =>
+        config.replace(
+          "include_inferred_edges_by_default: false",
+          "include_inferred_edges_by_default: false\n  plan_template_suggestion_limit: 1"
+        ),
+      true
+    );
+
+    const suggest = await dispatch(["plans", "suggest", "--task", "change student oauth provider", "--json"], { cwd });
+    const parsed = JSON.parse(suggest.stdout);
+
+    expect(suggest.exitCode).toBe(0);
+    expect(parsed.matches).toHaveLength(1);
+  });
+
   test("creates a plan run and builds context for the current stage", async () => {
     const cwd = await compiledMockAppWithPlan();
     const created = await dispatch(
@@ -208,9 +225,16 @@ describe("plans command", () => {
   });
 });
 
-async function compiledMockAppWithPlan(): Promise<string> {
+async function compiledMockAppWithPlan(updateConfig?: (config: string) => string, includeAlternatePlan = false): Promise<string> {
   const cwd = copyFixture(mockApp);
   writePlan(cwd);
+  if (includeAlternatePlan) {
+    writeAlternatePlan(cwd);
+  }
+  if (updateConfig) {
+    const configPath = path.join(cwd, "agent-memory.config.yaml");
+    fs.writeFileSync(configPath, updateConfig(fs.readFileSync(configPath, "utf8")));
+  }
   const compile = await dispatch(["compile"], { cwd });
   expect(compile.exitCode).toBe(0);
   return cwd;
@@ -268,6 +292,25 @@ stages:
     done_when:
       - Tests pass.
     memory_updates: []
+`
+  );
+}
+
+function writeAlternatePlan(cwd: string): void {
+  const planPath = path.join(cwd, "docs/agent-memory/plans/auth/oauth_change_second.yaml");
+  fs.mkdirSync(path.dirname(planPath), { recursive: true });
+  fs.writeFileSync(
+    planPath,
+    `id: plan_template.auth.oauth_change_second
+title: Second OAuth provider behavior change
+system: auth
+status: current
+intent_triggers:
+  - change student oauth provider
+stages:
+  - id: inspect
+    title: Inspect second current contract
+    goal: Inspect another OAuth provider behavior change path.
 `
   );
 }

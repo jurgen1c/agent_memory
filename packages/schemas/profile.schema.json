@@ -15,11 +15,27 @@
       "additionalProperties": true,
       "properties": {
         "task_triggers": { "type": "array", "items": { "type": "string" } },
+        "intents": { "type": "array", "items": { "type": "string" } },
+        "task_intents": { "type": "array", "items": { "type": "string" } },
+        "aliases": { "type": "array", "items": { "type": "string" } },
+        "profile_aliases": { "type": "array", "items": { "type": "string" } },
+        "profiles": { "type": "array", "items": { "type": "string" } },
         "systems": { "type": "array", "items": { "type": "string" } },
         "changed_files": { "type": "array", "items": { "type": "string" } },
+        "file_globs": { "type": "array", "items": { "type": "string" } },
+        "files": { "type": "array", "items": { "type": "string" } },
         "recipes": { "type": "array", "items": { "type": "string" } },
+        "recipe_ids": { "type": "array", "items": { "type": "string" } },
+        "plans": { "type": "array", "items": { "type": "string" } },
+        "plan_ids": { "type": "array", "items": { "type": "string" } },
+        "plan_template_ids": { "type": "array", "items": { "type": "string" } },
         "plan_stages": { "type": "array", "items": { "type": "string" } },
-        "tags": { "type": "array", "items": { "type": "string" } }
+        "stages": { "type": "array", "items": { "type": "string" } },
+        "claim_types": { "type": "array", "items": { "type": "string" } },
+        "risk_signals": { "type": "array", "items": { "type": "string" } },
+        "commands": { "type": "array", "items": { "type": "string" } },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "always": { "type": "boolean" }
       }
     },
     "snippet": { "type": "string", "maxLength": 1200 },

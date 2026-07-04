@@ -1257,7 +1257,20 @@ function updateYamlFile(filePath: string, operations: YamlPatchOperation[]): voi
     }
   }
 
-  fs.writeFileSync(filePath, content.endsWith("\n") ? content : `${content}\n`);
+  writeFileAtomic(filePath, content.endsWith("\n") ? content : `${content}\n`);
+}
+
+function writeFileAtomic(filePath: string, content: string): void {
+  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+
+  try {
+    fs.writeFileSync(tempPath, content);
+    fs.renameSync(tempPath, filePath);
+  } finally {
+    if (fs.existsSync(tempPath)) {
+      fs.unlinkSync(tempPath);
+    }
+  }
 }
 
 function replaceTopLevelScalar(content: string, key: string, value: string): string {

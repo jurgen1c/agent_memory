@@ -8,6 +8,7 @@ import { resolvePlanStageContext, type PlanRunStageDetail } from "./plans";
 import { selectProfileTraits, type DroppedProfileTrait, type ProfileMatchDiagnostics, type ProfileTraitMatch } from "./profiles";
 import { getRecipe, searchRecipeMatches, type Recipe, type RecipeMatch, type RecipeMatchReason } from "./recipes";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
+import type { AgentMemoryConfig } from "./types";
 
 export type ContextBudget = "small" | "medium" | "full";
 
@@ -123,14 +124,7 @@ interface OpenDatabase {
   database: SqliteDatabase;
   databasePath: string;
   repoRoot: string;
-  contextDefaults: {
-    default_budget: ContextBudget;
-    default_depth: number;
-    include_inferred_edges_by_default: boolean;
-    profile_trait_limit: number;
-    include_profile_traits: boolean;
-    include_profile_diagnostics: boolean;
-  };
+  contextDefaults: AgentMemoryConfig["context"];
 }
 
 const ACTIVE_STATUSES = ["current", "proposed", "needs_review", "experimental", "needs_verification"];
@@ -161,6 +155,7 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
     const uniqueChangedFiles = Array.from(new Set(changedFiles));
     const explicitRecipeIds = Array.from(new Set([...(options.recipeIds ?? []), ...(planContext?.stage.recipeRefs ?? [])]));
     const limits = BUDGET_LIMITS[budget];
+    const recipeLimit = Math.min(opened.contextDefaults.recipe_match_limit, limits.recipes);
     const initialMatched = rankClaims(opened.database, {
       task: options.task,
       changedFiles: uniqueChangedFiles,
@@ -172,7 +167,7 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
       changedFiles: uniqueChangedFiles,
       claimIds: initialMatched.map((claim) => claim.id),
       recipeIds: explicitRecipeIds,
-      limit: limits.recipes
+      limit: recipeLimit
     });
     const matched = expandExplicitClaims(
       opened.database,
@@ -181,7 +176,7 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
     );
     const criticalRules = criticalRulesForClaims(opened.database, matched).slice(0, limits.matched);
     const related = relatedClaims(opened.database, matched, depth, includeInferred).slice(0, limits.related);
-    const recipes = mergeRecipeMatches(opened.database, recipeMatches, relatedRecipes(opened.database, matched, uniqueChangedFiles), limits.recipes);
+    const recipes = mergeRecipeMatches(opened.database, recipeMatches, relatedRecipes(opened.database, matched, uniqueChangedFiles), recipeLimit);
     const claimsById = new Map([...criticalRules, ...matched, ...related.map((item) => item.claim)].map((claim) => [claim.id, claim]));
     const profileResult = opened.contextDefaults.include_profile_traits
       ? selectProfileTraits(opened.database, {

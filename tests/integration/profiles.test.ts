@@ -93,6 +93,11 @@ describe("profiles command", () => {
 
     expect(result.exitCode).toBe(0);
     expect(parsed.diagnostics.warnings).toContain("profile_trait.implementer.keep_scope_tight is broad; keep profile traits small and specific.");
+
+    const implicit = await dispatch(["profiles", "match", "--changed-files", "src/unrelated.js", "--json"], { cwd });
+    const implicitJson = JSON.parse(implicit.stdout);
+    expect(implicit.exitCode).toBe(0);
+    expect(implicitJson.traits.map((match: { trait: { id: string } }) => match.trait.id)).not.toContain("profile_trait.implementer.keep_scope_tight");
   });
 
   test("context includes selected and dropped profile traits with caps", async () => {

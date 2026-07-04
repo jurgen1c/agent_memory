@@ -268,7 +268,7 @@ function scoreTrait(
     }
   }
 
-  if (input.planId && readStringArray(appliesWhen, "plans", "plan_ids").includes(input.planId)) {
+  if (input.planId && readStringArray(appliesWhen, "plans", "plan_ids", "plan_template_ids").includes(input.planId)) {
     score += 50;
     reasons.push({ code: "plan_match", detail: input.planId });
   }
@@ -310,7 +310,7 @@ function scoreTrait(
     score -= 10;
   }
 
-  if (reasons.length === 0) {
+  if (reasons.length === 0 || !reasons.some((reason) => reason.code !== "broad_trait")) {
     score = 0;
   }
 
