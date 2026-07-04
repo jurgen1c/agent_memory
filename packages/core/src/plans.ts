@@ -515,7 +515,7 @@ function planRunsRoot(repoRoot: string): string {
 function loadPlanRun(repoRoot: string, id: string): { run: PlanRunDetail; path: string } {
   const root = planRunsRoot(repoRoot);
   const files = fs.existsSync(root) ? walkPlanRunFiles(root) : [];
-  const filePath = files.find((candidate) => parsePlanRunFile(candidate).id === id || path.basename(candidate, ".yaml") === id);
+  const filePath = files.find((candidate) => parsePlanRunFile(candidate).id === id || planRunFileStem(candidate) === id);
 
   if (!filePath) {
     throw new NotFoundError(`Plan run not found: ${id}`);
@@ -796,8 +796,16 @@ function walkPlanRunFiles(root: string): string[] {
     if (entry.isDirectory()) {
       return walkPlanRunFiles(entryPath);
     }
-    return entry.isFile() && entry.name.endsWith(".yaml") ? [entryPath] : [];
+    return entry.isFile() && isYamlFile(entry.name) ? [entryPath] : [];
   });
+}
+
+function isYamlFile(fileName: string): boolean {
+  return fileName.endsWith(".yaml") || fileName.endsWith(".yml");
+}
+
+function planRunFileStem(filePath: string): string {
+  return path.basename(filePath).replace(/\.(yaml|yml)$/, "");
 }
 
 function toFtsQuery(query: string): string {

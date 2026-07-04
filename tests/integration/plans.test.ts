@@ -55,6 +55,33 @@ describe("plans command", () => {
     expect(contextJson.verificationSteps).toContain("bun test");
   });
 
+  test("loads yml plan runs for show and next commands", async () => {
+    const cwd = await compiledMockAppWithPlan();
+    writePlanRun(cwd, ".agent-memory/plans/manual.yml", "plan_run.manual_yml");
+
+    const show = await dispatch(["plans", "show", "plan_run.manual_yml", "--json"], { cwd });
+    const showJson = JSON.parse(show.stdout);
+
+    expect(show.exitCode).toBe(0);
+    expect(showJson.run.id).toBe("plan_run.manual_yml");
+    expect(showJson.path).toBe(path.join(cwd, ".agent-memory/plans/manual.yml"));
+
+    const next = await dispatch(["plans", "next", "plan_run.manual_yml"], { cwd });
+    expect(next.exitCode).toBe(0);
+    expect(next.stdout).toContain("Next stage: inspect");
+  });
+
+  test("loads yml plan runs by filename stem", async () => {
+    const cwd = await compiledMockAppWithPlan();
+    writePlanRun(cwd, ".agent-memory/plans/manual-stem.yml", "plan_run.manual_stem");
+
+    const show = await dispatch(["plans", "show", "manual-stem", "--json"], { cwd });
+    const showJson = JSON.parse(show.stdout);
+
+    expect(show.exitCode).toBe(0);
+    expect(showJson.run.id).toBe("plan_run.manual_stem");
+  });
+
   test("requires stage evidence, advances stages, and deletes finished runs by default", async () => {
     const cwd = await compiledMockAppWithPlan();
     const created = await dispatch(
@@ -241,6 +268,40 @@ stages:
     done_when:
       - Tests pass.
     memory_updates: []
+`
+  );
+}
+
+function writePlanRun(cwd: string, relativePath: string, id: string): void {
+  const runPath = path.join(cwd, relativePath);
+  fs.mkdirSync(path.dirname(runPath), { recursive: true });
+  fs.writeFileSync(
+    runPath,
+    `id: ${id}
+template_id: plan_template.auth.oauth_change
+task: Manual YML plan run
+created_at: 2026-07-04T00:00:00.000Z
+updated_at: 2026-07-04T00:00:00.000Z
+status: active
+current_stage: inspect
+stages:
+  - id: inspect
+    title: Inspect current contract
+    goal: Identify provider callback behavior and tenant boundaries.
+    status: active
+    claim_refs:
+      - auth.student_oauth.uid_is_tenant_scoped
+    recipe_refs:
+      - recipe.auth.modify_student_oauth
+    profile_traits: []
+    source_files:
+      - src/auth.js
+    verification:
+      - bun test
+    done_when:
+      - Current auth contract is understood.
+    memory_updates: []
+    evidence: []
 `
   );
 }

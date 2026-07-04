@@ -263,6 +263,7 @@ describe("agent-manifest command", () => {
     expect(parsed.workflow_summary.plan_template_count).toBe(0);
     expect(parsed.workflow_summary.profile_trait_count).toBe(0);
     expect(parsed.workflow_summary.active_plan_run_count).toBe(0);
+    expect(parsed.workflow_summary.blocked_plan_run_count).toBe(0);
     expect(parsed.workflow_summary.warnings).toEqual([]);
   });
 
@@ -275,6 +276,7 @@ describe("agent-manifest command", () => {
     writeWorkflowArtifact(repoRoot, "docs/agent-memory/profiles/review/findings.yaml", "id: profile_trait.review.findings\n");
     writeWorkflowArtifact(repoRoot, ".agent-memory/plans/active.yaml", "id: plan_run.active\nstatus: active\n");
     writeWorkflowArtifact(repoRoot, ".agent-memory/plans/completed/done.yml", "id: plan_run.done\nstatus: complete\n");
+    writeWorkflowArtifact(repoRoot, ".agent-memory/plans/blocked.yml", "id: plan_run.blocked\nstatus: blocked\n");
     writeWorkflowArtifact(repoRoot, ".agent-memory/plans/abandoned.yaml", "id: plan_run.abandoned\nstatus: abandoned\n");
 
     const result = await dispatch(["agent-manifest", "--json"], { cwd: repoRoot });
@@ -287,6 +289,7 @@ describe("agent-manifest command", () => {
       profile_trait_count: 1,
       active_plan_run_count: 1,
       completed_plan_run_count: 1,
+      blocked_plan_run_count: 1,
       abandoned_plan_run_count: 1,
       warnings: []
     });

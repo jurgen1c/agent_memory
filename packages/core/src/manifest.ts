@@ -47,6 +47,7 @@ export interface AgentManifest {
     profile_trait_count: number;
     active_plan_run_count: number;
     completed_plan_run_count: number;
+    blocked_plan_run_count: number;
     abandoned_plan_run_count: number;
     warnings: string[];
   };
@@ -116,6 +117,7 @@ function buildWorkflowSummary(repoRoot: string, config: ReturnType<typeof loadCo
     profile_trait_count: countConfiguredFiles(memoryRoot, config.profiles, warnings, "profiles"),
     active_plan_run_count: runCounts.active,
     completed_plan_run_count: runCounts.complete,
+    blocked_plan_run_count: runCounts.blocked,
     abandoned_plan_run_count: runCounts.abandoned,
     warnings
   };
@@ -130,9 +132,9 @@ function countConfiguredFiles(memoryRoot: string, patterns: string[], warnings: 
   }
 }
 
-function countPlanRuns(repoRoot: string, warnings: string[]): { active: number; complete: number; abandoned: number } {
+function countPlanRuns(repoRoot: string, warnings: string[]): { active: number; complete: number; blocked: number; abandoned: number } {
   const root = path.join(repoRoot, ".agent-memory/plans");
-  const counts = { active: 0, complete: 0, abandoned: 0 };
+  const counts = { active: 0, complete: 0, blocked: 0, abandoned: 0 };
 
   if (!fs.existsSync(root)) {
     return counts;
@@ -145,6 +147,7 @@ function countPlanRuns(repoRoot: string, warnings: string[]): { active: number; 
 
       if (status === "active") counts.active += 1;
       else if (status === "complete") counts.complete += 1;
+      else if (status === "blocked") counts.blocked += 1;
       else if (status === "abandoned") counts.abandoned += 1;
     } catch (error) {
       warnings.push(`Unable to read plan run ${path.relative(repoRoot, filePath)}: ${error instanceof Error ? error.message : String(error)}`);
