@@ -14,6 +14,7 @@ export * from "./memory";
 export * from "./manifest";
 export * from "./migration";
 export * from "./plans";
+export * from "./profiles";
 export * from "./repo";
 export * from "./retrieval";
 export * from "./recipes";

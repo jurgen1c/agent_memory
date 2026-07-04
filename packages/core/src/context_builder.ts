@@ -5,6 +5,7 @@ import { loadConfig } from "./config";
 import { NotFoundError } from "./errors";
 import { pathMatchesPattern } from "./files";
 import { resolvePlanStageContext, type PlanRunStageDetail } from "./plans";
+import { selectProfileTraits, type DroppedProfileTrait, type ProfileMatchDiagnostics, type ProfileTraitMatch } from "./profiles";
 import { getRecipe, searchRecipeMatches, type Recipe, type RecipeMatch, type RecipeMatchReason } from "./recipes";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
 
@@ -21,6 +22,8 @@ export interface BuildContextOptions {
   recipeIds?: string[];
   planId?: string;
   stageId?: string;
+  profileAlias?: string;
+  profileTraitIds?: string[];
 }
 
 export interface AgentContext {
@@ -36,6 +39,9 @@ export interface AgentContext {
   relevantFiles: string[];
   recipes: ContextRecipe[];
   matchedRecipes: ContextRecipeMatch[];
+  profileTraits: ContextProfileTrait[];
+  droppedProfileTraits: DroppedProfileTrait[];
+  profileDiagnostics: ProfileMatchDiagnostics;
   verificationSteps: string[];
   warnings: string[];
 }
@@ -101,6 +107,18 @@ export interface ContextRecipeMatch extends ContextRecipe {
   reasons: RecipeMatchReason[];
 }
 
+export interface ContextProfileTrait {
+  id: string;
+  title: string;
+  status: string;
+  category: string;
+  priority: string;
+  sourcePath: string;
+  snippet: string;
+  score: number;
+  reasons: ProfileTraitMatch["reasons"];
+}
+
 interface OpenDatabase {
   database: SqliteDatabase;
   databasePath: string;
@@ -109,15 +127,18 @@ interface OpenDatabase {
     default_budget: ContextBudget;
     default_depth: number;
     include_inferred_edges_by_default: boolean;
+    profile_trait_limit: number;
+    include_profile_traits: boolean;
+    include_profile_diagnostics: boolean;
   };
 }
 
 const ACTIVE_STATUSES = ["current", "proposed", "needs_review", "experimental", "needs_verification"];
 const DIRECT_MATCH_STATUSES = [...ACTIVE_STATUSES, "stale", "deprecated"];
-const BUDGET_LIMITS: Record<ContextBudget, { matched: number; related: number; recipes: number }> = {
-  small: { matched: 3, related: 2, recipes: 2 },
-  medium: { matched: 8, related: 8, recipes: 5 },
-  full: { matched: 25, related: 25, recipes: 20 }
+const BUDGET_LIMITS: Record<ContextBudget, { matched: number; related: number; recipes: number; profiles: number }> = {
+  small: { matched: 3, related: 2, recipes: 2, profiles: 2 },
+  medium: { matched: 8, related: 8, recipes: 5, profiles: 5 },
+  full: { matched: 25, related: 25, recipes: 20, profiles: 10 }
 };
 
 export async function buildContext(options: BuildContextOptions): Promise<AgentContext> {
@@ -162,11 +183,27 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
     const related = relatedClaims(opened.database, matched, depth, includeInferred).slice(0, limits.related);
     const recipes = mergeRecipeMatches(opened.database, recipeMatches, relatedRecipes(opened.database, matched, uniqueChangedFiles), limits.recipes);
     const claimsById = new Map([...criticalRules, ...matched, ...related.map((item) => item.claim)].map((claim) => [claim.id, claim]));
+    const profileResult = opened.contextDefaults.include_profile_traits
+      ? selectProfileTraits(opened.database, {
+          task: options.task,
+          changedFiles: uniqueChangedFiles,
+          systems: Array.from(new Set([...claimsById.values()].map((claim) => claim.system))),
+          recipeIds: recipes.map((recipe) => recipe.id),
+          planId: planContext?.planId ?? options.planId,
+          stageId: planContext?.stage.id ?? options.stageId,
+          claimTypes: Array.from(new Set([...claimsById.values()].map((claim) => claim.type))),
+          profileAlias: options.profileAlias,
+          traitIds: Array.from(new Set([...(options.profileTraitIds ?? []), ...(planContext?.stage.profileTraits ?? [])])),
+          limit: Math.min(opened.contextDefaults.profile_trait_limit, limits.profiles),
+          strictExplicit: true
+        })
+      : emptyProfileResult();
     const warnings = [
       ...(planContext?.warnings ?? []),
       ...warningLines([...claimsById.values()]),
       ...recipeWarningLines(opened.database, recipes),
-      ...planStageWarningLines(opened.database, planContext?.stage)
+      ...planStageWarningLines(opened.database, planContext?.stage),
+      ...profileResult.diagnostics.warnings
     ];
 
     return {
@@ -182,12 +219,26 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
       relevantFiles: collectRelevantFiles([...claimsById.values()], recipes, uniqueChangedFiles),
       recipes,
       matchedRecipes: recipes,
+      profileTraits: profileResult.traits.map(toContextProfileTrait),
+      droppedProfileTraits: opened.contextDefaults.include_profile_diagnostics ? profileResult.droppedTraits : [],
+      profileDiagnostics: opened.contextDefaults.include_profile_diagnostics ? profileResult.diagnostics : { intents: [], warnings: [] },
       verificationSteps: collectVerificationSteps([...claimsById.values()], recipes, planContext?.stage),
       warnings
     };
   } finally {
     opened.database.close();
   }
+}
+
+function emptyProfileResult(): ReturnType<typeof selectProfileTraits> {
+  return {
+    traits: [],
+    droppedTraits: [],
+    diagnostics: {
+      intents: [],
+      warnings: []
+    }
+  };
 }
 
 function expandExplicitClaims(database: SqliteDatabase, claims: ContextClaim[], claimIds: string[]): ContextClaim[] {
@@ -588,6 +639,20 @@ function toContextPlanStage(planId: string, stage: PlanRunStageDetail): ContextP
     verification: stage.verification,
     doneWhen: stage.doneWhen,
     memoryUpdates: stage.memoryUpdates
+  };
+}
+
+function toContextProfileTrait(match: ProfileTraitMatch): ContextProfileTrait {
+  return {
+    id: match.trait.id,
+    title: match.trait.title,
+    status: match.trait.status,
+    category: match.trait.category,
+    priority: match.trait.priority,
+    sourcePath: match.trait.sourcePath,
+    snippet: match.trait.snippet,
+    score: match.score,
+    reasons: match.reasons
   };
 }
 

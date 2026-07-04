@@ -14,6 +14,7 @@ import { runMigrateDocsCommand } from "./commands/migrate_docs";
 import { runInitCommand } from "./commands/init";
 import { runNewCommand } from "./commands/new";
 import { runPlansCommand } from "./commands/plans";
+import { runProfilesCommand } from "./commands/profiles";
 import { runQueryCommand } from "./commands/query";
 import { runRecipesCommand } from "./commands/recipes";
 import { runShowCommand } from "./commands/show";
@@ -168,6 +169,17 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
     }
 
     return runPlansCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "profiles") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("profiles")
+      };
+    }
+
+    return runProfilesCommand(rest, { cwd: context.cwd });
   }
 
   if (command === "system") {

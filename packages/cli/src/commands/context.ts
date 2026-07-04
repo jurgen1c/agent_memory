@@ -22,6 +22,8 @@ interface ContextCommandOptions {
   recipeIds: string[];
   planId?: string;
   stageId?: string;
+  profileAlias?: string;
+  profileTraitIds: string[];
 }
 
 export async function runContextCommand(args: string[], context: ContextCommandContext = {}): Promise<ContextCommandResult> {
@@ -36,7 +38,9 @@ export async function runContextCommand(args: string[], context: ContextCommandC
     includeInferred: options.includeInferred,
     recipeIds: options.recipeIds,
     planId: options.planId,
-    stageId: options.stageId
+    stageId: options.stageId,
+    profileAlias: options.profileAlias,
+    profileTraitIds: options.profileTraitIds
   });
 
   return {
@@ -50,7 +54,8 @@ function parseContextArgs(args: string[]): ContextCommandOptions {
     changedFiles: [],
     gitDiff: false,
     json: false,
-    recipeIds: []
+    recipeIds: [],
+    profileTraitIds: []
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -132,6 +137,28 @@ function parseContextArgs(args: string[]): ContextCommandOptions {
       continue;
     }
 
+    if (arg === "--profile") {
+      options.profileAlias = readValue(args, index, "--profile");
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--profile=")) {
+      options.profileAlias = arg.slice("--profile=".length);
+      continue;
+    }
+
+    if (arg === "--profile-trait") {
+      options.profileTraitIds.push(readValue(args, index, "--profile-trait"));
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--profile-trait=")) {
+      options.profileTraitIds.push(arg.slice("--profile-trait=".length));
+      continue;
+    }
+
     if (arg === "--budget") {
       options.budget = parseBudget(readValue(args, index, "--budget"));
       index += 1;
@@ -159,8 +186,16 @@ function parseContextArgs(args: string[]): ContextCommandOptions {
     });
   }
 
-  if (!options.task && options.changedFiles.length === 0 && !options.gitDiff && options.recipeIds.length === 0 && !options.planId) {
-    throw new AgentMemoryError("context requires --task, --changed-files, --git-diff, --recipe, or --plan.", {
+  if (
+    !options.task &&
+    options.changedFiles.length === 0 &&
+    !options.gitDiff &&
+    options.recipeIds.length === 0 &&
+    !options.planId &&
+    !options.profileAlias &&
+    options.profileTraitIds.length === 0
+  ) {
+    throw new AgentMemoryError("context requires --task, --changed-files, --git-diff, --recipe, --plan, --profile, or --profile-trait.", {
       details: ['Example: agent-memory context --task "fix student oauth"', "Example: agent-memory context --plan plan_run.20260702.auth_work.1234abcd --stage inspect"]
     });
   }
@@ -267,6 +302,24 @@ function renderContext(context: AgentContext): string {
         lines.push("", "Verification:", ...recipe.verification.map((step) => `- ${step}`));
       }
     }
+  }
+
+  if (context.profileTraits.length > 0) {
+    lines.push("", "## Selected Profile Traits");
+
+    for (const trait of context.profileTraits) {
+      lines.push("", `### ${trait.id}`, "", `${trait.title} (${trait.category}, ${trait.priority})`);
+
+      if (trait.reasons.length > 0) {
+        lines.push("", "Selected because:", ...trait.reasons.map((reason) => `- ${reason.code}: ${reason.detail}`));
+      }
+
+      lines.push("", "Guidance:", "", trait.snippet);
+    }
+  }
+
+  if (context.droppedProfileTraits.length > 0) {
+    lines.push("", "## Dropped Profile Traits", "", ...context.droppedProfileTraits.map((trait) => `- ${trait.id}: ${trait.reason}`));
   }
 
   if (context.verificationSteps.length > 0) {

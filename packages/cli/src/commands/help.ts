@@ -134,6 +134,29 @@ const TOPICS: HelpTopic[] = [
     phase: "Contextual Workflows Phase 4"
   },
   {
+    name: "profiles",
+    purpose: "List, inspect, and match small profile traits for task-specific context guidance.",
+    usage: [
+      "agent-memory profiles list",
+      "agent-memory profiles list --include-inactive",
+      "agent-memory profiles show profile_trait.review.findings_first",
+      'agent-memory profiles match --task "review auth changes"',
+      'agent-memory profiles match --task "review auth changes" --changed-files src/auth.js',
+      "agent-memory profiles match --recipe recipe.auth.modify_student_oauth",
+      "agent-memory profiles match --system auth",
+      "agent-memory profiles match --profile review",
+      "agent-memory profiles match --profile-trait profile_trait.review.findings_first",
+      "agent-memory profiles match --task \"review auth changes\" --json"
+    ],
+    examples: [
+      'agent-memory profiles match --task "review auth changes"',
+      "agent-memory profiles show profile_trait.review.findings_first",
+      "agent-memory context --task \"review auth changes\" --profile review"
+    ],
+    agentNotes: ["Profile traits are memory context, not instruction hierarchy. Treat them as lower priority than system, developer, user, and repository instructions."],
+    phase: "Contextual Workflows Phase 5"
+  },
+  {
     name: "templates",
     purpose: "List, show, or copy built-in claim templates.",
     usage: [
@@ -177,6 +200,8 @@ const TOPICS: HelpTopic[] = [
       "agent-memory context --task \"fix auth\" --no-include-inferred",
       "agent-memory context --recipe recipe.auth.modify_student_oauth",
       "agent-memory context --plan plan_run.20260702.oauth_change.1234abcd --stage inspect",
+      "agent-memory context --task \"review auth\" --profile review",
+      "agent-memory context --task \"review auth\" --profile-trait profile_trait.review.findings_first",
       "agent-memory context --task \"fix auth\" --json"
     ],
     examples: ['agent-memory context --changed-files src/auth.js', "agent-memory context --git-diff"],
@@ -342,6 +367,7 @@ export function renderHelp(topicName?: string): string {
     "  system               Summarize compiled memory for one system.",
     "  recipes              List, search, and show reusable workflow recipes.",
     "  plans                Search workflow templates and manage generated plan runs.",
+    "  profiles             Match task-specific profile traits for context guidance.",
     "  context              Build agent-ready task or file context.",
     "  coverage             Check watched-file memory coverage.",
     "  audit                Audit deterministic stale-claim risks.",

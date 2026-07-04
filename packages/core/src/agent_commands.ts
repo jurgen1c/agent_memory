@@ -70,6 +70,16 @@ export function buildAgentCommands(commandPrefix: string): AgentCommandDescripti
       ]
     },
     {
+      name: "profiles",
+      purpose: "List, show, and match profile traits for task-specific context guidance.",
+      whenToUse: "Use when you need explainable guidance for reviews, architecture work, implementation scope, releases, or migrations.",
+      examples: [
+        `${commandPrefix} profiles match --task "review auth changes"`,
+        `${commandPrefix} profiles show profile_trait.review.findings_first`,
+        `${commandPrefix} context --task "review auth changes" --profile review`
+      ]
+    },
+    {
       name: "templates",
       purpose: "List and show claim templates.",
       whenToUse: "Use before creating claims so new memory follows the supported shape.",
