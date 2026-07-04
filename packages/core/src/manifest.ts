@@ -162,6 +162,10 @@ function walkYamlFiles(root: string): string[] {
       return walkYamlFiles(entryPath);
     }
 
-    return entry.isFile() && entry.name.endsWith(".yaml") ? [entryPath] : [];
+    return entry.isFile() && isYamlFile(entry.name) ? [entryPath] : [];
   });
+}
+
+function isYamlFile(fileName: string): boolean {
+  return fileName.endsWith(".yaml") || fileName.endsWith(".yml");
 }

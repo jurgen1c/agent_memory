@@ -274,7 +274,7 @@ describe("agent-manifest command", () => {
     writeWorkflowArtifact(repoRoot, "docs/agent-memory/plans/auth/oauth.yaml", "id: plan_template.auth.oauth\n");
     writeWorkflowArtifact(repoRoot, "docs/agent-memory/profiles/review/findings.yaml", "id: profile_trait.review.findings\n");
     writeWorkflowArtifact(repoRoot, ".agent-memory/plans/active.yaml", "id: plan_run.active\nstatus: active\n");
-    writeWorkflowArtifact(repoRoot, ".agent-memory/plans/completed/done.yaml", "id: plan_run.done\nstatus: complete\n");
+    writeWorkflowArtifact(repoRoot, ".agent-memory/plans/completed/done.yml", "id: plan_run.done\nstatus: complete\n");
     writeWorkflowArtifact(repoRoot, ".agent-memory/plans/abandoned.yaml", "id: plan_run.abandoned\nstatus: abandoned\n");
 
     const result = await dispatch(["agent-manifest", "--json"], { cwd: repoRoot });

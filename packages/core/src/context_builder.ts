@@ -486,7 +486,7 @@ function expandRecipeRequiredClaims(database: SqliteDatabase, claims: ContextCla
     }
   }
 
-  return Array.from(claimsById.values()).slice(0, Math.max(limit, claimsById.size));
+  return Array.from(claimsById.values()).slice(0, limit);
 }
 
 function mergeRecipeMatches(database: SqliteDatabase, matches: RecipeMatch[], related: ContextRecipe[], limit: number): ContextRecipeMatch[] {

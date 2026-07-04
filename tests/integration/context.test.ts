@@ -111,6 +111,44 @@ describe("context command", () => {
     expect(parsed.verificationSteps).toContain("bun test");
   });
 
+  test("caps required claims expanded from explicit recipes", async () => {
+    const cwd = copyFixture(mockApp);
+    const requiredClaimIds = [
+      "auth.student_oauth.uid_is_tenant_scoped",
+      "tenancy.current_tenant.required_for_student_auth",
+      "auth.recipe_limit.extra_one",
+      "auth.recipe_limit.extra_two",
+      "auth.recipe_limit.extra_three"
+    ];
+
+    writeClaim(cwd, {
+      id: "auth.recipe_limit.extra_one",
+      title: "Extra recipe limit claim one",
+      sourceFile: "src/auth.js"
+    });
+    writeClaim(cwd, {
+      id: "auth.recipe_limit.extra_two",
+      title: "Extra recipe limit claim two",
+      sourceFile: "src/tenant.js"
+    });
+    writeClaim(cwd, {
+      id: "auth.recipe_limit.extra_three",
+      title: "Extra recipe limit claim three",
+      sourceFile: "src/auth.js"
+    });
+    writeRecipe(cwd, requiredClaimIds);
+
+    const compile = await dispatch(["compile"], { cwd });
+    expect(compile.exitCode).toBe(0);
+
+    const result = await dispatch(["context", "--recipe", "recipe.auth.recipe_limit", "--budget", "small", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.matchedRecipes[0].id).toBe("recipe.auth.recipe_limit");
+    expect(parsed.matchedClaims.map((claim: { id: string }) => claim.id)).toEqual(requiredClaimIds.slice(0, 3));
+  });
+
   test("uses configured context defaults when command flags are omitted", async () => {
     const cwd = await compiledMockAppWithConfig((config) =>
       config.replace("default_budget: medium", "default_budget: small").replace("default_depth: 1", "default_depth: 0")
@@ -232,4 +270,68 @@ function initGitHistory(cwd: string): void {
       encoding: "utf8"
     }).status
   ).toBe(0);
+}
+
+function writeClaim(cwd: string, claim: { id: string; title: string; sourceFile: string }): void {
+  const idParts = claim.id.split(".");
+  const fileName = `${idParts[idParts.length - 1]}.md`;
+  const targetPath = path.join(cwd, "docs/agent-memory/claims/auth", fileName);
+  fs.writeFileSync(
+    targetPath,
+    `---
+id: ${claim.id}
+type: fact
+system: auth
+status: current
+confidence: high
+severity: important
+
+title: ${claim.title}
+
+claim: ${claim.title} is required for recipe limit regression coverage.
+
+source_files:
+  - ${claim.sourceFile}
+
+related_files: []
+symbols: []
+routes: []
+tags:
+  - auth
+verification:
+  - bun test
+
+last_verified_commit: null
+---
+
+# ${claim.title}
+`
+  );
+}
+
+function writeRecipe(cwd: string, requiredClaimIds: string[]): void {
+  const targetPath = path.join(cwd, "docs/agent-memory/recipes/auth/recipe_limit.yaml");
+  fs.writeFileSync(
+    targetPath,
+    `id: recipe.auth.recipe_limit
+title: Recipe limit regression
+system: auth
+status: current
+
+required_claims:
+${requiredClaimIds.map((id) => `  - ${id}`).join("\n")}
+
+intent_triggers:
+  - recipe limit regression
+
+relevant_files:
+  - src/auth.js
+
+steps:
+  - Keep required claims within the selected context budget.
+
+verification:
+  - bun test
+`
+  );
 }
