@@ -113,6 +113,26 @@ describe("doctor command", () => {
     expect(result.stdout).toContain("metadata");
     expect(result.stdout).toContain("FTS table is missing");
   });
+
+  test("warns when completed local plan runs accumulate", async () => {
+    const cwd = copyFixture(mockApp);
+    await dispatch(["compile"], { cwd });
+
+    for (let index = 0; index < 11; index += 1) {
+      writePlanRun(cwd, `done-${index}`, "complete");
+    }
+
+    const result = await dispatch(["doctor", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(5);
+    expect(parsed.checks).toContainEqual(
+      expect.objectContaining({
+        name: "plan_runs_accumulated",
+        status: "warning"
+      })
+    );
+  });
 });
 
 describe("sync command", () => {
@@ -217,6 +237,27 @@ function gitPath(cwd: string, gitRelativePath: string): string {
   expect(result.status).toBe(0);
   const output = result.stdout.trim();
   return path.isAbsolute(output) ? output : path.resolve(cwd, output);
+}
+
+function writePlanRun(cwd: string, name: string, status: string): void {
+  const runPath = path.join(cwd, `.agent-memory/plans/${name}.yaml`);
+  fs.mkdirSync(path.dirname(runPath), { recursive: true });
+  fs.writeFileSync(
+    runPath,
+    `id: plan_run.${name}
+task: ${name}
+created_at: 2026-07-03T00:00:00.000Z
+updated_at: 2026-07-03T00:00:00.000Z
+status: ${status}
+current_stage: done
+stages:
+  - id: done
+    title: Done
+    goal: Done.
+    status: complete
+    evidence: []
+`
+  );
 }
 
 function git(cwd: string, args: string[]): void {

@@ -15,7 +15,7 @@ import { type CSSProperties, type PointerEvent, type ReactNode, useCallback, use
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-type Mode = "graph" | "files" | "review";
+type Mode = "graph" | "files" | "review" | "workflows";
 type Origin = "explicit" | "inferred" | "recipe" | "replacement";
 
 const edgeLabelStyle: CSSProperties = { fill: "#1f2937", fontSize: 13, fontWeight: 700 };
@@ -30,6 +30,7 @@ interface UiMemoryModel {
   health: UiHealth;
   graph: UiGraphSummary;
   files: UiFileNode;
+  workflowSummary: UiWorkflowSummary;
   validation: ValidationResult;
   doctor: DoctorResult;
   reviewQueue: UiReviewItem[];
@@ -114,9 +115,20 @@ interface UiSystemGraph {
 interface UiFileNode {
   name: string;
   path: string;
-  kind: "directory" | "claim" | "graph" | "index" | "recipe" | "waiver" | "file";
+  kind: "directory" | "claim" | "graph" | "index" | "recipe" | "plan" | "profile" | "waiver" | "file";
   claimId?: string;
   children?: UiFileNode[];
+}
+
+interface UiWorkflowSummary {
+  recipeCount: number;
+  planTemplateCount: number;
+  profileTraitCount: number;
+  activePlanRunCount: number;
+  completedPlanRunCount: number;
+  abandonedPlanRunCount: number;
+  blockedPlanRunCount: number;
+  warnings: string[];
 }
 
 interface UiReviewItem {
@@ -129,6 +141,93 @@ interface UiReviewItem {
   sourcePath: string;
   priority: number;
   reason: string;
+}
+
+interface WorkflowData {
+  recipes: UiRecipeSummary[];
+  plans: UiPlanTemplateSummary[];
+  profiles: UiProfileTraitSummary[];
+  planRuns: UiPlanRunSummary[];
+  warnings: string[];
+}
+
+interface UiRecipeSummary {
+  id: string;
+  title: string;
+  system: string;
+  status: string;
+  sourcePath: string;
+  requiredClaims: string[];
+  intentTriggers: string[];
+  steps: string[];
+  verification: string[];
+}
+
+interface UiPlanTemplateSummary {
+  id: string;
+  title: string;
+  system: string;
+  status: string;
+  sourcePath: string;
+  intentTriggers: string[];
+  stages: UiPlanTemplateStageSummary[];
+}
+
+interface UiPlanTemplateStageSummary {
+  id: string;
+  title: string;
+  goal: string;
+  sequence: number;
+  claimRefs: string[];
+  recipeRefs: string[];
+  profileTraits: string[];
+  sourceFiles: string[];
+  verification: string[];
+  doneWhen: string[];
+  memoryUpdates: string[];
+}
+
+interface UiProfileTraitSummary {
+  id: string;
+  title: string;
+  status: string;
+  category: string;
+  priority: string;
+  sourcePath: string;
+  appliesWhen: Record<string, unknown>;
+  snippet: string;
+  conflictsWith: string[];
+}
+
+interface UiPlanRunSummary {
+  id: string;
+  templateId?: string;
+  task: string;
+  status: string;
+  currentStage: string;
+  branch?: string;
+  baseCommit?: string;
+  createdAt: string;
+  updatedAt: string;
+  path: string;
+  warnings: string[];
+  stages: UiPlanRunStageSummary[];
+}
+
+interface UiPlanRunStageSummary {
+  id: string;
+  title: string;
+  goal: string;
+  status: string;
+  claimRefs: string[];
+  recipeRefs: string[];
+  profileTraits: string[];
+  sourceFiles: string[];
+  verification: string[];
+  doneWhen: string[];
+  memoryUpdates: string[];
+  evidence: string[];
+  reason?: string;
 }
 
 interface ValidationResult {
@@ -165,6 +264,8 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [readerOpen, setReaderOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("graph");
+  const [workflows, setWorkflows] = useState<WorkflowData | null>(null);
+  const [workflowsLoading, setWorkflowsLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [system, setSystem] = useState("all");
   const [status, setStatus] = useState("all");
@@ -183,6 +284,7 @@ export default function App() {
     try {
       const next = await api<UiMemoryModel>("/api/memory");
       setMemory(next);
+      setWorkflows(null);
       setExpandedSystems(new Set());
       setSystemGraphs({});
       systemGraphLoads.current.clear();
@@ -201,6 +303,36 @@ export default function App() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  const loadWorkflows = useCallback(async () => {
+    setWorkflowsLoading(true);
+    try {
+      const [recipes, plans, profiles, planRuns] = await Promise.all([
+        api<{ recipes: UiRecipeSummary[] }>("/api/workflows/recipes"),
+        api<{ plans: UiPlanTemplateSummary[] }>("/api/workflows/plans"),
+        api<{ profiles: UiProfileTraitSummary[] }>("/api/workflows/profiles"),
+        api<{ runs: UiPlanRunSummary[]; warnings: string[] }>("/api/workflows/plan-runs")
+      ]);
+      setWorkflows({
+        recipes: recipes.recipes,
+        plans: plans.plans,
+        profiles: profiles.profiles,
+        planRuns: planRuns.runs,
+        warnings: planRuns.warnings
+      });
+      setNotice("Workflows loaded.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setWorkflowsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (mode === "workflows" && !workflows && !workflowsLoading) {
+      void loadWorkflows();
+    }
+  }, [loadWorkflows, mode, workflows, workflowsLoading]);
 
   useEffect(() => {
     window.localStorage.setItem(drawerWidthKey, String(drawerWidth));
@@ -360,6 +492,27 @@ export default function App() {
     await reviewClaim(id, "current", "high");
   }
 
+  async function updatePlanStage(runId: string, stageId: string, status: "complete" | "blocked", value: string) {
+    setBusy(true);
+    try {
+      await api<UiPlanRunSummary>(`/api/workflows/plan-runs/${encodeURIComponent(runId)}/stages/${encodeURIComponent(stageId)}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-agent-memory-token": token
+        },
+        body: JSON.stringify(status === "complete" ? { status, evidence: value } : { status, reason: value })
+      });
+      await refresh();
+      await loadWorkflows();
+      setNotice(`Plan stage ${status}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function reviewClaim(id: string, nextStatus: string, nextConfidence: string) {
     setBusy(true);
     try {
@@ -421,6 +574,9 @@ export default function App() {
             </button>
             <button className={mode === "files" ? "active" : ""} onClick={() => setMode("files")}>
               Files
+            </button>
+            <button className={mode === "workflows" ? "active" : ""} onClick={() => setMode("workflows")}>
+              Workflows
             </button>
             <button className={mode === "review" ? "active" : ""} onClick={() => setMode("review")}>
               Review
@@ -508,6 +664,16 @@ export default function App() {
           />
         )}
         {mode === "files" && memory && <FileView root={memory.files} onSelectClaim={selectClaim} />}
+        {mode === "workflows" && memory && (
+          <WorkflowView
+            summary={memory.workflowSummary}
+            data={workflows}
+            loading={workflowsLoading}
+            busy={busy}
+            onRefresh={loadWorkflows}
+            onUpdateStage={updatePlanStage}
+          />
+        )}
         {mode === "review" && memory && <ReviewView items={memory.reviewQueue} onSelect={selectClaim} onApprove={approveClaim} />}
       </section>
 
@@ -747,6 +913,219 @@ function ReviewView(props: { items: UiReviewItem[]; onSelect(id: string): void; 
           </div>
         </article>
       ))}
+    </div>
+  );
+}
+
+function WorkflowView(props: {
+  summary: UiWorkflowSummary;
+  data: WorkflowData | null;
+  loading: boolean;
+  busy: boolean;
+  onRefresh(): void;
+  onUpdateStage(runId: string, stageId: string, status: "complete" | "blocked", value: string): void;
+}) {
+  const data = props.data;
+  const warnings = [...props.summary.warnings, ...(data?.warnings ?? [])];
+
+  return (
+    <div className="workflow-view">
+      <div className="workflow-header">
+        <div>
+          <h2>Workflows</h2>
+          <p>{props.loading ? "Loading..." : "Canonical workflows and local plan runs"}</p>
+        </div>
+        <button onClick={props.onRefresh} disabled={props.loading}>
+          Refresh
+        </button>
+      </div>
+
+      <div className="workflow-stats">
+        <Stat label="Recipes" value={props.summary.recipeCount} />
+        <Stat label="Plan Templates" value={props.summary.planTemplateCount} />
+        <Stat label="Profile Traits" value={props.summary.profileTraitCount} />
+        <Stat label="Active Runs" value={props.summary.activePlanRunCount} />
+        <Stat label="Blocked Runs" value={props.summary.blockedPlanRunCount} />
+        <Stat label="Completed Runs" value={props.summary.completedPlanRunCount} />
+      </div>
+
+      {warnings.length > 0 && (
+        <section className="workflow-section">
+          <h3>Warnings</h3>
+          <List values={Array.from(new Set(warnings))} />
+        </section>
+      )}
+
+      <section className="workflow-section">
+        <h3>Plan Runs</h3>
+        {!data && <p className="empty">Loading plan runs.</p>}
+        {data && data.planRuns.length === 0 && <p className="empty">No local plan runs.</p>}
+        {data?.planRuns.map((run) => (
+          <article className="workflow-card" key={run.id}>
+            <div className="workflow-card-header">
+              <div>
+                <h4>{run.task}</h4>
+                <p>
+                  {run.id} · {run.status} · {run.path}
+                </p>
+              </div>
+              <span className={`badge status-${run.status}`}>{run.currentStage}</span>
+            </div>
+            {run.warnings.length > 0 && <List values={run.warnings} />}
+            <div className="stage-list">
+              {run.stages.map((stage) => (
+                <div className="stage-row" key={stage.id}>
+                  <div>
+                    <strong>{stage.title}</strong>
+                    <p>
+                      {stage.id} · {stage.status}
+                    </p>
+                    <p>{stage.goal}</p>
+                    <InlineMeta label="claims" values={stage.claimRefs} />
+                    <InlineMeta label="recipes" values={stage.recipeRefs} />
+                    <InlineMeta label="profiles" values={stage.profileTraits} />
+                  </div>
+                  {(stage.status === "active" || stage.status === "blocked") && (
+                    <PlanStageAction runId={run.id} stageId={stage.id} status={stage.status} busy={props.busy} onUpdate={props.onUpdateStage} />
+                  )}
+                </div>
+              ))}
+            </div>
+          </article>
+        ))}
+      </section>
+
+      <section className="workflow-section">
+        <h3>Recipes</h3>
+        {data && data.recipes.length === 0 && <p className="empty">No recipes.</p>}
+        {data?.recipes.map((recipe) => (
+          <article className="workflow-card" key={recipe.id}>
+            <div className="workflow-card-header">
+              <div>
+                <h4>{recipe.title}</h4>
+                <p>
+                  {recipe.id} · {recipe.system} · {recipe.status} · {recipe.sourcePath}
+                </p>
+              </div>
+            </div>
+            <InlineMeta label="triggers" values={recipe.intentTriggers} />
+            <InlineMeta label="claims" values={recipe.requiredClaims} />
+            <InlineMeta label="verification" values={recipe.verification} />
+          </article>
+        ))}
+      </section>
+
+      <section className="workflow-section">
+        <h3>Plan Templates</h3>
+        {data && data.plans.length === 0 && <p className="empty">No plan templates.</p>}
+        {data?.plans.map((plan) => (
+          <article className="workflow-card" key={plan.id}>
+            <div className="workflow-card-header">
+              <div>
+                <h4>{plan.title}</h4>
+                <p>
+                  {plan.id} · {plan.system} · {plan.status} · {plan.sourcePath}
+                </p>
+              </div>
+            </div>
+            <InlineMeta label="triggers" values={plan.intentTriggers} />
+            <div className="stage-list compact">
+              {plan.stages.map((stage) => (
+                <div className="stage-row" key={stage.id}>
+                  <div>
+                    <strong>{stage.title}</strong>
+                    <p>
+                      {stage.id} · {stage.goal}
+                    </p>
+                    <InlineMeta label="claims" values={stage.claimRefs} />
+                    <InlineMeta label="recipes" values={stage.recipeRefs} />
+                    <InlineMeta label="profiles" values={stage.profileTraits} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </article>
+        ))}
+      </section>
+
+      <section className="workflow-section">
+        <h3>Profile Traits</h3>
+        {data && data.profiles.length === 0 && <p className="empty">No profile traits.</p>}
+        {data?.profiles.map((profile) => (
+          <article className="workflow-card" key={profile.id}>
+            <div className="workflow-card-header">
+              <div>
+                <h4>{profile.title}</h4>
+                <p>
+                  {profile.id} · {profile.category} · {profile.priority} · {profile.status}
+                </p>
+              </div>
+            </div>
+            <p>{profile.snippet}</p>
+            <InlineMeta label="conflicts" values={profile.conflictsWith} />
+            {Object.keys(profile.appliesWhen).length > 0 && <pre>{JSON.stringify(profile.appliesWhen, null, 2)}</pre>}
+          </article>
+        ))}
+      </section>
+    </div>
+  );
+}
+
+function Stat(props: { label: string; value: number }) {
+  return (
+    <div className="workflow-stat">
+      <strong>{props.value}</strong>
+      <span>{props.label}</span>
+    </div>
+  );
+}
+
+function InlineMeta(props: { label: string; values: string[] }) {
+  if (props.values.length === 0) {
+    return null;
+  }
+
+  return (
+    <p className="inline-meta">
+      <strong>{props.label}:</strong> {props.values.join(", ")}
+    </p>
+  );
+}
+
+function PlanStageAction(props: {
+  runId: string;
+  stageId: string;
+  status: string;
+  busy: boolean;
+  onUpdate(runId: string, stageId: string, status: "complete" | "blocked", value: string): void;
+}) {
+  const [evidence, setEvidence] = useState("");
+  const [reason, setReason] = useState("");
+
+  return (
+    <div className="stage-action">
+      {props.status === "active" && (
+        <>
+          <textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} placeholder="Evidence" />
+          <textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Block reason" />
+          <div className="button-row">
+            <button onClick={() => props.onUpdate(props.runId, props.stageId, "complete", evidence)} disabled={props.busy}>
+              Complete
+            </button>
+            <button onClick={() => props.onUpdate(props.runId, props.stageId, "blocked", reason)} disabled={props.busy}>
+              Block
+            </button>
+          </div>
+        </>
+      )}
+      {props.status === "blocked" && (
+        <>
+          <textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reason" />
+          <button onClick={() => props.onUpdate(props.runId, props.stageId, "blocked", reason)} disabled={props.busy}>
+            Update
+          </button>
+        </>
+      )}
     </div>
   );
 }

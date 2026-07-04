@@ -4,7 +4,18 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentMemoryError, formatError, toAgentMemoryError } from "./errors";
-import { buildUiMemoryModel, getUiClaimDetail, getUiSystemGraph, reviewClaim, syncUiMemory } from "./ui_model";
+import {
+  buildUiMemoryModel,
+  getUiClaimDetail,
+  getUiPlanRuns,
+  getUiPlans,
+  getUiProfiles,
+  getUiRecipes,
+  getUiSystemGraph,
+  reviewClaim,
+  syncUiMemory,
+  updateUiPlanRunStage
+} from "./ui_model";
 
 export interface UiServerOptions {
   cwd?: string;
@@ -139,6 +150,44 @@ async function handleBunRequest(
       return jsonResponse(200, await buildUiMemoryModel(context.cwd));
     }
 
+    if (url.pathname === "/api/workflows/recipes" && request.method === "GET") {
+      return jsonResponse(200, { recipes: getUiRecipes(context.cwd) });
+    }
+
+    if (url.pathname === "/api/workflows/plans" && request.method === "GET") {
+      return jsonResponse(200, { plans: getUiPlans(context.cwd) });
+    }
+
+    if (url.pathname === "/api/workflows/profiles" && request.method === "GET") {
+      return jsonResponse(200, { profiles: getUiProfiles(context.cwd) });
+    }
+
+    if (url.pathname === "/api/workflows/plan-runs" && request.method === "GET") {
+      return jsonResponse(200, getUiPlanRuns(context.cwd));
+    }
+
+    if (url.pathname.startsWith("/api/workflows/plan-runs/") && url.pathname.includes("/stages/") && request.method === "PATCH") {
+      requireTokenValue(request.headers.get("x-agent-memory-token"), context.token);
+      const match = /^\/api\/workflows\/plan-runs\/([^/]+)\/stages\/([^/]+)$/.exec(url.pathname);
+
+      if (!match) {
+        throw new AgentMemoryError("Invalid plan run stage update path.", { code: "BAD_REQUEST" });
+      }
+
+      const body = await readRequestJson<{ status?: "complete" | "blocked"; evidence?: string; reason?: string }>(request);
+      return jsonResponse(
+        200,
+        updateUiPlanRunStage({
+          cwd: context.cwd,
+          id: decodeURIComponent(match[1]),
+          stageId: decodeURIComponent(match[2]),
+          status: parsePlanRunStageUpdateStatus(body.status),
+          evidence: body.evidence,
+          reason: body.reason
+        })
+      );
+    }
+
     if (url.pathname.startsWith("/api/graph/systems/") && request.method === "GET") {
       const system = decodeURIComponent(url.pathname.slice("/api/graph/systems/".length));
       return jsonResponse(200, getUiSystemGraph(context.cwd, system));
@@ -190,6 +239,45 @@ async function handleRequest(
 
     if (url.pathname === "/api/memory" && request.method === "GET") {
       return sendJson(response, 200, await buildUiMemoryModel(context.cwd));
+    }
+
+    if (url.pathname === "/api/workflows/recipes" && request.method === "GET") {
+      return sendJson(response, 200, { recipes: getUiRecipes(context.cwd) });
+    }
+
+    if (url.pathname === "/api/workflows/plans" && request.method === "GET") {
+      return sendJson(response, 200, { plans: getUiPlans(context.cwd) });
+    }
+
+    if (url.pathname === "/api/workflows/profiles" && request.method === "GET") {
+      return sendJson(response, 200, { profiles: getUiProfiles(context.cwd) });
+    }
+
+    if (url.pathname === "/api/workflows/plan-runs" && request.method === "GET") {
+      return sendJson(response, 200, getUiPlanRuns(context.cwd));
+    }
+
+    if (url.pathname.startsWith("/api/workflows/plan-runs/") && url.pathname.includes("/stages/") && request.method === "PATCH") {
+      requireToken(request, context.token);
+      const match = /^\/api\/workflows\/plan-runs\/([^/]+)\/stages\/([^/]+)$/.exec(url.pathname);
+
+      if (!match) {
+        throw new AgentMemoryError("Invalid plan run stage update path.", { code: "BAD_REQUEST" });
+      }
+
+      const body = await readJson<{ status?: "complete" | "blocked"; evidence?: string; reason?: string }>(request);
+      return sendJson(
+        response,
+        200,
+        updateUiPlanRunStage({
+          cwd: context.cwd,
+          id: decodeURIComponent(match[1]),
+          stageId: decodeURIComponent(match[2]),
+          status: parsePlanRunStageUpdateStatus(body.status),
+          evidence: body.evidence,
+          reason: body.reason
+        })
+      );
     }
 
     if (url.pathname.startsWith("/api/graph/systems/") && request.method === "GET") {
@@ -249,6 +337,16 @@ function requireTokenValue(value: string | string[] | null | undefined, token: s
       code: "FORBIDDEN"
     });
   }
+}
+
+function parsePlanRunStageUpdateStatus(value: string | undefined): "complete" | "blocked" {
+  if (value === "complete" || value === "blocked") {
+    return value;
+  }
+
+  throw new AgentMemoryError("Plan run stage update status must be 'complete' or 'blocked'.", {
+    code: "BAD_REQUEST"
+  });
 }
 
 function statusForError(error: AgentMemoryError): number {

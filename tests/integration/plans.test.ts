@@ -96,6 +96,38 @@ describe("plans command", () => {
     expect(fs.existsSync(finishJson.path)).toBe(false);
   });
 
+  test("finish reports unresolved memory update prompts before deleting runs", async () => {
+    const cwd = await compiledMockAppWithPlan();
+    const created = await dispatch(
+      ["plans", "new", "--template", "plan_template.auth.oauth_change", "--task", "change student oauth provider", "--json"],
+      { cwd }
+    );
+    const run = JSON.parse(created.stdout).run;
+
+    await dispatch(["plans", "complete-stage", run.id, "--stage", "inspect", "--evidence", "Reviewed"], { cwd });
+    await dispatch(["plans", "complete-stage", run.id, "--stage", "implement", "--evidence", "Verified"], { cwd });
+
+    let stderr = "";
+    const exitCode = await runCli(
+      ["plans", "finish", run.id],
+      {
+        stdout: { write: () => true },
+        stderr: {
+          write: (chunk: string) => {
+            stderr += chunk;
+            return true;
+          }
+        }
+      },
+      { cwd }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("Plan run has unresolved memory update prompts");
+    expect(stderr).toContain("Update claims if OAuth tenant behavior changes");
+    expect(fs.existsSync(JSON.parse(created.stdout).path)).toBe(true);
+  });
+
   test("archives, prunes, and promotes completed runs intentionally", async () => {
     const cwd = await compiledMockAppWithPlan();
     const created = await dispatch(

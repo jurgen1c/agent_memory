@@ -22,12 +22,17 @@ describe("init command", () => {
       "docs/agent-memory/graph/.gitkeep",
       "docs/agent-memory/indexes/.gitkeep",
       "docs/agent-memory/recipes/.gitkeep",
+      "docs/agent-memory/plans/.gitkeep",
+      "docs/agent-memory/profiles/.gitkeep",
       "docs/agent-memory/waivers/.gitkeep",
       "bin/memory",
       "AGENTS.md",
       ".codex/skills/repo-memory/SKILL.md",
       ".codex/skills/repo-memory/references/claims.md",
+      ".codex/skills/repo-memory/references/contextual-workflows.md",
       ".codex/skills/repo-memory/references/recipes.md",
+      ".codex/skills/repo-memory/references/plans.md",
+      ".codex/skills/repo-memory/references/profiles.md",
       ".codex/skills/repo-memory/references/graphs-and-indexes.md",
       ".codex/skills/repo-memory/references/coverage-and-validation.md",
       "docs/agent-memory/AGENT_SKILL.md"
@@ -46,9 +51,14 @@ describe("init command", () => {
     expect(agents).toContain("Use the repo-memory skill or instruction file whenever it is available.");
     expect(agents).toContain("bin/memory context --task");
     expect(agents).toContain("After non-trivial work:");
+    expect(agents).toContain("If context includes matched recipes");
+    expect(agents).toContain("If context includes a plan stage");
+    expect(agents).toContain("If context includes profile traits");
     expect(agents).toContain("Update memory in the same change when durable repository knowledge changed.");
     expect(agents).toContain("bin/memory audit --git-diff");
     expect(agents).toContain("Recipes for new or changed repeatable workflows.");
+    expect(agents).toContain("Plan templates for reusable multi-stage workflows");
+    expect(agents).toContain("Profile traits for reusable retrieval/output/verification/risk/scope guidance.");
     expect(agents).toContain("Waivers for intentional coverage exceptions with a reason and expiration.");
     const wrapper = fs.readFileSync(path.join(repoRoot, "bin/memory"), "utf8");
     expect(wrapper).toContain('LOCAL_CLI="${REPO_ROOT}/node_modules/.bin/agent-memory"');

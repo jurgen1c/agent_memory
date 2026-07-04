@@ -32,6 +32,48 @@ describe("coverage command", () => {
     expect(parsed.changes.find((change: { path: string }) => change.path === "src/auth.js").status).toBe("covered");
   });
 
+  test("passes when a related recipe changes in the same change set", async () => {
+    const cwd = await compiledMockAppWithoutRecipeGlobs();
+    const result = await dispatch(["coverage", "--changed-files", "src/auth.js", "docs/agent-memory/recipes/auth/modify_student_oauth.yaml", "--json"], {
+      cwd
+    });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.changes.find((change: { path: string }) => change.path === "src/auth.js").status).toBe("covered");
+  });
+
+  test("warns when an active local plan run is staged", async () => {
+    const cwd = await compiledMockApp();
+    writePlanRun(cwd, "active");
+
+    const result = await dispatch(["coverage", "--changed-files", ".agent-memory/plans/active.yaml", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.warnings).toContain(".agent-memory/plans/active.yaml: active plan runs are local task state and should not be staged by default.");
+  });
+
+  test("does not require profile trait updates for matching source changes", async () => {
+    const cwd = copyFixture(mockApp);
+    writeProfile(cwd);
+    const compile = await dispatch(["compile"], { cwd });
+    expect(compile.exitCode).toBe(0);
+
+    const result = await dispatch(
+      ["coverage", "--changed-files", "src/auth.js", "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md", "--json"],
+      { cwd }
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.changes.find((change: { path: string }) => change.path === "src/auth.js").status).toBe("covered");
+    expect(parsed.warnings).toContain("src/auth.js: profile trait profile_trait.review.auth_changes may apply; update the trait only if guidance changed.");
+  });
+
   test("passes when a valid waiver covers the changed watched file", async () => {
     const cwd = await compiledMockApp();
     writeWaiver(cwd);
@@ -123,6 +165,15 @@ async function compiledMockApp(): Promise<string> {
   return cwd;
 }
 
+async function compiledMockAppWithoutRecipeGlobs(): Promise<string> {
+  const cwd = copyFixture(mockApp);
+  const indexPath = path.join(cwd, "docs/agent-memory/indexes/auth.yaml");
+  fs.writeFileSync(indexPath, fs.readFileSync(indexPath, "utf8").replace("recipe_globs:\n  - recipes/auth/**/*.yaml\n\n", ""));
+  const compile = await dispatch(["compile"], { cwd });
+  expect(compile.exitCode).toBe(0);
+  return cwd;
+}
+
 function copyFixture(source: string): string {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-coverage-"));
   fs.cpSync(source, target, { recursive: true });
@@ -138,6 +189,45 @@ reason: Temporary follow-up tracked outside this change.
 files:
   - src/auth.js
 expires_at: 2999-01-01
+`
+  );
+}
+
+function writePlanRun(cwd: string, status: string): void {
+  const planPath = path.join(cwd, ".agent-memory/plans/active.yaml");
+  fs.mkdirSync(path.dirname(planPath), { recursive: true });
+  fs.writeFileSync(
+    planPath,
+    `id: plan_run.active
+task: Active local task
+created_at: 2026-07-03T00:00:00.000Z
+updated_at: 2026-07-03T00:00:00.000Z
+status: ${status}
+current_stage: inspect
+stages:
+  - id: inspect
+    title: Inspect
+    goal: Inspect task.
+    status: active
+    evidence: []
+`
+  );
+}
+
+function writeProfile(cwd: string): void {
+  const profilePath = path.join(cwd, "docs/agent-memory/profiles/review/auth_changes.yaml");
+  fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+  fs.writeFileSync(
+    profilePath,
+    `id: profile_trait.review.auth_changes
+title: Auth changes
+status: current
+category: risk_lens
+priority: normal
+applies_when:
+  changed_files:
+    - src/auth.js
+snippet: Review auth changes carefully.
 `
   );
 }

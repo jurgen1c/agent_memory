@@ -6,6 +6,7 @@ import { loadConfig } from "./config";
 import { canonicalMemoryFileInventory, discoverCanonicalMemoryFiles, resolveConfiguredPath } from "./files";
 import { openSqliteDatabase } from "./sqlite";
 import { PACKAGE_VERSION } from "./version";
+import { parseYaml } from "./yaml";
 
 export type DoctorStatus = "ok" | "warning";
 
@@ -26,6 +27,9 @@ export interface DoctorResult {
 export interface DoctorOptions {
   cwd?: string;
 }
+
+const COMPLETED_PLAN_RUN_WARNING_COUNT = 10;
+const COMPLETED_PLAN_RUN_WARNING_AGE_DAYS = 30;
 
 export async function doctorMemory(options: DoctorOptions = {}): Promise<DoctorResult> {
   const loaded = loadConfig({ cwd: options.cwd });
@@ -106,6 +110,8 @@ export async function doctorMemory(options: DoctorOptions = {}): Promise<DoctorR
     } else {
       checks.push(warn("fts", "FTS table is missing.", "Run `agent-memory compile`."));
     }
+
+    checks.push(...localPlanRunChecks(repoRoot));
   } finally {
     database.close();
   }
@@ -131,6 +137,8 @@ function isDatabaseFresh(
     graphs: string[];
     indexes: string[];
     recipes: string[];
+    plans?: string[];
+    profiles?: string[];
     waivers: string[];
   }
 ): boolean {
@@ -155,6 +163,76 @@ function currentGitCommit(repoRoot: string): string {
 
 function sha256(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function localPlanRunChecks(repoRoot: string): DoctorCheck[] {
+  const root = path.join(repoRoot, ".agent-memory/plans");
+
+  if (!fs.existsSync(root)) {
+    return [ok("plan_runs", "No local plan runs found.")];
+  }
+
+  const warnings: DoctorCheck[] = [];
+  const runs = walkYamlFiles(root)
+    .map((filePath) => readPlanRunSummary(filePath))
+    .filter((run): run is { status: string; updatedAt: string; path: string } => run !== null);
+  const completedOrAbandoned = runs.filter((run) => run.status === "complete" || run.status === "abandoned");
+
+  if (completedOrAbandoned.length > COMPLETED_PLAN_RUN_WARNING_COUNT) {
+    warnings.push(
+      warn(
+        "plan_runs_accumulated",
+        `${completedOrAbandoned.length} completed or abandoned local plan runs remain under .agent-memory/plans.`,
+        `Run \`agent-memory plans prune --completed --abandoned --older-than ${COMPLETED_PLAN_RUN_WARNING_AGE_DAYS}d\` or delete one-off runs after preserving durable memory.`
+      )
+    );
+  }
+
+  const cutoff = Date.now() - COMPLETED_PLAN_RUN_WARNING_AGE_DAYS * 24 * 60 * 60 * 1000;
+  const oldRuns = completedOrAbandoned.filter((run) => {
+    const time = Date.parse(run.updatedAt);
+    return Number.isFinite(time) && time < cutoff;
+  });
+
+  if (oldRuns.length > 0) {
+    warnings.push(
+      warn(
+        "plan_runs_old_completed",
+        `${oldRuns.length} completed or abandoned local plan runs are older than ${COMPLETED_PLAN_RUN_WARNING_AGE_DAYS} days.`,
+        "Prune old local plan runs after promoting reusable knowledge into claims, recipes, graph edges, indexes, or profile traits."
+      )
+    );
+  }
+
+  return warnings.length > 0 ? warnings : [ok("plan_runs", "Local plan run accumulation is within expected bounds.")];
+}
+
+function walkYamlFiles(root: string): string[] {
+  const files: string[] = [];
+
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const entryPath = path.join(root, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...walkYamlFiles(entryPath));
+    } else if (entry.isFile() && (entry.name.endsWith(".yaml") || entry.name.endsWith(".yml"))) {
+      files.push(entryPath);
+    }
+  }
+
+  return files.sort();
+}
+
+function readPlanRunSummary(filePath: string): { status: string; updatedAt: string; path: string } | null {
+  try {
+    const data = parseYaml(fs.readFileSync(filePath, "utf8"));
+    const raw = typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
+    const status = typeof raw.status === "string" ? raw.status : "";
+    const updatedAt = typeof raw.updated_at === "string" ? raw.updated_at : typeof raw.created_at === "string" ? raw.created_at : "";
+    return { status, updatedAt, path: filePath };
+  } catch {
+    return null;
+  }
 }
 
 function ok(name: string, message: string): DoctorCheck {

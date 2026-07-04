@@ -35,6 +35,9 @@ describe("upgrade command", () => {
     const agents = fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8");
     const skill = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"), "utf8");
     const claimsReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"), "utf8");
+    const contextualReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/contextual-workflows.md"), "utf8");
+    const plansReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/plans.md"), "utf8");
+    const profilesReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/profiles.md"), "utf8");
     const coverageReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/coverage-and-validation.md"), "utf8");
     const loaded = loadConfig({ repoRoot });
 
@@ -52,9 +55,34 @@ describe("upgrade command", () => {
     expect(skill).toContain("## Available Commands");
     expect(skill).toContain("memory audit --git-diff");
     expect(skill).toContain("memory/claims/**/*.md");
+    expect(skill).toContain("memory/plans/**/*.yaml");
+    expect(skill).toContain("If context includes matched recipes");
     expect(skill).toContain("references/claims.md");
+    expect(skill).toContain("references/contextual-workflows.md");
     expect(claimsReference).toContain("<!-- agent-memory:generated-reference repo-memory/claims.md -->");
+    expect(contextualReference).toContain("<!-- agent-memory:generated-reference repo-memory/contextual-workflows.md -->");
+    expect(contextualReference).toContain("Selected Profile Traits");
+    expect(plansReference).toContain("plans finish");
+    expect(profilesReference).toContain("profiles match");
     expect(coverageReference).toContain("## Stale Review");
+  });
+
+  test("preserves custom skill references unless forced", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const skillPath = path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md");
+    const customReferencePath = path.join(repoRoot, ".codex/skills/repo-memory/references/plans.md");
+    fs.mkdirSync(path.dirname(customReferencePath), { recursive: true });
+    fs.writeFileSync(skillPath, oldGeneratedSkill());
+    fs.writeFileSync(customReferencePath, "# Custom plans reference\n");
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("does not look generated");
+    expect(fs.readFileSync(customReferencePath, "utf8")).toBe("# Custom plans reference\n");
+
+    const forced = await dispatch(["upgrade", "--write", "--force"], { cwd: repoRoot });
+    expect(forced.exitCode).toBe(0);
+    expect(fs.readFileSync(customReferencePath, "utf8")).toContain("<!-- agent-memory:generated-reference repo-memory/plans.md -->");
   });
 
   test("refreshes known generated wrappers while preserving their package manager fallback", async () => {

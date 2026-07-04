@@ -35,9 +35,26 @@ user-invocable: false
     expect(content).toContain("Relationship Graphs");
     expect(content).toContain("Do not edit or commit the SQLite database");
     expect(content).toContain("references/claims.md");
+    expect(content).toContain("references/contextual-workflows.md");
+    expect(content).toContain("references/plans.md");
+    expect(content).toContain("references/profiles.md");
+    expect(content).toContain("If context includes matched recipes");
+    expect(content).toContain("plans finish <id>");
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"))).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/contextual-workflows.md"))).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/plans.md"))).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/profiles.md"))).toBe(true);
     expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"), "utf8")).toContain(
       "<!-- agent-memory:generated-reference repo-memory/claims.md -->"
+    );
+    expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/contextual-workflows.md"), "utf8")).toContain(
+      "Matched Recipes"
+    );
+    expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/plans.md"), "utf8")).toContain(
+      "plans new --template"
+    );
+    expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/profiles.md"), "utf8")).toContain(
+      "profiles match"
     );
     expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/coverage-and-validation.md"), "utf8")).toContain(
       "## Stale Review"
@@ -57,6 +74,8 @@ user-invocable: false
     expect(result.stdout).toContain("docs/custom/AGENT_MEMORY.md");
     expect(fs.existsSync(skillPath)).toBe(true);
     expect(fs.readFileSync(skillPath, "utf8")).toContain("bin/memory context --git-diff");
+    expect(fs.readFileSync(skillPath, "utf8")).toContain("If context includes matched recipes");
+    expect(fs.readFileSync(skillPath, "utf8")).toContain("plans finish <id>");
     expect(fs.readFileSync(skillPath, "utf8")).not.toContain("references/claims.md");
   });
 
@@ -235,6 +254,42 @@ describe("agent-manifest command", () => {
     expect(parsed.commands.some((command: { name: string }) => command.name === "context")).toBe(true);
     expect(parsed.commands.some((command: { name: string }) => command.name === "audit")).toBe(true);
     expect(parsed.commands.find((command: { name: string }) => command.name === "context").examples[0]).toContain("bin/memory");
+    expect(parsed.capabilities.contextual_workflows).toBe(true);
+    expect(parsed.capabilities.recipes.commands).toContain("recipes search");
+    expect(parsed.capabilities.plans.context_flags).toEqual(["--plan", "--stage"]);
+    expect(parsed.capabilities.plans.run_root).toBe(".agent-memory/plans");
+    expect(parsed.capabilities.profiles.context_flags).toContain("--profile-trait");
+    expect(parsed.workflow_summary.recipe_count).toBe(0);
+    expect(parsed.workflow_summary.plan_template_count).toBe(0);
+    expect(parsed.workflow_summary.profile_trait_count).toBe(0);
+    expect(parsed.workflow_summary.active_plan_run_count).toBe(0);
+    expect(parsed.workflow_summary.warnings).toEqual([]);
+  });
+
+  test("reports contextual workflow counts without requiring compile", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    writeWorkflowArtifact(repoRoot, "docs/agent-memory/recipes/auth/oauth.yaml", "id: recipe.auth.oauth\n");
+    writeWorkflowArtifact(repoRoot, "docs/agent-memory/plans/auth/oauth.yaml", "id: plan_template.auth.oauth\n");
+    writeWorkflowArtifact(repoRoot, "docs/agent-memory/profiles/review/findings.yaml", "id: profile_trait.review.findings\n");
+    writeWorkflowArtifact(repoRoot, ".agent-memory/plans/active.yaml", "id: plan_run.active\nstatus: active\n");
+    writeWorkflowArtifact(repoRoot, ".agent-memory/plans/completed/done.yaml", "id: plan_run.done\nstatus: complete\n");
+    writeWorkflowArtifact(repoRoot, ".agent-memory/plans/abandoned.yaml", "id: plan_run.abandoned\nstatus: abandoned\n");
+
+    const result = await dispatch(["agent-manifest", "--json"], { cwd: repoRoot });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.workflow_summary).toMatchObject({
+      recipe_count: 1,
+      plan_template_count: 1,
+      profile_trait_count: 1,
+      active_plan_run_count: 1,
+      completed_plan_run_count: 1,
+      abandoned_plan_run_count: 1,
+      warnings: []
+    });
   });
 
   test("renders command help for phase 10 commands", async () => {
@@ -260,6 +315,12 @@ function rewriteGenericSkillPath(repoRoot: string, skillPath: string): void {
   const configPath = path.join(repoRoot, "agent-memory.config.yaml");
   const config = fs.readFileSync(configPath, "utf8");
   fs.writeFileSync(configPath, config.replace("    path: docs/agent-memory/AGENT_SKILL.md", `    path: ${skillPath}`));
+}
+
+function writeWorkflowArtifact(repoRoot: string, relativePath: string, content: string): void {
+  const target = path.join(repoRoot, relativePath);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, content);
 }
 
 function quietStreams(onStderr: (chunk: string) => void) {

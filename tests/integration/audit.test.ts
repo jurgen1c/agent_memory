@@ -319,6 +319,69 @@ describe("audit command", () => {
     expect(result.stdout).toContain("graph.active_conflict_unreviewed");
   });
 
+  test("fails when a current recipe requires a deprecated claim", async () => {
+    const cwd = copyFixture(mockApp);
+    const claimPath = path.join(cwd, "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md");
+    fs.writeFileSync(claimPath, fs.readFileSync(claimPath, "utf8").replace("status: current", "status: deprecated"));
+
+    const result = await dispatch(["audit", "--changed-files", "docs/agent-memory/recipes/auth/modify_student_oauth.yaml"], { cwd });
+
+    expect(result.exitCode).toBe(6);
+    expect(result.stdout).toContain("recipe.required_claim.inactive");
+    expect(result.stdout).toContain("auth.student_oauth.uid_is_tenant_scoped");
+  });
+
+  test("fails when a current plan stage references a deprecated recipe", async () => {
+    const cwd = copyFixture(mockApp);
+    const planPath = writePlan(cwd, "plans/auth/oauth_change.yaml", {
+      id: "plan_template.auth.oauth_change",
+      recipe: "recipe.auth.modify_student_oauth"
+    });
+    const recipePath = path.join(cwd, "docs/agent-memory/recipes/auth/modify_student_oauth.yaml");
+    fs.writeFileSync(recipePath, fs.readFileSync(recipePath, "utf8").replace("status: current", "status: deprecated"));
+
+    const result = await dispatch(["audit", "--changed-files", planPath], { cwd });
+
+    expect(result.exitCode).toBe(6);
+    expect(result.stdout).toContain("plan.recipe_ref.inactive");
+    expect(result.stdout).toContain("recipe.auth.modify_student_oauth");
+  });
+
+  test("fails when a critical current profile trait applies too broadly", async () => {
+    const cwd = copyFixture(mockApp);
+    const profilePath = writeProfile(cwd, "profiles/review/critical_broad.yaml", {
+      id: "profile_trait.review.critical_broad",
+      priority: "critical",
+      appliesWhen: "always: true"
+    });
+
+    const result = await dispatch(["audit", "--changed-files", profilePath], { cwd });
+
+    expect(result.exitCode).toBe(6);
+    expect(result.stdout).toContain("profile.critical_broad");
+    expect(result.stdout).toContain("profile_trait.review.critical_broad");
+  });
+
+  test("fails when overlapping current profile traits omit conflicts_with", async () => {
+    const cwd = copyFixture(mockApp);
+    const profilePath = writeProfile(cwd, "profiles/review/findings_first.yaml", {
+      id: "profile_trait.review.findings_first",
+      priority: "normal",
+      appliesWhen: "systems:\n    - auth"
+    });
+    writeProfile(cwd, "profiles/review/tutorial_style.yaml", {
+      id: "profile_trait.review.tutorial_style",
+      priority: "normal",
+      appliesWhen: "systems:\n    - auth"
+    });
+
+    const result = await dispatch(["audit", "--changed-files", profilePath], { cwd });
+
+    expect(result.exitCode).toBe(6);
+    expect(result.stdout).toContain("profile.conflict_missing");
+    expect(result.stdout).toContain("profile_trait.review.tutorial_style");
+  });
+
   test("ignores pre-existing unrelated active conflicts", async () => {
     const cwd = copyFixture(mockApp);
     appendGraphEdge(cwd, {
@@ -561,6 +624,46 @@ function appendGraphEdge(cwd: string, edge: { source: string; target: string; re
 `
   );
   return relativePath;
+}
+
+function writePlan(cwd: string, relativeMemoryPath: string, options: { id: string; recipe: string }): string {
+  const relativePath = path.join("docs/agent-memory", relativeMemoryPath);
+  const absolutePath = path.join(cwd, relativePath);
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(
+    absolutePath,
+    `id: ${options.id}
+title: OAuth change
+system: auth
+status: current
+stages:
+  - id: inspect
+    title: Inspect
+    goal: Inspect OAuth behavior.
+    recipe_refs:
+      - ${options.recipe}
+`
+  );
+  return relativePath.replaceAll(path.sep, "/");
+}
+
+function writeProfile(cwd: string, relativeMemoryPath: string, options: { id: string; priority: string; appliesWhen: string }): string {
+  const relativePath = path.join("docs/agent-memory", relativeMemoryPath);
+  const absolutePath = path.join(cwd, relativePath);
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(
+    absolutePath,
+    `id: ${options.id}
+title: ${options.id}
+status: current
+category: review
+priority: ${options.priority}
+applies_when:
+  ${options.appliesWhen}
+snippet: Test profile trait.
+`
+  );
+  return relativePath.replaceAll(path.sep, "/");
 }
 
 function initGitHistory(cwd: string): void {

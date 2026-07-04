@@ -2,7 +2,19 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { buildUiGraphSummary, buildUiMemoryModel, deterministicSystemColor, reviewClaim, type UiClaimSummary, type UiRelation } from "../../packages/core/src/ui_model";
+import {
+  buildUiGraphSummary,
+  buildUiMemoryModel,
+  deterministicSystemColor,
+  getUiPlanRuns,
+  getUiPlans,
+  getUiProfiles,
+  getUiRecipes,
+  reviewClaim,
+  updateUiPlanRunStage,
+  type UiClaimSummary,
+  type UiRelation
+} from "../../packages/core/src/ui_model";
 
 const repoRoot = path.resolve(".");
 const mockApp = path.join(repoRoot, "examples/mock-app");
@@ -37,6 +49,16 @@ describe("UI memory model", () => {
       bidirectional: false
     });
     expect(model.files.children?.some((node) => node.name === "claims")).toBe(true);
+    expect(model.workflowSummary).toMatchObject({
+      recipeCount: 1,
+      planTemplateCount: 0,
+      profileTraitCount: 0,
+      activePlanRunCount: 0,
+      completedPlanRunCount: 0,
+      abandonedPlanRunCount: 0,
+      blockedPlanRunCount: 0,
+      warnings: []
+    });
     expect(model.reviewQueue.length).toBe(0);
     expect(model.health.healthy).toBe(false);
     expect(model.validation.valid).toBe(true);
@@ -106,6 +128,103 @@ describe("UI memory model", () => {
 
     expect(fs.readFileSync(claimPath, "utf8")).toBe(before);
   });
+
+  test("projects workflow artifacts and updates local plan stages", async () => {
+    const cwd = copyFixture(mockApp);
+    writeProfile(cwd);
+    writePlan(cwd);
+    writePlanRun(cwd);
+
+    const model = await buildUiMemoryModel(cwd);
+    const recipes = getUiRecipes(cwd);
+    const plans = getUiPlans(cwd);
+    const profiles = getUiProfiles(cwd);
+    const planRuns = getUiPlanRuns(cwd);
+
+    expect(model.workflowSummary).toMatchObject({
+      recipeCount: 1,
+      planTemplateCount: 1,
+      profileTraitCount: 1,
+      activePlanRunCount: 1
+    });
+    expect(model.files.children?.some((node) => node.name === "plans")).toBe(true);
+    expect(model.files.children?.some((node) => node.name === "profiles")).toBe(true);
+    expect(recipes[0]).toMatchObject({
+      id: "recipe.auth.modify_student_oauth",
+      title: "Modify student OAuth safely",
+      requiredClaims: ["auth.student_oauth.uid_is_tenant_scoped", "tenancy.current_tenant.required_for_student_auth"]
+    });
+    expect(plans[0]).toMatchObject({
+      id: "plan_template.auth.oauth_review",
+      stages: [
+        expect.objectContaining({
+          id: "inspect_current_contract",
+          claimRefs: ["auth.student_oauth.uid_is_tenant_scoped"],
+          recipeRefs: ["recipe.auth.modify_student_oauth"],
+          profileTraits: ["profile_trait.implementer.keep_scope_tight"]
+        })
+      ]
+    });
+    expect(profiles[0]).toMatchObject({
+      id: "profile_trait.implementer.keep_scope_tight",
+      conflictsWith: []
+    });
+    expect(planRuns.runs[0]).toMatchObject({
+      id: "plan_run.20260703.oauth_review",
+      status: "active",
+      currentStage: "inspect_current_contract",
+      path: ".agent-memory/plans/oauth-review.yaml"
+    });
+
+    expect(() =>
+      updateUiPlanRunStage({
+        cwd,
+        id: "plan_run.20260703.oauth_review",
+        stageId: "inspect_current_contract",
+        status: "complete",
+        evidence: ""
+      })
+    ).toThrow("complete-stage requires non-empty --evidence");
+
+    const updated = updateUiPlanRunStage({
+      cwd,
+      id: "plan_run.20260703.oauth_review",
+      stageId: "inspect_current_contract",
+      status: "complete",
+      evidence: "Reviewed tenant-scoped OAuth claims."
+    });
+
+    expect(updated).toMatchObject({
+      id: "plan_run.20260703.oauth_review",
+      status: "complete",
+      stages: [
+        expect.objectContaining({
+          id: "inspect_current_contract",
+          status: "complete",
+          evidence: ["Reviewed tenant-scoped OAuth claims."]
+        })
+      ]
+    });
+  });
+
+  test("reports empty workflow artifacts without warnings", async () => {
+    const cwd = copyFixture(mockApp);
+    fs.rmSync(path.join(cwd, "docs/agent-memory/recipes"), { recursive: true, force: true });
+
+    const model = await buildUiMemoryModel(cwd);
+
+    expect(getUiRecipes(cwd)).toEqual([]);
+    expect(getUiPlans(cwd)).toEqual([]);
+    expect(getUiProfiles(cwd)).toEqual([]);
+    expect(getUiPlanRuns(cwd)).toEqual({ runs: [], warnings: [] });
+    expect(model.workflowSummary).toMatchObject({
+      recipeCount: 0,
+      planTemplateCount: 0,
+      profileTraitCount: 0,
+      activePlanRunCount: 0,
+      warnings: []
+    });
+  });
 });
 
 function copyFixture(source: string): string {
@@ -140,4 +259,91 @@ function relation(id: string, source: string, target: string, bidirectional: boo
     origin: "explicit",
     bidirectional
   };
+}
+
+function writePlan(cwd: string): void {
+  const planPath = path.join(cwd, "docs/agent-memory/plans/auth/oauth_review.yaml");
+  fs.mkdirSync(path.dirname(planPath), { recursive: true });
+  fs.writeFileSync(
+    planPath,
+    `id: plan_template.auth.oauth_review
+title: OAuth review
+system: auth
+status: current
+intent_triggers:
+  - review oauth change
+recipes:
+  - recipe.auth.modify_student_oauth
+stages:
+  - id: inspect_current_contract
+    title: Inspect current contract
+    goal: Review current OAuth and tenancy behavior.
+    claim_refs:
+      - auth.student_oauth.uid_is_tenant_scoped
+    recipe_refs:
+      - recipe.auth.modify_student_oauth
+    profile_traits:
+      - profile_trait.implementer.keep_scope_tight
+    source_files:
+      - src/auth.js
+    verification:
+      - bun test
+    done_when:
+      - Current behavior is understood.
+`
+  );
+}
+
+function writeProfile(cwd: string): void {
+  const profilePath = path.join(cwd, "docs/agent-memory/profiles/implementer/keep_scope_tight.yaml");
+  fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+  fs.writeFileSync(
+    profilePath,
+    `id: profile_trait.implementer.keep_scope_tight
+title: Keep scope tight
+status: current
+category: scope_control
+priority: normal
+applies_when:
+  systems:
+    - auth
+snippet: Keep implementation scope tied to selected claims.
+conflicts_with: []
+`
+  );
+}
+
+function writePlanRun(cwd: string): void {
+  const runPath = path.join(cwd, ".agent-memory/plans/oauth-review.yaml");
+  fs.mkdirSync(path.dirname(runPath), { recursive: true });
+  fs.writeFileSync(
+    runPath,
+    `id: plan_run.20260703.oauth_review
+template_id: plan_template.auth.oauth_review
+task: Review OAuth change
+created_at: 2026-07-03T00:00:00.000Z
+updated_at: 2026-07-03T00:00:00.000Z
+status: active
+current_stage: inspect_current_contract
+stages:
+  - id: inspect_current_contract
+    title: Inspect current contract
+    goal: Review current OAuth and tenancy behavior.
+    status: active
+    claim_refs:
+      - auth.student_oauth.uid_is_tenant_scoped
+    recipe_refs:
+      - recipe.auth.modify_student_oauth
+    profile_traits:
+      - profile_trait.implementer.keep_scope_tight
+    source_files:
+      - src/auth.js
+    verification:
+      - bun test
+    done_when:
+      - Current behavior is understood.
+    memory_updates: []
+    evidence: []
+`
+  );
 }
