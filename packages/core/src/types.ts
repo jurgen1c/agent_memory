@@ -103,10 +103,12 @@ export interface PlanRun {
 
 export interface PlanRunStage {
   id: string;
-  status: "pending" | "active" | "blocked" | "complete" | "skipped";
+  status: "pending" | "active" | "blocked" | "complete" | "skipped" | "abandoned";
   started_at?: string;
   completed_at?: string;
+  blocked_at?: string;
   evidence?: string[];
+  reason?: string;
 }
 
 export interface ProfileTrait {
@@ -122,11 +124,25 @@ export interface ProfileTrait {
 }
 
 export interface ProfileTraitAppliesWhen {
+  aliases?: string[];
+  profile_aliases?: string[];
+  profiles?: string[];
+  intents?: string[];
+  task_intents?: string[];
   task_triggers?: string[];
   systems?: string[];
   changed_files?: string[];
+  file_globs?: string[];
+  files?: string[];
   recipes?: string[];
+  recipe_ids?: string[];
+  plans?: string[];
+  plan_ids?: string[];
+  plan_template_ids?: string[];
+  stages?: string[];
   plan_stages?: string[];
+  claim_types?: string[];
+  risk_signals?: string[];
   tags?: string[];
   metadata?: Record<string, unknown>;
 }

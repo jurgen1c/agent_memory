@@ -172,6 +172,37 @@ describe("plans command", () => {
     expect(fs.existsSync(JSON.parse(created.stdout).path)).toBe(true);
   });
 
+  test("abandons blocked runs with pending stages", async () => {
+    const cwd = await compiledMockAppWithPlan();
+    const created = await dispatch(
+      ["plans", "new", "--template", "plan_template.auth.oauth_change", "--task", "change student oauth provider", "--json"],
+      { cwd }
+    );
+    const run = JSON.parse(created.stdout).run;
+
+    await dispatch(["plans", "block-stage", run.id, "--stage", "inspect", "--reason", "Waiting on identity provider"], { cwd });
+
+    const rejected = await runCli(
+      ["plans", "finish", run.id, "--confirm-unresolved"],
+      {
+        stdout: { write: () => true },
+        stderr: { write: () => true }
+      },
+      { cwd }
+    );
+    expect(rejected).toBe(1);
+
+    const archived = await dispatch(["plans", "finish", run.id, "--abandon-blocked", "--archive", "--confirm-unresolved", "--json"], { cwd });
+    const archivedJson = JSON.parse(archived.stdout);
+    const archivedYaml = fs.readFileSync(archivedJson.archivePath, "utf8");
+
+    expect(archived.exitCode).toBe(0);
+    expect(archivedJson.status).toBe("archived");
+    expect(archivedYaml).toContain("status: abandoned");
+    expect(archivedYaml).toContain('reason: "Waiting on identity provider"');
+    expect(archivedYaml).not.toContain("status: pending");
+  });
+
   test("archives, prunes, and promotes completed runs intentionally", async () => {
     const cwd = await compiledMockAppWithPlan();
     const created = await dispatch(
@@ -197,6 +228,27 @@ describe("plans command", () => {
     const pruneJson = JSON.parse(prune.stdout);
     expect(prune.exitCode).toBe(0);
     expect(pruneJson.paths).toEqual([archivedJson.archivePath]);
+  });
+
+  test("promote requires a plan ID", async () => {
+    const cwd = await compiledMockAppWithPlan();
+    let stderr = "";
+    const exitCode = await runCli(
+      ["plans", "promote", "--to-template"],
+      {
+        stdout: { write: () => true },
+        stderr: {
+          write: (chunk: string) => {
+            stderr += chunk;
+            return true;
+          }
+        }
+      },
+      { cwd }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("plans promote requires a plan ID");
   });
 
   test("context reports missing plan stages", async () => {

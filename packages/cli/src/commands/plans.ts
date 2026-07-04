@@ -303,6 +303,9 @@ function parsePruneArgs(args: string[], cwd?: string): Parameters<typeof prunePl
 
 function parsePromoteArgs(args: string[], cwd?: string): Parameters<typeof promotePlanRun>[0] & { json: boolean } {
   const [id, ...rest] = args;
+  if (!id || id.startsWith("--")) {
+    throw new AgentMemoryError("plans promote requires a plan ID.");
+  }
   const options: Parameters<typeof promotePlanRun>[0] & { json: boolean } = { cwd, id, json: false };
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];

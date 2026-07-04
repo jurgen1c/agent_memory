@@ -273,12 +273,13 @@ export function finishPlanRun(options: {
   const loaded = loadConfig({ cwd: options.cwd });
   const { run, path: runPath } = loadPlanRun(loaded.repo.root, options.id);
   const unresolved = unresolvedMemoryUpdates(run);
+  const hasBlockedStages = run.stages.some((stage) => stage.status === "blocked");
 
-  if (run.stages.some((stage) => stage.status === "active" || stage.status === "pending")) {
+  if (run.stages.some((stage) => stage.status === "active" || stage.status === "pending") && !(options.abandonBlocked && hasBlockedStages)) {
     throw new AgentMemoryError("Cannot finish plan run while stages are active or pending.");
   }
 
-  if (run.stages.some((stage) => stage.status === "blocked") && !options.abandonBlocked) {
+  if (hasBlockedStages && !options.abandonBlocked) {
     throw new AgentMemoryError("Cannot finish plan run with blocked stages unless --abandon-blocked is passed.");
   }
 
@@ -293,6 +294,9 @@ export function finishPlanRun(options: {
     fs.mkdirSync(archiveDir, { recursive: true });
     const archivePath = path.join(archiveDir, path.basename(runPath));
     const now = new Date().toISOString();
+    if (options.abandonBlocked) {
+      abandonIncompleteStages(run, now, options.reason);
+    }
     run.status = options.abandonBlocked ? "abandoned" : "complete";
     run.updatedAt = now;
     writePlanRunAtomic(loaded.repo.root, runPath, run);
@@ -708,6 +712,17 @@ function ensureTransition(from: PlanRunStageStatus, to: PlanRunStageStatus): voi
   ]);
   if (!allowed.has(`${from}:${to}`)) {
     throw new AgentMemoryError(`Invalid plan stage transition: ${from} -> ${to}`);
+  }
+}
+
+function abandonIncompleteStages(run: PlanRunDetail, now: string, reason?: string): void {
+  for (const stage of run.stages) {
+    if (stage.status !== "active" && stage.status !== "pending" && stage.status !== "blocked") {
+      continue;
+    }
+    stage.status = "abandoned";
+    stage.completedAt = now;
+    stage.reason = reason?.trim() || stage.reason || "Abandoned blocked plan run.";
   }
 }
 
