@@ -230,6 +230,10 @@ interface UiPlanRunStageSummary {
   reason?: string;
 }
 
+interface WorkflowArtifactUpdateResult {
+  validation: ValidationResult;
+}
+
 interface ValidationResult {
   valid: boolean;
   errors: Array<{ message: string; path?: string; id?: string }>;
@@ -513,6 +517,33 @@ export default function App() {
     }
   }
 
+  async function updateWorkflowArtifact(kind: "recipe" | "plan" | "profile", id: string, patch: Record<string, unknown>) {
+    setBusy(true);
+    try {
+      const endpoint =
+        kind === "recipe"
+          ? `/api/workflows/recipes/${encodeURIComponent(id)}`
+          : kind === "plan"
+            ? `/api/workflows/plans/${encodeURIComponent(id)}`
+            : `/api/workflows/profiles/${encodeURIComponent(id)}`;
+      const result = await api<WorkflowArtifactUpdateResult>(endpoint, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-agent-memory-token": token
+        },
+        body: JSON.stringify(patch)
+      });
+      await refresh();
+      await loadWorkflows();
+      setNotice(result.validation.valid ? "Workflow artifact updated." : `Workflow updated with ${result.validation.errors.length} validation errors.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function reviewClaim(id: string, nextStatus: string, nextConfidence: string) {
     setBusy(true);
     try {
@@ -672,6 +703,7 @@ export default function App() {
             busy={busy}
             onRefresh={loadWorkflows}
             onUpdateStage={updatePlanStage}
+            onUpdateArtifact={updateWorkflowArtifact}
           />
         )}
         {mode === "review" && memory && <ReviewView items={memory.reviewQueue} onSelect={selectClaim} onApprove={approveClaim} />}
@@ -924,6 +956,7 @@ function WorkflowView(props: {
   busy: boolean;
   onRefresh(): void;
   onUpdateStage(runId: string, stageId: string, status: "complete" | "blocked", value: string): void;
+  onUpdateArtifact(kind: "recipe" | "plan" | "profile", id: string, patch: Record<string, unknown>): void;
 }) {
   const data = props.data;
   const warnings = [...props.summary.warnings, ...(data?.warnings ?? [])];
@@ -1011,6 +1044,7 @@ function WorkflowView(props: {
             <InlineMeta label="triggers" values={recipe.intentTriggers} />
             <InlineMeta label="claims" values={recipe.requiredClaims} />
             <InlineMeta label="verification" values={recipe.verification} />
+            <RecipeEditor recipe={recipe} busy={props.busy} onUpdate={props.onUpdateArtifact} />
           </article>
         ))}
       </section>
@@ -1044,6 +1078,7 @@ function WorkflowView(props: {
                 </div>
               ))}
             </div>
+            <PlanEditor plan={plan} busy={props.busy} onUpdate={props.onUpdateArtifact} />
           </article>
         ))}
       </section>
@@ -1064,6 +1099,7 @@ function WorkflowView(props: {
             <p>{profile.snippet}</p>
             <InlineMeta label="conflicts" values={profile.conflictsWith} />
             {Object.keys(profile.appliesWhen).length > 0 && <pre>{JSON.stringify(profile.appliesWhen, null, 2)}</pre>}
+            <ProfileEditor profile={profile} busy={props.busy} onUpdate={props.onUpdateArtifact} />
           </article>
         ))}
       </section>
@@ -1128,6 +1164,207 @@ function PlanStageAction(props: {
       )}
     </div>
   );
+}
+
+function RecipeEditor(props: {
+  recipe: UiRecipeSummary;
+  busy: boolean;
+  onUpdate(kind: "recipe", id: string, patch: Record<string, unknown>): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState(props.recipe.title);
+  const [status, setStatus] = useState(props.recipe.status);
+  const [triggers, setTriggers] = useState(props.recipe.intentTriggers.join("\n"));
+
+  useEffect(() => {
+    setTitle(props.recipe.title);
+    setStatus(props.recipe.status);
+    setTriggers(props.recipe.intentTriggers.join("\n"));
+  }, [props.recipe]);
+
+  if (!open) {
+    return <button onClick={() => setOpen(true)}>Edit</button>;
+  }
+
+  return (
+    <div className="workflow-edit">
+      <label>
+        <span>Title</span>
+        <input value={title} onChange={(event) => setTitle(event.target.value)} />
+      </label>
+      <label>
+        <span>Status</span>
+        <select value={status} onChange={(event) => setStatus(event.target.value)}>
+          {workflowStatuses.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>Intent Triggers</span>
+        <textarea value={triggers} onChange={(event) => setTriggers(event.target.value)} />
+      </label>
+      <div className="button-row">
+        <button onClick={() => props.onUpdate("recipe", props.recipe.id, { title, status, intent_triggers: lines(triggers) })} disabled={props.busy}>
+          Save
+        </button>
+        <button onClick={() => setOpen(false)} disabled={props.busy}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PlanEditor(props: {
+  plan: UiPlanTemplateSummary;
+  busy: boolean;
+  onUpdate(kind: "plan", id: string, patch: Record<string, unknown>): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState(props.plan.title);
+  const [status, setStatus] = useState(props.plan.status);
+  const [triggers, setTriggers] = useState(props.plan.intentTriggers.join("\n"));
+  const [stages, setStages] = useState(props.plan.stages.map((stage) => ({ id: stage.id, title: stage.title, goal: stage.goal })));
+
+  useEffect(() => {
+    setTitle(props.plan.title);
+    setStatus(props.plan.status);
+    setTriggers(props.plan.intentTriggers.join("\n"));
+    setStages(props.plan.stages.map((stage) => ({ id: stage.id, title: stage.title, goal: stage.goal })));
+  }, [props.plan]);
+
+  if (!open) {
+    return <button onClick={() => setOpen(true)}>Edit</button>;
+  }
+
+  return (
+    <div className="workflow-edit">
+      <label>
+        <span>Title</span>
+        <input value={title} onChange={(event) => setTitle(event.target.value)} />
+      </label>
+      <label>
+        <span>Status</span>
+        <select value={status} onChange={(event) => setStatus(event.target.value)}>
+          {workflowStatuses.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>Intent Triggers</span>
+        <textarea value={triggers} onChange={(event) => setTriggers(event.target.value)} />
+      </label>
+      {stages.map((stage, index) => (
+        <div className="workflow-edit-stage" key={stage.id}>
+          <strong>{stage.id}</strong>
+          <input value={stage.title} onChange={(event) => setStages(replaceStage(stages, index, { title: event.target.value }))} />
+          <textarea value={stage.goal} onChange={(event) => setStages(replaceStage(stages, index, { goal: event.target.value }))} />
+        </div>
+      ))}
+      <div className="button-row">
+        <button onClick={() => props.onUpdate("plan", props.plan.id, { title, status, intent_triggers: lines(triggers), stages })} disabled={props.busy}>
+          Save
+        </button>
+        <button onClick={() => setOpen(false)} disabled={props.busy}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ProfileEditor(props: {
+  profile: UiProfileTraitSummary;
+  busy: boolean;
+  onUpdate(kind: "profile", id: string, patch: Record<string, unknown>): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState(props.profile.title);
+  const [status, setStatus] = useState(props.profile.status);
+  const [priority, setPriority] = useState(props.profile.priority);
+  const [snippet, setSnippet] = useState(props.profile.snippet);
+  const [conflicts, setConflicts] = useState(props.profile.conflictsWith.join("\n"));
+
+  useEffect(() => {
+    setTitle(props.profile.title);
+    setStatus(props.profile.status);
+    setPriority(props.profile.priority);
+    setSnippet(props.profile.snippet);
+    setConflicts(props.profile.conflictsWith.join("\n"));
+  }, [props.profile]);
+
+  if (!open) {
+    return <button onClick={() => setOpen(true)}>Edit</button>;
+  }
+
+  return (
+    <div className="workflow-edit">
+      <label>
+        <span>Title</span>
+        <input value={title} onChange={(event) => setTitle(event.target.value)} />
+      </label>
+      <label>
+        <span>Status</span>
+        <select value={status} onChange={(event) => setStatus(event.target.value)}>
+          {workflowStatuses.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>Priority</span>
+        <select value={priority} onChange={(event) => setPriority(event.target.value)}>
+          {profilePriorities.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>Snippet</span>
+        <textarea value={snippet} onChange={(event) => setSnippet(event.target.value)} />
+      </label>
+      <label>
+        <span>Conflicts With</span>
+        <textarea value={conflicts} onChange={(event) => setConflicts(event.target.value)} />
+      </label>
+      <div className="button-row">
+        <button onClick={() => props.onUpdate("profile", props.profile.id, { title, status, priority, snippet, conflicts_with: lines(conflicts) })} disabled={props.busy}>
+          Save
+        </button>
+        <button onClick={() => setOpen(false)} disabled={props.busy}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const workflowStatuses = ["current", "proposed", "needs_review", "deprecated", "stale", "rejected"];
+const profilePriorities = ["low", "normal", "high", "critical"];
+
+function lines(value: string): string[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+function replaceStage(
+  stages: Array<{ id: string; title: string; goal: string }>,
+  index: number,
+  patch: Partial<{ title: string; goal: string }>
+): Array<{ id: string; title: string; goal: string }> {
+  return stages.map((stage, candidateIndex) => (candidateIndex === index ? { ...stage, ...patch } : stage));
 }
 
 function ClaimDrawer(props: {

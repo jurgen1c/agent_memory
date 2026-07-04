@@ -12,6 +12,7 @@ import {
   getUiRecipes,
   reviewClaim,
   updateUiPlanRunStage,
+  updateUiWorkflowArtifact,
   type UiClaimSummary,
   type UiRelation
 } from "../../packages/core/src/ui_model";
@@ -223,6 +224,59 @@ describe("UI memory model", () => {
       profileTraitCount: 0,
       activePlanRunCount: 0,
       warnings: []
+    });
+  });
+
+  test("updates workflow artifacts with structured patches", async () => {
+    const cwd = copyFixture(mockApp);
+    writeProfile(cwd);
+    writePlan(cwd);
+
+    const recipe = updateUiWorkflowArtifact({
+      cwd,
+      kind: "recipe",
+      id: "recipe.auth.modify_student_oauth",
+      patch: {
+        title: "Modify student OAuth with tenant checks",
+        status: "needs_review",
+        intent_triggers: ["student oauth tenant checks"]
+      }
+    });
+    const plan = updateUiWorkflowArtifact({
+      cwd,
+      kind: "plan",
+      id: "plan_template.auth.oauth_review",
+      patch: {
+        title: "OAuth review plan",
+        stages: [{ id: "inspect_current_contract", goal: "Review OAuth tenant behavior before editing." }]
+      }
+    });
+    const profile = updateUiWorkflowArtifact({
+      cwd,
+      kind: "profile",
+      id: "profile_trait.implementer.keep_scope_tight",
+      patch: {
+        priority: "high",
+        snippet: "Keep scope tied to selected auth claims.",
+        conflicts_with: []
+      }
+    });
+
+    expect(recipe.validation.valid).toBe(true);
+    expect(recipe.artifact).toMatchObject({
+      title: "Modify student OAuth with tenant checks",
+      status: "needs_review",
+      intentTriggers: ["student oauth tenant checks"]
+    });
+    expect(plan.validation.valid).toBe(true);
+    expect(plan.artifact).toMatchObject({
+      title: "OAuth review plan",
+      stages: [expect.objectContaining({ goal: "Review OAuth tenant behavior before editing." })]
+    });
+    expect(profile.validation.valid).toBe(true);
+    expect(profile.artifact).toMatchObject({
+      priority: "high",
+      snippet: "Keep scope tied to selected auth claims."
     });
   });
 });

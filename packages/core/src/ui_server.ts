@@ -14,7 +14,8 @@ import {
   getUiSystemGraph,
   reviewClaim,
   syncUiMemory,
-  updateUiPlanRunStage
+  updateUiPlanRunStage,
+  updateUiWorkflowArtifact
 } from "./ui_model";
 
 export interface UiServerOptions {
@@ -166,6 +167,24 @@ async function handleBunRequest(
       return jsonResponse(200, getUiPlanRuns(context.cwd));
     }
 
+    if (url.pathname.startsWith("/api/workflows/recipes/") && request.method === "PATCH") {
+      requireTokenValue(request.headers.get("x-agent-memory-token"), context.token);
+      const id = decodeURIComponent(url.pathname.slice("/api/workflows/recipes/".length));
+      return jsonResponse(200, updateUiWorkflowArtifact({ cwd: context.cwd, kind: "recipe", id, patch: await readRequestJson<Record<string, unknown>>(request) }));
+    }
+
+    if (url.pathname.startsWith("/api/workflows/plans/") && request.method === "PATCH") {
+      requireTokenValue(request.headers.get("x-agent-memory-token"), context.token);
+      const id = decodeURIComponent(url.pathname.slice("/api/workflows/plans/".length));
+      return jsonResponse(200, updateUiWorkflowArtifact({ cwd: context.cwd, kind: "plan", id, patch: await readRequestJson<Record<string, unknown>>(request) }));
+    }
+
+    if (url.pathname.startsWith("/api/workflows/profiles/") && request.method === "PATCH") {
+      requireTokenValue(request.headers.get("x-agent-memory-token"), context.token);
+      const id = decodeURIComponent(url.pathname.slice("/api/workflows/profiles/".length));
+      return jsonResponse(200, updateUiWorkflowArtifact({ cwd: context.cwd, kind: "profile", id, patch: await readRequestJson<Record<string, unknown>>(request) }));
+    }
+
     if (url.pathname.startsWith("/api/workflows/plan-runs/") && url.pathname.includes("/stages/") && request.method === "PATCH") {
       requireTokenValue(request.headers.get("x-agent-memory-token"), context.token);
       const match = /^\/api\/workflows\/plan-runs\/([^/]+)\/stages\/([^/]+)$/.exec(url.pathname);
@@ -255,6 +274,24 @@ async function handleRequest(
 
     if (url.pathname === "/api/workflows/plan-runs" && request.method === "GET") {
       return sendJson(response, 200, getUiPlanRuns(context.cwd));
+    }
+
+    if (url.pathname.startsWith("/api/workflows/recipes/") && request.method === "PATCH") {
+      requireToken(request, context.token);
+      const id = decodeURIComponent(url.pathname.slice("/api/workflows/recipes/".length));
+      return sendJson(response, 200, updateUiWorkflowArtifact({ cwd: context.cwd, kind: "recipe", id, patch: await readJson<Record<string, unknown>>(request) }));
+    }
+
+    if (url.pathname.startsWith("/api/workflows/plans/") && request.method === "PATCH") {
+      requireToken(request, context.token);
+      const id = decodeURIComponent(url.pathname.slice("/api/workflows/plans/".length));
+      return sendJson(response, 200, updateUiWorkflowArtifact({ cwd: context.cwd, kind: "plan", id, patch: await readJson<Record<string, unknown>>(request) }));
+    }
+
+    if (url.pathname.startsWith("/api/workflows/profiles/") && request.method === "PATCH") {
+      requireToken(request, context.token);
+      const id = decodeURIComponent(url.pathname.slice("/api/workflows/profiles/".length));
+      return sendJson(response, 200, updateUiWorkflowArtifact({ cwd: context.cwd, kind: "profile", id, patch: await readJson<Record<string, unknown>>(request) }));
     }
 
     if (url.pathname.startsWith("/api/workflows/plan-runs/") && url.pathname.includes("/stages/") && request.method === "PATCH") {

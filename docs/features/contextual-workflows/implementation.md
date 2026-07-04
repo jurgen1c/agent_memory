@@ -1206,6 +1206,9 @@ Do not implement these in the first pass:
 
 These can be revisited after deterministic CLI behavior is useful.
 
+Expanded notes for these deferred ideas live in
+[future-improvements.md](./future-improvements.md).
+
 ## Command Summary
 
 New command groups:

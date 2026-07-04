@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { compileMemory, type CompileResult } from "./compiler";
-import { loadConfig } from "./config";
+import { loadConfig, renderYamlScalar } from "./config";
 import { doctorMemory, type DoctorResult } from "./doctor";
 import { AgentMemoryError, NotFoundError } from "./errors";
 import { discoverCanonicalMemoryFiles, resolveConfiguredPath, toPosix } from "./files";
@@ -272,6 +272,18 @@ export interface UpdateUiPlanRunStageOptions {
   reason?: string;
 }
 
+export interface UpdateUiWorkflowArtifactOptions {
+  cwd?: string;
+  kind: "recipe" | "plan" | "profile";
+  id: string;
+  patch: Record<string, unknown>;
+}
+
+export interface UpdateUiWorkflowArtifactResult {
+  artifact: UiRecipeSummary | UiPlanTemplateSummary | UiProfileTraitSummary;
+  validation: ValidationResult;
+}
+
 export async function buildUiMemoryModel(cwd?: string): Promise<UiMemoryModel> {
   const loaded = loadConfig({ cwd });
   const memory = loadMemory(cwd);
@@ -354,6 +366,49 @@ export function updateUiPlanRunStage(options: UpdateUiPlanRunStageOptions): UiPl
 
     throw error;
   }
+}
+
+export function updateUiWorkflowArtifact(options: UpdateUiWorkflowArtifactOptions): UpdateUiWorkflowArtifactResult {
+  const loaded = loadConfig({ cwd: options.cwd });
+  const memoryRoot = resolveConfiguredPath(loaded.repo.root, loaded.config.memory_root);
+  const memory = loadMemory(options.cwd);
+
+  if (options.kind === "recipe") {
+    const recipe = memory.recipes.find((candidate) => candidate.id === options.id);
+    if (!recipe) {
+      throw new NotFoundError(`Recipe not found: ${options.id}`);
+    }
+
+    updateYamlFile(path.join(memoryRoot, recipe.sourcePath), recipePatchOperations(options.patch));
+    return {
+      artifact: toUiRecipeSummary(loadMemory(options.cwd).recipes.find((candidate) => candidate.id === options.id) ?? recipe),
+      validation: validateRepository({ cwd: options.cwd })
+    };
+  }
+
+  if (options.kind === "plan") {
+    const plan = memory.plans.find((candidate) => candidate.id === options.id);
+    if (!plan) {
+      throw new NotFoundError(`Plan template not found: ${options.id}`);
+    }
+
+    updateYamlFile(path.join(memoryRoot, plan.sourcePath), planPatchOperations(options.patch));
+    return {
+      artifact: toUiPlanTemplateSummary(loadMemory(options.cwd).plans.find((candidate) => candidate.id === options.id) ?? plan),
+      validation: validateRepository({ cwd: options.cwd })
+    };
+  }
+
+  const profile = memory.profiles.find((candidate) => candidate.id === options.id);
+  if (!profile) {
+    throw new NotFoundError(`Profile trait not found: ${options.id}`);
+  }
+
+  updateYamlFile(path.join(memoryRoot, profile.sourcePath), profilePatchOperations(options.patch));
+  return {
+    artifact: toUiProfileTraitSummary(loadMemory(options.cwd).profiles.find((candidate) => candidate.id === options.id) ?? profile),
+    validation: validateRepository({ cwd: options.cwd })
+  };
 }
 
 export function getUiClaimDetail(cwd: string | undefined, id: string): UiClaimDetail {
@@ -1085,6 +1140,231 @@ function sortFileTree(node: UiFileNode): void {
   for (const child of node.children ?? []) {
     sortFileTree(child);
   }
+}
+
+type YamlPatchOperation =
+  | { type: "scalar"; key: string; value: string }
+  | { type: "array"; key: string; values: string[] }
+  | { type: "planStages"; stages: Array<{ id: string; title?: string; goal?: string }> };
+
+function recipePatchOperations(patch: Record<string, unknown>): YamlPatchOperation[] {
+  return allowedWorkflowOperations(patch, {
+    scalars: ["title", "status"],
+    arrays: ["intent_triggers"]
+  });
+}
+
+function planPatchOperations(patch: Record<string, unknown>): YamlPatchOperation[] {
+  const operations = allowedWorkflowOperations(patch, {
+    scalars: ["title", "status"],
+    arrays: ["intent_triggers"]
+  });
+  const stages = readPatchStages(patch);
+
+  if (stages.length > 0) {
+    operations.push({ type: "planStages", stages });
+  }
+
+  return operations;
+}
+
+function profilePatchOperations(patch: Record<string, unknown>): YamlPatchOperation[] {
+  return allowedWorkflowOperations(patch, {
+    scalars: ["title", "status", "priority", "snippet"],
+    arrays: ["conflicts_with"]
+  });
+}
+
+function allowedWorkflowOperations(
+  patch: Record<string, unknown>,
+  options: { scalars: string[]; arrays: string[] }
+): YamlPatchOperation[] {
+  const operations: YamlPatchOperation[] = [];
+
+  for (const key of options.scalars) {
+    if (patch[key] !== undefined) {
+      operations.push({ type: "scalar", key, value: readPatchString(patch[key], key) });
+    }
+  }
+
+  for (const key of options.arrays) {
+    if (patch[key] !== undefined) {
+      operations.push({ type: "array", key, values: readPatchStringArray(patch[key], key) });
+    }
+  }
+
+  return operations;
+}
+
+function readPatchStages(patch: Record<string, unknown>): Array<{ id: string; title?: string; goal?: string }> {
+  const value = patch.stages;
+
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new AgentMemoryError("Workflow patch field stages must be an array.", { code: "BAD_REQUEST" });
+  }
+
+  return value.map((item) => {
+    const record = readRecord(item);
+    const id = readPatchString(record.id, "stages.id");
+    const stage: { id: string; title?: string; goal?: string } = { id };
+
+    if (record.title !== undefined) {
+      stage.title = readPatchString(record.title, "stages.title");
+    }
+
+    if (record.goal !== undefined) {
+      stage.goal = readPatchString(record.goal, "stages.goal");
+    }
+
+    return stage;
+  });
+}
+
+function readPatchString(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new AgentMemoryError(`Workflow patch field ${field} must be a string.`, { code: "BAD_REQUEST" });
+  }
+
+  return value.trim();
+}
+
+function readPatchStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw new AgentMemoryError(`Workflow patch field ${field} must be a string array.`, { code: "BAD_REQUEST" });
+  }
+
+  return value.map((item) => item.trim()).filter((item) => item.length > 0);
+}
+
+function updateYamlFile(filePath: string, operations: YamlPatchOperation[]): void {
+  if (operations.length === 0) {
+    throw new AgentMemoryError("Workflow patch did not include editable fields.", { code: "BAD_REQUEST" });
+  }
+
+  let content = fs.readFileSync(filePath, "utf8");
+
+  for (const operation of operations) {
+    if (operation.type === "scalar") {
+      content = replaceTopLevelScalar(content, operation.key, operation.value);
+    } else if (operation.type === "array") {
+      content = replaceTopLevelArray(content, operation.key, operation.values);
+    } else {
+      content = replacePlanStages(content, operation.stages);
+    }
+  }
+
+  fs.writeFileSync(filePath, content.endsWith("\n") ? content : `${content}\n`);
+}
+
+function replaceTopLevelScalar(content: string, key: string, value: string): string {
+  const lines = content.split("\n");
+  const rendered = `${key}: ${renderYamlScalar(value)}`;
+  const index = lines.findIndex((line) => line.startsWith(`${key}:`));
+
+  if (index >= 0) {
+    lines[index] = rendered;
+    return lines.join("\n");
+  }
+
+  lines.push(rendered);
+  return lines.join("\n");
+}
+
+function replaceTopLevelArray(content: string, key: string, values: string[]): string {
+  const lines = content.split("\n");
+  const index = lines.findIndex((line) => line.startsWith(`${key}:`));
+  const rendered = renderYamlArrayField(key, values, 0);
+
+  if (index < 0) {
+    lines.push(rendered);
+    return lines.join("\n");
+  }
+
+  const end = nextTopLevelIndex(lines, index + 1);
+  lines.splice(index, end - index, rendered);
+  return lines.join("\n");
+}
+
+function replacePlanStages(content: string, stages: Array<{ id: string; title?: string; goal?: string }>): string {
+  const lines = content.split("\n");
+  const stagePatches = new Map(stages.map((stage) => [stage.id, stage]));
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^  - id: (.+)$/.exec(lines[index]);
+
+    if (!match) {
+      continue;
+    }
+
+    const stageId = unquoteYamlScalar(match[1].trim());
+    const patch = stagePatches.get(stageId);
+
+    if (!patch) {
+      continue;
+    }
+
+    const end = nextStageIndex(lines, index + 1);
+    replaceIndentedScalar(lines, index + 1, end, "title", patch.title, 4);
+    replaceIndentedScalar(lines, index + 1, end, "goal", patch.goal, 4);
+  }
+
+  return lines.join("\n");
+}
+
+function replaceIndentedScalar(lines: string[], start: number, end: number, key: string, value: string | undefined, indent: number): void {
+  if (value === undefined) {
+    return;
+  }
+
+  const prefix = `${" ".repeat(indent)}${key}:`;
+  const index = lines.slice(start, end).findIndex((line) => line.startsWith(prefix));
+  const rendered = `${" ".repeat(indent)}${key}: ${renderYamlScalar(value)}`;
+
+  if (index >= 0) {
+    lines[start + index] = rendered;
+  }
+}
+
+function nextTopLevelIndex(lines: string[], start: number): number {
+  for (let index = start; index < lines.length; index += 1) {
+    if (/^[A-Za-z0-9_./-]+:/.test(lines[index])) {
+      return index;
+    }
+  }
+
+  return lines.length;
+}
+
+function nextStageIndex(lines: string[], start: number): number {
+  for (let index = start; index < lines.length; index += 1) {
+    if (/^  - id: /.test(lines[index])) {
+      return index;
+    }
+  }
+
+  return lines.length;
+}
+
+function renderYamlArrayField(key: string, values: string[], indent: number): string {
+  const prefix = " ".repeat(indent);
+
+  if (values.length === 0) {
+    return `${prefix}${key}: []`;
+  }
+
+  return `${prefix}${key}:\n${values.map((value) => `${prefix}  - ${renderYamlScalar(value)}`).join("\n")}`;
+}
+
+function unquoteYamlScalar(value: string): string {
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+
+  return value;
 }
 
 function walkYamlFiles(root: string): string[] {

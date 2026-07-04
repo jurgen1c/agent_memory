@@ -125,6 +125,75 @@ describe("UI server", () => {
     }
   });
 
+  test("requires token and updates workflow artifacts through structured patches", async () => {
+    const cwd = copyFixture(mockApp);
+    writePlan(cwd);
+    writeProfile(cwd);
+    const staticRoot = makeStaticRoot();
+    const server = await startUiServer({ cwd, port: 0, staticRoot, token: "test-token" });
+
+    try {
+      const denied = await fetch(`${baseUrl(server.port)}/api/workflows/recipes/recipe.auth.modify_student_oauth`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "needs_review" })
+      });
+      expect(denied.status).toBe(403);
+
+      const invalid = await fetch(`${baseUrl(server.port)}/api/workflows/recipes/recipe.auth.modify_student_oauth`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-agent-memory-token": "test-token"
+        },
+        body: JSON.stringify({ intent_triggers: "not an array" })
+      });
+      const invalidBody = (await invalid.json()) as { code: string };
+      expect(invalid.status).toBe(400);
+      expect(invalidBody.code).toBe("BAD_REQUEST");
+
+      const recipe = await fetch(`${baseUrl(server.port)}/api/workflows/recipes/recipe.auth.modify_student_oauth`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-agent-memory-token": "test-token"
+        },
+        body: JSON.stringify({ title: "Modify student OAuth with tenant checks", status: "needs_review" })
+      });
+      const recipeBody = (await recipe.json()) as { artifact: { title: string; status: string }; validation: { valid: boolean } };
+      expect(recipe.status).toBe(200);
+      expect(recipeBody.validation.valid).toBe(true);
+      expect(recipeBody.artifact).toMatchObject({
+        title: "Modify student OAuth with tenant checks",
+        status: "needs_review"
+      });
+
+      const plan = await fetch(`${baseUrl(server.port)}/api/workflows/plans/plan_template.auth.oauth_review`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-agent-memory-token": "test-token"
+        },
+        body: JSON.stringify({ stages: [{ id: "inspect_current_contract", goal: "Review OAuth tenant behavior before editing." }] })
+      });
+      expect(plan.status).toBe(200);
+
+      const profile = await fetch(`${baseUrl(server.port)}/api/workflows/profiles/profile_trait.implementer.keep_scope_tight`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-agent-memory-token": "test-token"
+        },
+        body: JSON.stringify({ priority: "high", snippet: "Keep scope tied to selected auth claims." })
+      });
+      expect(profile.status).toBe(200);
+      expect(fs.readFileSync(path.join(cwd, "docs/agent-memory/plans/auth/oauth_review.yaml"), "utf8")).toContain("Review OAuth tenant behavior before editing.");
+      expect(fs.readFileSync(path.join(cwd, "docs/agent-memory/profiles/implementer/keep_scope_tight.yaml"), "utf8")).toContain("priority: high");
+    } finally {
+      await server.close();
+    }
+  });
+
   test("serves claim details with relations and related claims", async () => {
     const cwd = copyFixture(mockApp);
     const staticRoot = makeStaticRoot();
@@ -404,6 +473,54 @@ stages:
       - Current behavior is understood.
     memory_updates: []
     evidence: []
+`
+  );
+}
+
+function writePlan(cwd: string): void {
+  const planPath = path.join(cwd, "docs/agent-memory/plans/auth/oauth_review.yaml");
+  fs.mkdirSync(path.dirname(planPath), { recursive: true });
+  fs.writeFileSync(
+    planPath,
+    `id: plan_template.auth.oauth_review
+title: OAuth review
+system: auth
+status: current
+stages:
+  - id: inspect_current_contract
+    title: Inspect current contract
+    goal: Review current OAuth and tenancy behavior.
+    claim_refs:
+      - auth.student_oauth.uid_is_tenant_scoped
+    recipe_refs:
+      - recipe.auth.modify_student_oauth
+    profile_traits:
+      - profile_trait.implementer.keep_scope_tight
+    source_files:
+      - src/auth.js
+    verification:
+      - bun test
+    done_when:
+      - Current behavior is understood.
+`
+  );
+}
+
+function writeProfile(cwd: string): void {
+  const profilePath = path.join(cwd, "docs/agent-memory/profiles/implementer/keep_scope_tight.yaml");
+  fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+  fs.writeFileSync(
+    profilePath,
+    `id: profile_trait.implementer.keep_scope_tight
+title: Keep scope tight
+status: current
+category: scope_control
+priority: normal
+applies_when:
+  systems:
+    - auth
+snippet: Keep implementation scope tied to selected claims.
+conflicts_with: []
 `
   );
 }

@@ -465,6 +465,38 @@ textarea {
   flex-shrink: 0;
 }
 
+.workflow-edit,
+.workflow-edit-stage {
+  display: grid;
+  gap: 8px;
+}
+
+.workflow-edit {
+  padding: 10px;
+  border: 1px solid #d7dee8;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.workflow-edit label {
+  display: grid;
+  gap: 5px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.workflow-edit-stage {
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.workflow-edit-stage strong {
+  color: #334155;
+  font-size: 12px;
+}
+
 .inline-meta {
   font-size: 12px;
 }
