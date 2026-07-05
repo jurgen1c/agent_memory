@@ -307,10 +307,11 @@ function parsePromoteArgs(args: string[], cwd?: string): Parameters<typeof promo
     throw new AgentMemoryError("plans promote requires a plan ID.");
   }
   const options: Parameters<typeof promotePlanRun>[0] & { json: boolean } = { cwd, id, json: false };
+  let toTemplate = false;
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     if (arg === "--json") options.json = true;
-    else if (arg === "--to-template") continue;
+    else if (arg === "--to-template") toTemplate = true;
     else if (arg === "--finish-after-promote") options.finishAfterPromote = true;
     else if (arg === "--system") {
       options.system = readValue(rest, index, "--system");
@@ -319,6 +320,9 @@ function parsePromoteArgs(args: string[], cwd?: string): Parameters<typeof promo
       options.title = readValue(rest, index, "--title");
       index += 1;
     } else throw new AgentMemoryError(`Unknown promote option: ${arg}`);
+  }
+  if (!toTemplate) {
+    throw new AgentMemoryError("plans promote requires --to-template.");
   }
   return options;
 }

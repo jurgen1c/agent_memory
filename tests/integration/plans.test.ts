@@ -251,6 +251,32 @@ describe("plans command", () => {
     expect(stderr).toContain("plans promote requires a plan ID");
   });
 
+  test("promote requires explicit template promotion confirmation", async () => {
+    const cwd = await compiledMockAppWithPlan();
+    const created = await dispatch(
+      ["plans", "new", "--template", "plan_template.auth.oauth_change", "--task", "change student oauth provider", "--json"],
+      { cwd }
+    );
+    const run = JSON.parse(created.stdout).run;
+    let stderr = "";
+    const exitCode = await runCli(
+      ["plans", "promote", run.id, "--title", "Reusable OAuth plan", "--system", "auth"],
+      {
+        stdout: { write: () => true },
+        stderr: {
+          write: (chunk: string) => {
+            stderr += chunk;
+            return true;
+          }
+        }
+      },
+      { cwd }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("plans promote requires --to-template");
+  });
+
   test("context reports missing plan stages", async () => {
     const cwd = await compiledMockAppWithPlan();
     const created = await dispatch(["plans", "new", "--template", "plan_template.auth.oauth_change", "--task", "change student oauth provider", "--json"], {
