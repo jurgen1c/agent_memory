@@ -124,9 +124,11 @@ export interface ProfileTrait {
 }
 
 export interface ProfileTraitAppliesWhen {
+  always?: boolean;
   aliases?: string[];
   profile_aliases?: string[];
   profiles?: string[];
+  commands?: string[];
   intents?: string[];
   task_intents?: string[];
   task_triggers?: string[];

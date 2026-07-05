@@ -168,6 +168,19 @@ describe("context command", () => {
     expect(parsed.matchedRecipes).toHaveLength(1);
   });
 
+  test("honors configured recipe diagnostics setting", async () => {
+    const cwd = await compiledMockAppWithConfig((config) =>
+      config.replace("include_inferred_edges_by_default: false", "include_inferred_edges_by_default: false\n  include_recipe_diagnostics: false")
+    );
+
+    const result = await dispatch(["context", "--task", "student oauth tenant", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.matchedRecipes[0].id).toBe("recipe.auth.modify_student_oauth");
+    expect(parsed.matchedRecipes[0].reasons).toEqual([]);
+  });
+
   test("uses configured context defaults when command flags are omitted", async () => {
     const cwd = await compiledMockAppWithConfig((config) =>
       config.replace("default_budget: medium", "default_budget: small").replace("default_depth: 1", "default_depth: 0")

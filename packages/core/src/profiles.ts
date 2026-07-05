@@ -476,14 +476,15 @@ function parseJson(value: string): Record<string, unknown> {
 }
 
 function readStringArray(data: Record<string, unknown>, ...fields: string[]): string[] {
+  const values: string[] = [];
   for (const field of fields) {
     const value = data[field];
     if (Array.isArray(value)) {
-      return value.filter((item): item is string => typeof item === "string");
+      values.push(...value.filter((item): item is string => typeof item === "string"));
     }
   }
 
-  return [];
+  return Array.from(new Set(values));
 }
 
 interface ProfileTraitRow {

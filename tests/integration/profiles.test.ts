@@ -57,6 +57,28 @@ describe("profiles command", () => {
     });
   });
 
+  test("matches across equivalent applies_when array fields", async () => {
+    const cwd = await compiledMockAppWithProfiles();
+    writeProfile(cwd, "review/changed_files_fallback.yaml", {
+      id: "profile_trait.review.changed_files_fallback",
+      title: "Changed files fallback",
+      category: "risk_lens",
+      priority: "critical",
+      appliesWhen: `file_globs: []
+  changed_files:
+    - src/tenant.js`,
+      snippet: "Apply when tenant files change, even if a preferred alias field is present but empty."
+    });
+    const compile = await dispatch(["compile"], { cwd });
+    expect(compile.exitCode).toBe(0);
+
+    const result = await dispatch(["profiles", "match", "--changed-files", "src/tenant.js", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.traits.some((match: { trait: { id: string }; reasons: Array<{ code: string }> }) => match.trait.id === "profile_trait.review.changed_files_fallback" && match.reasons.some((reason) => reason.code === "file_glob_match"))).toBe(true);
+  });
+
   test("supports explicit traits and reports missing explicit traits", async () => {
     const cwd = await compiledMockAppWithProfiles();
     const explicit = await dispatch(["profiles", "match", "--profile-trait", "profile_trait.implementer.keep_scope_tight", "--json"], { cwd });

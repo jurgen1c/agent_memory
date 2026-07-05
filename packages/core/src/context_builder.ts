@@ -176,7 +176,13 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
     );
     const criticalRules = criticalRulesForClaims(opened.database, matched).slice(0, limits.matched);
     const related = relatedClaims(opened.database, matched, depth, includeInferred).slice(0, limits.related);
-    const recipes = mergeRecipeMatches(opened.database, recipeMatches, relatedRecipes(opened.database, matched, uniqueChangedFiles), recipeLimit);
+    const recipes = mergeRecipeMatches(
+      opened.database,
+      recipeMatches,
+      relatedRecipes(opened.database, matched, uniqueChangedFiles),
+      recipeLimit,
+      opened.contextDefaults.include_recipe_diagnostics
+    );
     const claimsById = new Map([...criticalRules, ...matched, ...related.map((item) => item.claim)].map((claim) => [claim.id, claim]));
     const profileResult = opened.contextDefaults.include_profile_traits
       ? selectProfileTraits(opened.database, {
@@ -484,14 +490,14 @@ function expandRecipeRequiredClaims(database: SqliteDatabase, claims: ContextCla
   return Array.from(claimsById.values()).slice(0, limit);
 }
 
-function mergeRecipeMatches(database: SqliteDatabase, matches: RecipeMatch[], related: ContextRecipe[], limit: number): ContextRecipeMatch[] {
+function mergeRecipeMatches(database: SqliteDatabase, matches: RecipeMatch[], related: ContextRecipe[], limit: number, includeDiagnostics: boolean): ContextRecipeMatch[] {
   const byId = new Map<string, ContextRecipeMatch>();
 
   for (const match of matches) {
     byId.set(match.recipe.id, {
       ...toContextRecipe(match.recipe),
       score: match.score,
-      reasons: match.reasons
+      reasons: includeDiagnostics ? match.reasons : []
     });
   }
 
@@ -504,7 +510,7 @@ function mergeRecipeMatches(database: SqliteDatabase, matches: RecipeMatch[], re
     byId.set(recipe.id, {
       ...(hydrated ? toContextRecipe(hydrated) : recipe),
       score: 1,
-      reasons: [{ code: "required_claim_already_matched", detail: recipe.requiredClaims[0] ?? recipe.id }]
+      reasons: includeDiagnostics ? [{ code: "required_claim_already_matched", detail: recipe.requiredClaims[0] ?? recipe.id }] : []
     });
   }
 
