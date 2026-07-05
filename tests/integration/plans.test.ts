@@ -222,12 +222,54 @@ describe("plans command", () => {
     const archived = await dispatch(["plans", "finish", run.id, "--archive", "--confirm-unresolved", "--json"], { cwd });
     const archivedJson = JSON.parse(archived.stdout);
     expect(archivedJson.status).toBe("archived");
+    expect(archivedJson.path).toBe(archivedJson.archivePath);
     expect(fs.existsSync(archivedJson.archivePath)).toBe(true);
+    expect(fs.existsSync(JSON.parse(created.stdout).path)).toBe(false);
 
     const prune = await dispatch(["plans", "prune", "--completed", "--dry-run", "--json"], { cwd });
     const pruneJson = JSON.parse(prune.stdout);
     expect(prune.exitCode).toBe(0);
     expect(pruneJson.paths).toEqual([archivedJson.archivePath]);
+  });
+
+  test("cleans temporary plan run files when atomic rename fails", async () => {
+    const cwd = await compiledMockAppWithPlan();
+    const plansDir = path.join(cwd, ".agent-memory/plans");
+    const lockPath = path.join(cwd, ".agent-memory/locks/plans.lock");
+    const originalRenameSync = fs.renameSync;
+
+    fs.renameSync = ((oldPath: fs.PathLike, newPath: fs.PathLike) => {
+      if (typeof oldPath === "string" && oldPath.includes(".agent-memory/plans/") && oldPath.endsWith(".tmp")) {
+        throw new Error("simulated plan run rename failure");
+      }
+
+      originalRenameSync(oldPath, newPath);
+    }) as typeof fs.renameSync;
+
+    try {
+      let stderr = "";
+      const exitCode = await runCli(
+        ["plans", "new", "--template", "plan_template.auth.oauth_change", "--task", "change student oauth provider"],
+        {
+          stdout: { write: () => true },
+          stderr: {
+            write: (chunk: string) => {
+              stderr += chunk;
+              return true;
+            }
+          }
+        },
+        { cwd }
+      );
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("simulated plan run rename failure");
+    } finally {
+      fs.renameSync = originalRenameSync;
+    }
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+    expect(fs.existsSync(plansDir) ? fs.readdirSync(plansDir).filter((entry) => entry.endsWith(".tmp")) : []).toEqual([]);
   });
 
   test("promote requires a plan ID", async () => {

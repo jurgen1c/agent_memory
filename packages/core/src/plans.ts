@@ -301,7 +301,7 @@ export function finishPlanRun(options: {
     run.updatedAt = now;
     writePlanRunAtomic(loaded.repo.root, runPath, run);
     fs.renameSync(runPath, archivePath);
-    return { status: "archived", path: runPath, archivePath, prompts: unresolved, durableArtifacts: durableArtifacts() };
+    return { status: "archived", path: archivePath, archivePath, prompts: unresolved, durableArtifacts: durableArtifacts() };
   }
 
   fs.unlinkSync(runPath);
@@ -583,11 +583,18 @@ function writePlanRunAtomic(repoRoot: string, filePath: string, run: PlanRunDeta
     });
   }
 
+  let tempPath: string | null = null;
+
   try {
-    const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
     fs.writeFileSync(tempPath, renderPlanRunYaml(run));
     fs.renameSync(tempPath, filePath);
+    tempPath = null;
   } finally {
+    if (tempPath && fs.existsSync(tempPath)) {
+      fs.unlinkSync(tempPath);
+    }
+
     if (lockHandle !== null) {
       fs.closeSync(lockHandle);
       fs.unlinkSync(lockPath);
