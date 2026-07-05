@@ -2,7 +2,7 @@ import path from "node:path";
 import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
 import { loadConfig } from "./config";
 import { canonicalMemoryFileInventory, configuredPathRelativeToRepo, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
-import { loadMemory, type MemoryClaim, type MemoryGraph } from "./memory";
+import { loadMemory, type MemoryClaim, type MemoryGraph, type MemoryPlanTemplate, type MemoryProfileTrait, type MemoryRecipe } from "./memory";
 import type { AgentMemoryConfig } from "./types";
 
 export interface AuditOptions {
@@ -76,7 +76,11 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
     ...findOverlappingChangedClaims(claims, changedFileSet, memoryRootRelative, explicitRelations),
     ...findUnreviewedRelatedSourceClaims(claims, changedFileSet, memoryRootRelative, memoryFiles),
     ...findInvalidDeprecatedBy(claims, claimsById, changedFileSet, memoryRootRelative, memoryFiles),
-    ...findUnreviewedActiveConflicts(claimsById, explicitRelations, changedFileSet, memoryRootRelative, memoryFiles)
+    ...findUnreviewedActiveConflicts(claimsById, explicitRelations, changedFileSet, memoryRootRelative, memoryFiles),
+    ...findCurrentRecipesWithInactiveClaims(memory.recipes, claimsById, changedFileSet, memoryRootRelative),
+    ...findCurrentPlansWithInactiveRecipes(memory.plans, memory.recipes, changedFileSet, memoryRootRelative),
+    ...findUnsafeCriticalProfiles(memory.profiles, changedFileSet, memoryRootRelative),
+    ...findUnmarkedProfileConflicts(memory.profiles, changedFileSet, memoryRootRelative)
   ];
 
   return {
@@ -85,6 +89,160 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
     findings: uniqueFindings(findings),
     warnings: loaded.repo.warnings
   };
+}
+
+function findCurrentRecipesWithInactiveClaims(
+  recipes: MemoryRecipe[],
+  claimsById: Map<string, ClaimRecord>,
+  changedFiles: Set<string>,
+  memoryRootRelative: string
+): AuditFinding[] {
+  const findings: AuditFinding[] = [];
+
+  for (const recipe of recipes) {
+    if (recipe.status !== "current") {
+      continue;
+    }
+
+    const recipePath = memoryPath(memoryRootRelative, recipe.sourcePath);
+    const inactiveClaims = recipe.requiredClaims
+      .map((claimId) => claimsById.get(claimId))
+      .filter((claim): claim is ClaimRecord => claim !== undefined && ["deprecated", "stale", "rejected"].includes(claim.status));
+
+    if (inactiveClaims.length === 0) {
+      continue;
+    }
+
+    const touched =
+      changedFiles.has(recipePath) || inactiveClaims.some((claim) => changedFiles.has(memoryPath(memoryRootRelative, claim.sourcePath)));
+
+    if (!touched) {
+      continue;
+    }
+
+    findings.push({
+      code: "recipe.required_claim.inactive",
+      message: `Current recipe ${recipe.id} requires inactive claims: ${inactiveClaims.map((claim) => `${claim.id} (${claim.status})`).join(", ")}.`,
+      claimIds: inactiveClaims.map((claim) => claim.id).sort(),
+      paths: [recipePath, ...inactiveClaims.map((claim) => memoryPath(memoryRootRelative, claim.sourcePath))].sort(),
+      remediation: "Update the recipe to require current claims, reactivate the intended claim, or mark the recipe non-current."
+    });
+  }
+
+  return findings;
+}
+
+function findCurrentPlansWithInactiveRecipes(
+  plans: MemoryPlanTemplate[],
+  recipes: MemoryRecipe[],
+  changedFiles: Set<string>,
+  memoryRootRelative: string
+): AuditFinding[] {
+  const findings: AuditFinding[] = [];
+  const recipesById = new Map(recipes.map((recipe) => [recipe.id, recipe]));
+
+  for (const plan of plans) {
+    if (plan.status !== "current") {
+      continue;
+    }
+
+    const inactiveRecipeIds = new Set<string>();
+
+    for (const recipeId of [...readStringArray(plan.raw, "recipes"), ...plan.stages.flatMap((stage) => readStringArray(stage.raw, "recipe_refs"))]) {
+      const recipe = recipesById.get(recipeId);
+      if (recipe && ["deprecated", "stale", "rejected"].includes(recipe.status)) {
+        inactiveRecipeIds.add(recipeId);
+      }
+    }
+
+    if (inactiveRecipeIds.size === 0) {
+      continue;
+    }
+
+    const planPath = memoryPath(memoryRootRelative, plan.sourcePath);
+    const inactiveRecipes = Array.from(inactiveRecipeIds)
+      .map((recipeId) => recipesById.get(recipeId))
+      .filter((recipe): recipe is MemoryRecipe => Boolean(recipe));
+    const touched =
+      changedFiles.has(planPath) || inactiveRecipes.some((recipe) => changedFiles.has(memoryPath(memoryRootRelative, recipe.sourcePath)));
+
+    if (!touched) {
+      continue;
+    }
+
+    findings.push({
+      code: "plan.recipe_ref.inactive",
+      message: `Current plan template ${plan.id} references inactive recipes: ${inactiveRecipes.map((recipe) => `${recipe.id} (${recipe.status})`).join(", ")}.`,
+      claimIds: [],
+      paths: [planPath, ...inactiveRecipes.map((recipe) => memoryPath(memoryRootRelative, recipe.sourcePath))].sort(),
+      remediation: "Update the plan stage to use a current recipe, reactivate the intended recipe, or mark the plan non-current."
+    });
+  }
+
+  return findings;
+}
+
+function findUnsafeCriticalProfiles(
+  profiles: MemoryProfileTrait[],
+  changedFiles: Set<string>,
+  memoryRootRelative: string
+): AuditFinding[] {
+  return profiles
+    .filter((profile) => profile.status === "current" && profile.priority === "critical" && isBroadProfile(profile))
+    .filter((profile) => changedFiles.has(memoryPath(memoryRootRelative, profile.sourcePath)))
+    .map((profile) => ({
+      code: "profile.critical_broad",
+      message: `Current critical profile trait ${profile.id} has broad applies_when.`,
+      claimIds: [],
+      paths: [memoryPath(memoryRootRelative, profile.sourcePath)],
+      remediation: "Narrow applies_when with systems, changed_files, recipes, plan_stages, or lower the priority."
+    }));
+}
+
+function findUnmarkedProfileConflicts(
+  profiles: MemoryProfileTrait[],
+  changedFiles: Set<string>,
+  memoryRootRelative: string
+): AuditFinding[] {
+  const findings: AuditFinding[] = [];
+  const currentProfiles = profiles.filter((profile) => profile.status === "current");
+  const seenPairs = new Set<string>();
+
+  for (const profile of currentProfiles) {
+    for (const other of currentProfiles) {
+      if (profile.id === other.id) {
+        continue;
+      }
+
+      const key = pairKey(profile.id, other.id);
+      if (seenPairs.has(key)) {
+        continue;
+      }
+
+      seenPairs.add(key);
+
+      if (
+        !changedFiles.has(memoryPath(memoryRootRelative, profile.sourcePath)) &&
+        !changedFiles.has(memoryPath(memoryRootRelative, other.sourcePath))
+      ) {
+        continue;
+      }
+
+      if (!profilesMayConflict(profile, other) || hasProfileConflictReference(profile, other)) {
+        continue;
+      }
+
+      findings.push({
+        code: "profile.conflict_missing",
+        message: `Current profile traits ${profile.id} and ${other.id} appear to overlap but do not declare conflicts_with.`,
+        claimIds: [],
+        paths: [memoryPath(memoryRootRelative, profile.sourcePath), memoryPath(memoryRootRelative, other.sourcePath)].sort(),
+        remediation: "Add conflicts_with to one trait, narrow applies_when, or clarify that both traits can safely compose."
+      });
+    }
+  }
+
+  return findings;
 }
 
 function findOverlappingChangedClaims(
@@ -459,6 +617,43 @@ function memoryPath(memoryRootRelative: string, sourcePath: string): string {
 
 function readString(data: Record<string, unknown>, field: string): string {
   return typeof data[field] === "string" ? data[field] : "";
+}
+
+function readStringArray(data: Record<string, unknown>, field: string): string[] {
+  const value = data[field];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function isBroadProfile(profile: MemoryProfileTrait): boolean {
+  const keys = Object.keys(profile.appliesWhen);
+  return keys.length === 0 || profile.appliesWhen.always === true || readStringArray(profile.appliesWhen, "commands").includes("*");
+}
+
+function profilesMayConflict(left: MemoryProfileTrait, right: MemoryProfileTrait): boolean {
+  if (left.category !== right.category) {
+    return false;
+  }
+
+  if (isBroadProfile(left) || isBroadProfile(right)) {
+    return true;
+  }
+
+  return (
+    sharedProfileAppliesWhen(left, right, "systems") ||
+    sharedProfileAppliesWhen(left, right, "changed_files") ||
+    sharedProfileAppliesWhen(left, right, "file_globs") ||
+    sharedProfileAppliesWhen(left, right, "recipes") ||
+    sharedProfileAppliesWhen(left, right, "plan_stages") ||
+    sharedProfileAppliesWhen(left, right, "tags")
+  );
+}
+
+function sharedProfileAppliesWhen(left: MemoryProfileTrait, right: MemoryProfileTrait, field: string): boolean {
+  return intersects(readStringArray(left.appliesWhen, field), readStringArray(right.appliesWhen, field));
+}
+
+function hasProfileConflictReference(left: MemoryProfileTrait, right: MemoryProfileTrait): boolean {
+  return readStringArray(left.raw, "conflicts_with").includes(right.id) || readStringArray(right.raw, "conflicts_with").includes(left.id);
 }
 
 function pairKey(left: string, right: string): string {

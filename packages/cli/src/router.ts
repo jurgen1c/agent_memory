@@ -13,7 +13,10 @@ import { runInstallSkillCommand } from "./commands/install_skill";
 import { runMigrateDocsCommand } from "./commands/migrate_docs";
 import { runInitCommand } from "./commands/init";
 import { runNewCommand } from "./commands/new";
+import { runPlansCommand } from "./commands/plans";
+import { runProfilesCommand } from "./commands/profiles";
 import { runQueryCommand } from "./commands/query";
+import { runRecipesCommand } from "./commands/recipes";
 import { runShowCommand } from "./commands/show";
 import { runSystemCommand } from "./commands/system";
 import { runSyncCommand } from "./commands/sync";
@@ -144,6 +147,39 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
     }
 
     return runShowCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "recipes") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("recipes")
+      };
+    }
+
+    return runRecipesCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "plans") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("plans")
+      };
+    }
+
+    return runPlansCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "profiles") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("profiles")
+      };
+    }
+
+    return runProfilesCommand(rest, { cwd: context.cwd });
   }
 
   if (command === "system") {

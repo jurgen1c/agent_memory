@@ -58,6 +58,23 @@ describe("doctor command", () => {
     expect(result.stdout).toContain("inventory changed");
   });
 
+  test("warns when canonical plan or profile files are added after compile", async () => {
+    const cwd = copyFixture(mockApp);
+    await dispatch(["compile"], { cwd });
+    const planPath = path.join(cwd, "docs/agent-memory/plans/auth/new_plan.yaml");
+    const profilePath = path.join(cwd, "docs/agent-memory/profiles/review/new_trait.yaml");
+    fs.mkdirSync(path.dirname(planPath), { recursive: true });
+    fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+    fs.writeFileSync(planPath, "id: plan_template.auth.new_plan\n");
+    fs.writeFileSync(profilePath, "id: profile_trait.review.new_trait\n");
+
+    const result = await dispatch(["doctor"], { cwd });
+
+    expect(result.exitCode).toBe(5);
+    expect(result.stdout).toContain("file_inventory");
+    expect(result.stdout).toContain("inventory changed");
+  });
+
   test("warns when git commit changed after compile", async () => {
     const cwd = copyFixture(mockApp);
     initGitHistory(cwd);
@@ -95,6 +112,48 @@ describe("doctor command", () => {
     expect(result.exitCode).toBe(5);
     expect(result.stdout).toContain("metadata");
     expect(result.stdout).toContain("FTS table is missing");
+  });
+
+  test("warns when completed local plan runs accumulate", async () => {
+    const cwd = copyFixture(mockApp);
+    await dispatch(["compile"], { cwd });
+
+    for (let index = 0; index < 11; index += 1) {
+      writePlanRun(cwd, `done-${index}`, "complete");
+    }
+
+    const result = await dispatch(["doctor", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(5);
+    expect(parsed.checks).toContainEqual(
+      expect.objectContaining({
+        name: "plan_runs_accumulated",
+        status: "warning"
+      })
+    );
+  });
+
+  test("warns when local plan runs cannot be inspected", async () => {
+    const cwd = copyFixture(mockApp);
+    await dispatch(["compile"], { cwd });
+    const brokenPath = path.join(cwd, ".agent-memory/plans/broken.yaml");
+    fs.mkdirSync(path.dirname(brokenPath), { recursive: true });
+    fs.writeFileSync(brokenPath, "- invalid\n");
+
+    const result = await dispatch(["doctor", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(5);
+    expect(parsed.checks).toContainEqual(
+      expect.objectContaining({
+        name: "plan_runs_unreadable",
+        status: "warning"
+      })
+    );
+    expect(parsed.checks.find((check: { name: string }) => check.name === "plan_runs_unreadable").message).toContain(
+      ".agent-memory/plans/broken.yaml"
+    );
   });
 });
 
@@ -200,6 +259,27 @@ function gitPath(cwd: string, gitRelativePath: string): string {
   expect(result.status).toBe(0);
   const output = result.stdout.trim();
   return path.isAbsolute(output) ? output : path.resolve(cwd, output);
+}
+
+function writePlanRun(cwd: string, name: string, status: string): void {
+  const runPath = path.join(cwd, `.agent-memory/plans/${name}.yaml`);
+  fs.mkdirSync(path.dirname(runPath), { recursive: true });
+  fs.writeFileSync(
+    runPath,
+    `id: plan_run.${name}
+task: ${name}
+created_at: 2026-07-03T00:00:00.000Z
+updated_at: 2026-07-03T00:00:00.000Z
+status: ${status}
+current_stage: done
+stages:
+  - id: done
+    title: Done
+    goal: Done.
+    status: complete
+    evidence: []
+`
+  );
 }
 
 function git(cwd: string, args: string[]): void {

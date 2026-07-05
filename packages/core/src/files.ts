@@ -8,6 +8,8 @@ export interface CanonicalMemoryFilePatterns {
   graphs: string[];
   indexes: string[];
   recipes: string[];
+  plans?: string[];
+  profiles?: string[];
   waivers: string[];
 }
 
@@ -32,6 +34,8 @@ export function discoverCanonicalMemoryFiles(memoryRoot: string, config: Canonic
     ...discoverFiles(memoryRoot, config.graphs),
     ...discoverFiles(memoryRoot, config.indexes),
     ...discoverFiles(memoryRoot, config.recipes),
+    ...discoverFiles(memoryRoot, config.plans ?? []),
+    ...discoverFiles(memoryRoot, config.profiles ?? []),
     ...discoverFiles(memoryRoot, config.waivers)
   ].sort();
 }

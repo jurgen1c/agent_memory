@@ -86,7 +86,13 @@ function renderCompileResult(result: CompileResult, verbose: boolean): string {
     `Indexes: ${result.counts.indexes}`,
     `Recipes: ${result.counts.recipes}`,
     `Recipe claims: ${result.counts.recipeClaims}`,
-    `FTS rows: ${result.counts.ftsRows}`
+    `Plans: ${result.counts.plans}`,
+    `Plan stages: ${result.counts.planStages}`,
+    `Profiles: ${result.counts.profiles}`,
+    `FTS rows: ${result.counts.ftsRows}`,
+    `Recipe FTS rows: ${result.counts.recipeFtsRows}`,
+    `Plan FTS rows: ${result.counts.planFtsRows}`,
+    `Profile FTS rows: ${result.counts.profileFtsRows}`
   ];
 
   if (verbose) {

@@ -59,6 +59,23 @@ interface MemoryFile {
   sourcePath: string;
 }
 
+interface RecipeCoverageFile extends MemoryFile {
+  relevantFiles: string[];
+}
+
+interface PlanTemplateCoverageRow {
+  id: string;
+  sourcePath: string;
+  stageId: string;
+  metadataJson: string;
+}
+
+interface ProfileCoverageRow {
+  id: string;
+  sourcePath: string;
+  appliesWhenJson: string;
+}
+
 export async function checkCoverage(options: CoverageOptions = {}): Promise<CoverageResult> {
   const loaded = loadConfig({ cwd: options.cwd });
   const repoRoot = loaded.repo.root;
@@ -86,11 +103,12 @@ export async function checkCoverage(options: CoverageOptions = {}): Promise<Cove
   try {
     const indexes = loadCoverageIndexes(database);
     const claims = database.all<MemoryFile>("SELECT id, source_path AS sourcePath FROM claims");
-    const recipes = database.all<MemoryFile>("SELECT id, source_path AS sourcePath FROM recipes");
+    const recipes = loadRecipeCoverageFiles(database);
     const changedFileSet = new Set(changedFiles);
     const changes = changedFiles.map((file) =>
       coverageForFile(file, changedFileSet, indexes, claims, recipes, waivers, database, memoryRootRelative)
     );
+    warnings.push(...workflowCoverageWarnings(repoRoot, changedFiles, changedFileSet, database, memoryRootRelative));
 
     return {
       ok: changes.every((change) => change.status !== "uncovered"),
@@ -111,7 +129,7 @@ function coverageForFile(
   changedFileSet: Set<string>,
   indexes: CoverageIndex[],
   claims: MemoryFile[],
-  recipes: MemoryFile[],
+  recipes: RecipeCoverageFile[],
   waivers: CoverageWaiver[],
   database: SqliteDatabase,
   memoryRootRelative: string
@@ -173,7 +191,7 @@ function relatedMemoryFilesFor(
   changedFile: string,
   indexes: CoverageIndex[],
   claims: MemoryFile[],
-  recipes: MemoryFile[],
+  recipes: RecipeCoverageFile[],
   database: SqliteDatabase,
   memoryRootRelative: string
 ): string[] {
@@ -205,7 +223,105 @@ function relatedMemoryFilesFor(
     files.add(memoryPath(memoryRootRelative, row.sourcePath));
   }
 
+  for (const recipe of recipes) {
+    if (recipe.relevantFiles.some((pattern) => pathMatchesPattern(pattern, changedFile))) {
+      files.add(memoryPath(memoryRootRelative, recipe.sourcePath));
+    }
+  }
+
   return Array.from(files).sort();
+}
+
+function workflowCoverageWarnings(
+  repoRoot: string,
+  changedFiles: string[],
+  changedFileSet: Set<string>,
+  database: SqliteDatabase,
+  memoryRootRelative: string
+): string[] {
+  const warnings: string[] = [];
+  warnings.push(...activePlanRunWarnings(repoRoot, changedFiles));
+  warnings.push(...planTemplateCoverageWarnings(changedFiles, changedFileSet, database, memoryRootRelative));
+  warnings.push(...profileCoverageWarnings(changedFiles, changedFileSet, database, memoryRootRelative));
+  return Array.from(new Set(warnings)).sort();
+}
+
+function activePlanRunWarnings(repoRoot: string, changedFiles: string[]): string[] {
+  const warnings: string[] = [];
+
+  for (const file of changedFiles) {
+    const absolutePath = path.join(repoRoot, file);
+    if (!file.startsWith(".agent-memory/plans/") || !(file.endsWith(".yaml") || file.endsWith(".yml")) || !fs.existsSync(absolutePath)) {
+      continue;
+    }
+
+    try {
+      const data = parseYaml(fs.readFileSync(absolutePath, "utf8"));
+      const raw = isRecord(data) ? data : {};
+      if (readString(raw, "status") === "active") {
+        warnings.push(`${file}: active plan runs are local task state and should not be staged by default.`);
+      }
+    } catch (error) {
+      warnings.push(`${file}: could not inspect plan run status (${error instanceof Error ? error.message : String(error)}).`);
+    }
+  }
+
+  return warnings;
+}
+
+function planTemplateCoverageWarnings(
+  changedFiles: string[],
+  changedFileSet: Set<string>,
+  database: SqliteDatabase,
+  memoryRootRelative: string
+): string[] {
+  const warnings: string[] = [];
+  const stages = database.all<PlanTemplateCoverageRow>(
+    `SELECT p.id, p.source_path AS sourcePath, s.stage_id AS stageId, s.metadata_json AS metadataJson
+     FROM plan_templates p
+     JOIN plan_stages s ON s.plan_id = p.id
+     WHERE p.status IN ('current', 'proposed', 'needs_review')`
+  );
+
+  for (const changedFile of changedFiles) {
+    for (const stage of stages) {
+      const metadata = parseJson(stage.metadataJson);
+      const sourceFiles = readStringArray(metadata, "source_files");
+      const planPath = memoryPath(memoryRootRelative, stage.sourcePath);
+
+      if (sourceFiles.some((pattern) => pathMatchesPattern(pattern, changedFile)) && !changedFileSet.has(planPath)) {
+        warnings.push(`${changedFile}: plan template ${stage.id} stage ${stage.stageId} references this file; review only if workflow guidance changed.`);
+      }
+    }
+  }
+
+  return warnings;
+}
+
+function profileCoverageWarnings(
+  changedFiles: string[],
+  changedFileSet: Set<string>,
+  database: SqliteDatabase,
+  memoryRootRelative: string
+): string[] {
+  const warnings: string[] = [];
+  const profiles = database.all<ProfileCoverageRow>(
+    "SELECT id, source_path AS sourcePath, applies_when_json AS appliesWhenJson FROM profile_traits WHERE status IN ('current', 'proposed', 'needs_review')"
+  );
+
+  for (const changedFile of changedFiles) {
+    for (const profile of profiles) {
+      const appliesWhen = parseJson(profile.appliesWhenJson);
+      const profilePath = memoryPath(memoryRootRelative, profile.sourcePath);
+      const patterns = [...readStringArray(appliesWhen, "changed_files"), ...readStringArray(appliesWhen, "file_globs"), ...readStringArray(appliesWhen, "files")];
+
+      if (patterns.some((pattern) => pathMatchesPattern(pattern, changedFile)) && !changedFileSet.has(profilePath)) {
+        warnings.push(`${changedFile}: profile trait ${profile.id} may apply; update the trait only if guidance changed.`);
+      }
+    }
+  }
+
+  return warnings;
 }
 
 function loadCoverageIndexes(database: SqliteDatabase): CoverageIndex[] {
@@ -220,6 +336,14 @@ function loadCoverageIndexes(database: SqliteDatabase): CoverageIndex[] {
       recipeGlobs: readStringArray(metadata, "recipe_globs")
     };
   });
+}
+
+function loadRecipeCoverageFiles(database: SqliteDatabase): RecipeCoverageFile[] {
+  return database.all<{ id: string; sourcePath: string; metadataJson: string }>("SELECT id, source_path AS sourcePath, metadata_json AS metadataJson FROM recipes").map((row) => ({
+    id: row.id,
+    sourcePath: row.sourcePath,
+    relevantFiles: readStringArray(parseJson(row.metadataJson), "relevant_files")
+  }));
 }
 
 function loadCoverageWaivers(memoryRoot: string, patterns: string[]): CoverageWaiver[] {

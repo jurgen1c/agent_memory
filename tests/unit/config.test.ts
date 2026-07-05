@@ -5,6 +5,8 @@ import path from "node:path";
 import { defaultConfig, loadConfig, renderConfigTemplate } from "../../packages/core/src/config";
 import { ConfigError } from "../../packages/core/src/errors";
 
+const repoRoot = path.resolve(".");
+
 describe("loadConfig", () => {
   test("loads repository config with defaults and nested values", () => {
     const repoRoot = makeTempRepo(`
@@ -45,9 +47,45 @@ context:
     expect(loaded.config.version).toBe(1);
     expect(loaded.config.memory_root).toBe("docs/agent-memory");
     expect(loaded.config.claims).toEqual(["claims/**/*.md"]);
+    expect(loaded.config.plans).toEqual(["plans/**/*.yaml"]);
+    expect(loaded.config.profiles).toEqual(["profiles/**/*.yaml"]);
     expect(loaded.config.agent_skills.generic.enabled).toBe(false);
     expect(loaded.config.context.default_budget).toBe("full");
     expect(loaded.config.context.default_depth).toBe(2);
+    expect(loaded.config.context.recipe_match_limit).toBe(3);
+    expect(loaded.config.context.profile_trait_limit).toBe(5);
+    expect(loaded.config.context.plan_template_suggestion_limit).toBe(3);
+    expect(loaded.config.context.include_profile_traits).toBe(true);
+    expect(loaded.config.context.include_recipe_diagnostics).toBe(true);
+    expect(loaded.config.context.include_profile_diagnostics).toBe(true);
+  });
+
+  test("loads contextual workflow config values when provided", () => {
+    const repoRoot = makeTempRepo(`
+version: 1
+plans:
+  - workflows/plans/**/*.yaml
+profiles:
+  - workflows/profiles/**/*.yaml
+context:
+  recipe_match_limit: 4
+  profile_trait_limit: 6
+  plan_template_suggestion_limit: 2
+  include_profile_traits: false
+  include_recipe_diagnostics: false
+  include_profile_diagnostics: false
+`);
+
+    const loaded = loadConfig({ repoRoot });
+
+    expect(loaded.config.plans).toEqual(["workflows/plans/**/*.yaml"]);
+    expect(loaded.config.profiles).toEqual(["workflows/profiles/**/*.yaml"]);
+    expect(loaded.config.context.recipe_match_limit).toBe(4);
+    expect(loaded.config.context.profile_trait_limit).toBe(6);
+    expect(loaded.config.context.plan_template_suggestion_limit).toBe(2);
+    expect(loaded.config.context.include_profile_traits).toBe(false);
+    expect(loaded.config.context.include_recipe_diagnostics).toBe(false);
+    expect(loaded.config.context.include_profile_diagnostics).toBe(false);
   });
 
   test("rejects unsupported config versions", () => {
@@ -61,6 +99,16 @@ context:
 version: 1
 context:
   default_depth: 11
+`);
+
+    expect(() => loadConfig({ repoRoot })).toThrow(ConfigError);
+  });
+
+  test("rejects invalid contextual workflow limits", () => {
+    const repoRoot = makeTempRepo(`
+version: 1
+context:
+  recipe_match_limit: 0
 `);
 
     expect(() => loadConfig({ repoRoot })).toThrow(ConfigError);
@@ -80,11 +128,21 @@ context:
     expect(rendered).toContain('- "1.2"');
     expect(rendered).toContain('- "01"');
     expect(rendered).toContain('- "1e3"');
+    expect(rendered).toContain("plans:");
+    expect(rendered).toContain("profiles:");
+    expect(rendered).toContain("recipe_match_limit: 3");
     expect(loaded.config.memory_root).toBe("true");
     expect(loaded.config.database_path).toBe("123");
     expect(loaded.config.claims).toEqual(["null", "**/*.md", "{claims}/**/*.md", "1.2", "01", "1e3"]);
     expect(loaded.config.git.hooks).toEqual(["~"]);
     expect(loaded.config.agent_skills.codex.path).toBe("false");
+  });
+
+  test("schema requires contextual workflow path globs", () => {
+    const schema = JSON.parse(fs.readFileSync(path.join(repoRoot, "packages/schemas/config.schema.json"), "utf8"));
+
+    expect(schema.required).toContain("plans");
+    expect(schema.required).toContain("profiles");
   });
 });
 

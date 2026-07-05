@@ -59,6 +59,40 @@ export interface MemoryRecipe {
   status: string;
   sourcePath: string;
   requiredClaims: string[];
+  intentTriggers: string[];
+  steps: string[];
+  verification: string[];
+  raw: Record<string, unknown>;
+}
+
+export interface MemoryPlanTemplate {
+  id: string;
+  title: string;
+  system: string;
+  status: string;
+  sourcePath: string;
+  intentTriggers: string[];
+  stages: MemoryPlanTemplateStage[];
+  raw: Record<string, unknown>;
+}
+
+export interface MemoryPlanTemplateStage {
+  id: string;
+  title: string;
+  goal: string;
+  sequence: number;
+  raw: Record<string, unknown>;
+}
+
+export interface MemoryProfileTrait {
+  id: string;
+  title: string;
+  status: string;
+  category: string;
+  priority: string;
+  sourcePath: string;
+  appliesWhen: Record<string, unknown>;
+  snippet: string;
   raw: Record<string, unknown>;
 }
 
@@ -68,6 +102,8 @@ export interface LoadedMemory {
   graphs: MemoryGraph[];
   indexes: MemoryIndex[];
   recipes: MemoryRecipe[];
+  plans: MemoryPlanTemplate[];
+  profiles: MemoryProfileTrait[];
 }
 
 export function loadMemory(cwd?: string): LoadedMemory {
@@ -80,7 +116,9 @@ export function loadMemory(cwd?: string): LoadedMemory {
     claims: loadClaims(memoryRoot, discoverFiles(memoryRoot, loadedConfig.config.claims)),
     graphs: loadGraphs(memoryRoot, discoverFiles(memoryRoot, loadedConfig.config.graphs)),
     indexes: loadIndexes(memoryRoot, discoverFiles(memoryRoot, loadedConfig.config.indexes)),
-    recipes: loadRecipes(memoryRoot, discoverFiles(memoryRoot, loadedConfig.config.recipes))
+    recipes: loadRecipes(memoryRoot, discoverFiles(memoryRoot, loadedConfig.config.recipes)),
+    plans: loadPlans(memoryRoot, discoverFiles(memoryRoot, loadedConfig.config.plans)),
+    profiles: loadProfiles(memoryRoot, discoverFiles(memoryRoot, loadedConfig.config.profiles))
   };
 }
 
@@ -162,6 +200,52 @@ function loadRecipes(memoryRoot: string, files: string[]): MemoryRecipe[] {
       status: readString(raw, "status"),
       sourcePath: relativePath,
       requiredClaims: readOptionalStringArray(raw, "required_claims"),
+      intentTriggers: readOptionalStringArray(raw, "intent_triggers"),
+      steps: readOptionalStringArray(raw, "steps"),
+      verification: readOptionalStringArray(raw, "verification"),
+      raw
+    };
+  });
+}
+
+function loadPlans(memoryRoot: string, files: string[]): MemoryPlanTemplate[] {
+  return files.map((filePath) => {
+    const relativePath = path.relative(memoryRoot, filePath);
+    const raw = asRecord(parseYaml(fs.readFileSync(filePath, "utf8")));
+
+    return {
+      id: readString(raw, "id"),
+      title: readString(raw, "title"),
+      system: readString(raw, "system"),
+      status: readString(raw, "status"),
+      sourcePath: relativePath,
+      intentTriggers: readOptionalStringArray(raw, "intent_triggers"),
+      stages: readRecords(raw, "stages").map((stage, index) => ({
+        id: readString(stage, "id"),
+        title: readString(stage, "title"),
+        goal: readString(stage, "goal"),
+        sequence: index,
+        raw: stage
+      })),
+      raw
+    };
+  });
+}
+
+function loadProfiles(memoryRoot: string, files: string[]): MemoryProfileTrait[] {
+  return files.map((filePath) => {
+    const relativePath = path.relative(memoryRoot, filePath);
+    const raw = asRecord(parseYaml(fs.readFileSync(filePath, "utf8")));
+
+    return {
+      id: readString(raw, "id"),
+      title: readString(raw, "title"),
+      status: readString(raw, "status"),
+      category: readString(raw, "category"),
+      priority: readString(raw, "priority"),
+      sourcePath: relativePath,
+      appliesWhen: readRecord(raw, "applies_when"),
+      snippet: readString(raw, "snippet"),
       raw
     };
   });
@@ -206,4 +290,9 @@ function readOptionalStringArray(data: Record<string, unknown>, field: string): 
 function readRecords(data: Record<string, unknown>, field: string): Array<Record<string, unknown>> {
   const value = data[field];
   return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null && !Array.isArray(item)) : [];
+}
+
+function readRecord(data: Record<string, unknown>, field: string): Record<string, unknown> {
+  const value = data[field];
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }

@@ -20,7 +20,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -43,13 +44,19 @@ button:disabled {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   background: #ffffff;
   color: #172033;
   padding: 7px 8px;
+}
+
+textarea {
+  min-height: 66px;
+  resize: vertical;
 }
 
 .shell {
@@ -160,7 +167,7 @@ select {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 4px;
   margin-bottom: 16px;
 }
@@ -360,10 +367,138 @@ select {
 }
 
 .file-view,
-.review-view {
+.review-view,
+.workflow-view {
   height: 100%;
   padding: 20px;
   overflow: auto;
+}
+
+.workflow-header,
+.workflow-card-header,
+.stage-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.workflow-header {
+  margin-bottom: 16px;
+}
+
+.workflow-header h2,
+.workflow-card h4,
+.workflow-section h3 {
+  margin: 0;
+}
+
+.workflow-header p,
+.workflow-card p,
+.stage-row p {
+  margin: 4px 0 0;
+  color: #64748b;
+}
+
+.workflow-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.workflow-stat,
+.workflow-card {
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.workflow-stat {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+}
+
+.workflow-stat strong {
+  font-size: 20px;
+}
+
+.workflow-stat span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.workflow-section {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.workflow-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.stage-list {
+  display: grid;
+  gap: 8px;
+}
+
+.stage-row {
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.stage-list.compact .stage-row {
+  display: block;
+}
+
+.stage-action {
+  display: grid;
+  width: min(280px, 38%);
+  min-width: 220px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.workflow-edit,
+.workflow-edit-stage {
+  display: grid;
+  gap: 8px;
+}
+
+.workflow-edit {
+  padding: 10px;
+  border: 1px solid #d7dee8;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.workflow-edit label {
+  display: grid;
+  gap: 5px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.workflow-edit-stage {
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.workflow-edit-stage strong {
+  color: #334155;
+  font-size: 12px;
+}
+
+.inline-meta {
+  font-size: 12px;
 }
 
 .file-view details {

@@ -310,6 +310,86 @@ describe("validate command", () => {
     expect(result.exitCode).toBe(2);
     expect(result.stdout).toContain("index.watched_files.outside_repo");
   });
+
+  test("validates plan templates and profile traits", async () => {
+    const cwd = copyFixture(mockApp);
+    writeProfile(cwd, "docs/agent-memory/profiles/implementer/keep_scope_tight.yaml", {
+      id: "profile_trait.implementer.keep_scope_tight",
+      snippet: "Keep implementation scope tied to the selected claims and changed files."
+    });
+    writePlan(cwd, "docs/agent-memory/plans/auth/oauth_change.yaml", {
+      id: "plan_template.auth.oauth_change",
+      stageId: "inspect_current_contract",
+      profileTrait: "profile_trait.implementer.keep_scope_tight"
+    });
+
+    const result = await dispatch(["validate", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.counts.plans).toBe(1);
+    expect(parsed.counts.profiles).toBe(1);
+  });
+
+  test("rejects invalid plan templates missing stages", async () => {
+    const cwd = copyFixture(mockApp);
+    const planPath = path.join(cwd, "docs/agent-memory/plans/auth/missing_stages.yaml");
+    fs.mkdirSync(path.dirname(planPath), { recursive: true });
+    fs.writeFileSync(
+      planPath,
+      `id: plan_template.auth.missing_stages
+title: Missing stages
+system: auth
+status: current
+`
+    );
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/plans/auth/missing_stages.yaml"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("plan.stages.required");
+  });
+
+  test("rejects duplicate plan stage IDs", async () => {
+    const cwd = copyFixture(mockApp);
+    writePlan(cwd, "docs/agent-memory/plans/auth/duplicate_stage.yaml", {
+      id: "plan_template.auth.duplicate_stage",
+      stageId: "inspect_current_contract",
+      duplicateStageId: "inspect_current_contract"
+    });
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/plans/auth/duplicate_stage.yaml"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("plan.stage.id.duplicate");
+  });
+
+  test("rejects huge profile trait snippets", async () => {
+    const cwd = copyFixture(mockApp);
+    writeProfile(cwd, "docs/agent-memory/profiles/review/huge.yaml", {
+      id: "profile_trait.review.huge",
+      snippet: "a".repeat(1201)
+    });
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/profiles/review/huge.yaml"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("profile.snippet.too_long");
+  });
+
+  test("rejects profile trait conflict references to missing traits", async () => {
+    const cwd = copyFixture(mockApp);
+    writeProfile(cwd, "docs/agent-memory/profiles/review/security_sensitive.yaml", {
+      id: "profile_trait.review.security_sensitive",
+      snippet: "Treat auth changes as security-sensitive.",
+      conflictsWith: ["profile_trait.review.missing"]
+    });
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/profiles/review/security_sensitive.yaml"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("profile.conflicts_with.missing");
+  });
 });
 
 function copyFixture(source: string): string {
@@ -380,6 +460,82 @@ last_verified_commit: null
 ## Claim
 
 Test claim for validation behavior.
+`
+  );
+}
+
+function writePlan(
+  cwd: string,
+  relativePath: string,
+  options: {
+    id: string;
+    stageId: string;
+    duplicateStageId?: string;
+    profileTrait?: string;
+  }
+): void {
+  const planPath = path.join(cwd, relativePath);
+  fs.mkdirSync(path.dirname(planPath), { recursive: true });
+  const profileTraits = options.profileTrait ? `    profile_traits:\n      - ${options.profileTrait}\n` : "";
+  const duplicateStage = options.duplicateStageId
+    ? `
+  - id: ${options.duplicateStageId}
+    title: Duplicate stage
+    goal: Prove duplicate stage validation.
+`
+    : "";
+
+  fs.writeFileSync(
+    planPath,
+    `id: ${options.id}
+title: OAuth provider behavior change
+system: auth
+status: current
+intent_triggers:
+  - change student oauth
+recipes:
+  - recipe.auth.modify_student_oauth
+stages:
+  - id: ${options.stageId}
+    title: Inspect current contract
+    goal: Identify current provider, tenant, token, and callback behavior.
+    claim_refs:
+      - auth.student_oauth.uid_is_tenant_scoped
+    recipe_refs:
+      - recipe.auth.modify_student_oauth
+${profileTraits}    source_files:
+      - src/auth.js
+    verification:
+      - bun test
+    done_when:
+      - Current behavior is understood from code and memory.
+${duplicateStage}`
+  );
+}
+
+function writeProfile(
+  cwd: string,
+  relativePath: string,
+  options: {
+    id: string;
+    snippet: string;
+    conflictsWith?: string[];
+  }
+): void {
+  const profilePath = path.join(cwd, relativePath);
+  fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+  fs.writeFileSync(
+    profilePath,
+    `id: ${options.id}
+title: Test profile trait
+status: current
+category: scope_control
+priority: normal
+applies_when:
+  systems:
+    - auth
+snippet: ${JSON.stringify(options.snippet)}
+${renderYamlField("conflicts_with", options.conflictsWith ?? [])}
 `
   );
 }

@@ -20,8 +20,9 @@ describe("context command", () => {
     expect(result.stdout).toContain("auth.student_oauth.uid_is_tenant_scoped");
     expect(result.stdout).toContain("## Related Claims");
     expect(result.stdout).toContain("tenancy.current_tenant.required_for_student_auth");
-    expect(result.stdout).toContain("## Related Recipes");
+    expect(result.stdout).toContain("## Matched Recipes");
     expect(result.stdout).toContain("recipe.auth.modify_student_oauth");
+    expect(result.stdout).toContain("Matched because:");
     expect(result.stdout).toContain("## Verification");
     expect(result.stdout).toContain("bun test");
   });
@@ -89,7 +90,121 @@ describe("context command", () => {
     expect(result.exitCode).toBe(0);
     expect(parsed.matchedClaims.some((claim: { id: string }) => claim.id === "auth.student_oauth.uid_is_tenant_scoped")).toBe(true);
     expect(parsed.relatedClaims.some((related: { claim: { id: string } }) => related.claim.id === "tenancy.current_tenant.required_for_student_auth")).toBe(true);
+    expect(parsed.recipes[0].id).toBe("recipe.auth.modify_student_oauth");
+    expect(parsed.recipes[0].score).toBeUndefined();
+    expect(parsed.recipes[0].reasons).toBeUndefined();
+    expect(parsed.matchedRecipes[0].id).toBe("recipe.auth.modify_student_oauth");
+    expect(parsed.matchedRecipes[0].score).toBeGreaterThan(0);
+    expect(parsed.matchedRecipes[0].reasons.length).toBeGreaterThan(0);
+    expect(parsed.matchedRecipes[0].reasons.some((reason: { code: string }) => reason.code === "fts_match")).toBe(true);
     expect(parsed.verificationSteps).toContain("bun test");
+  });
+
+  test("expands explicit recipe context with required claims", async () => {
+    const cwd = await compiledMockApp();
+    const result = await dispatch(["context", "--recipe", "recipe.auth.modify_student_oauth", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.matchedRecipes[0].id).toBe("recipe.auth.modify_student_oauth");
+    expect(parsed.matchedRecipes[0].reasons).toContainEqual({
+      code: "explicit_recipe",
+      detail: "recipe.auth.modify_student_oauth"
+    });
+    expect(parsed.matchedClaims.map((claim: { id: string }) => claim.id)).toContain("auth.student_oauth.uid_is_tenant_scoped");
+    expect(parsed.matchedClaims.map((claim: { id: string }) => claim.id)).toContain("tenancy.current_tenant.required_for_student_auth");
+    expect(parsed.verificationSteps).toContain("bun test");
+  });
+
+  test("resolves explicit inactive recipes", async () => {
+    const cwd = copyFixture(mockApp);
+    replaceStatus(path.join(cwd, "docs/agent-memory/recipes/auth/modify_student_oauth.yaml"), "stale");
+    const compile = await dispatch(["compile"], { cwd });
+    expect(compile.exitCode).toBe(0);
+
+    const result = await dispatch(["context", "--recipe", "recipe.auth.modify_student_oauth", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.matchedRecipes[0]).toMatchObject({
+      id: "recipe.auth.modify_student_oauth",
+      status: "stale"
+    });
+    expect(parsed.matchedRecipes[0].reasons).toContainEqual({
+      code: "explicit_recipe",
+      detail: "recipe.auth.modify_student_oauth"
+    });
+    expect(parsed.warnings).toContain("recipe.auth.modify_student_oauth has status stale.");
+  });
+
+  test("caps required claims expanded from explicit recipes", async () => {
+    const cwd = copyFixture(mockApp);
+    const requiredClaimIds = [
+      "auth.student_oauth.uid_is_tenant_scoped",
+      "tenancy.current_tenant.required_for_student_auth",
+      "auth.recipe_limit.extra_one",
+      "auth.recipe_limit.extra_two",
+      "auth.recipe_limit.extra_three"
+    ];
+
+    writeClaim(cwd, {
+      id: "auth.recipe_limit.extra_one",
+      title: "Extra recipe limit claim one",
+      sourceFile: "src/auth.js"
+    });
+    writeClaim(cwd, {
+      id: "auth.recipe_limit.extra_two",
+      title: "Extra recipe limit claim two",
+      sourceFile: "src/tenant.js"
+    });
+    writeClaim(cwd, {
+      id: "auth.recipe_limit.extra_three",
+      title: "Extra recipe limit claim three",
+      sourceFile: "src/auth.js"
+    });
+    writeRecipe(cwd, requiredClaimIds);
+
+    const compile = await dispatch(["compile"], { cwd });
+    expect(compile.exitCode).toBe(0);
+
+    const result = await dispatch(["context", "--recipe", "recipe.auth.recipe_limit", "--budget", "small", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.matchedRecipes[0].id).toBe("recipe.auth.recipe_limit");
+    expect(parsed.matchedClaims.map((claim: { id: string }) => claim.id)).toEqual(requiredClaimIds.slice(0, 3));
+  });
+
+  test("uses configured recipe match limit", async () => {
+    const cwd = copyFixture(mockApp);
+    const configPath = path.join(cwd, "agent-memory.config.yaml");
+    fs.writeFileSync(
+      configPath,
+      fs.readFileSync(configPath, "utf8").replace("include_inferred_edges_by_default: false", "include_inferred_edges_by_default: false\n  recipe_match_limit: 1")
+    );
+    writeSimpleRecipe(cwd, "recipe.auth.recipe_limit_extra", "recipe_limit_extra.yaml");
+
+    const compile = await dispatch(["compile"], { cwd });
+    expect(compile.exitCode).toBe(0);
+
+    const result = await dispatch(["context", "--task", "student oauth tenant", "--budget", "full", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.matchedRecipes).toHaveLength(1);
+  });
+
+  test("honors configured recipe diagnostics setting", async () => {
+    const cwd = await compiledMockAppWithConfig((config) =>
+      config.replace("include_inferred_edges_by_default: false", "include_inferred_edges_by_default: false\n  include_recipe_diagnostics: false")
+    );
+
+    const result = await dispatch(["context", "--task", "student oauth tenant", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.matchedRecipes[0].id).toBe("recipe.auth.modify_student_oauth");
+    expect(parsed.matchedRecipes[0].reasons).toEqual([]);
   });
 
   test("uses configured context defaults when command flags are omitted", async () => {
@@ -213,4 +328,99 @@ function initGitHistory(cwd: string): void {
       encoding: "utf8"
     }).status
   ).toBe(0);
+}
+
+function writeClaim(cwd: string, claim: { id: string; title: string; sourceFile: string }): void {
+  const idParts = claim.id.split(".");
+  const fileName = `${idParts[idParts.length - 1]}.md`;
+  const targetPath = path.join(cwd, "docs/agent-memory/claims/auth", fileName);
+  fs.writeFileSync(
+    targetPath,
+    `---
+id: ${claim.id}
+type: fact
+system: auth
+status: current
+confidence: high
+severity: important
+
+title: ${claim.title}
+
+claim: ${claim.title} is required for recipe limit regression coverage.
+
+source_files:
+  - ${claim.sourceFile}
+
+related_files: []
+symbols: []
+routes: []
+tags:
+  - auth
+verification:
+  - bun test
+
+last_verified_commit: null
+---
+
+# ${claim.title}
+`
+  );
+}
+
+function replaceStatus(filePath: string, nextStatus: string): void {
+  fs.writeFileSync(filePath, fs.readFileSync(filePath, "utf8").replace("status: current", `status: ${nextStatus}`));
+}
+
+function writeRecipe(cwd: string, requiredClaimIds: string[]): void {
+  const targetPath = path.join(cwd, "docs/agent-memory/recipes/auth/recipe_limit.yaml");
+  fs.writeFileSync(
+    targetPath,
+    `id: recipe.auth.recipe_limit
+title: Recipe limit regression
+system: auth
+status: current
+
+required_claims:
+${requiredClaimIds.map((id) => `  - ${id}`).join("\n")}
+
+intent_triggers:
+  - recipe limit regression
+
+relevant_files:
+  - src/auth.js
+
+steps:
+  - Keep required claims within the selected context budget.
+
+verification:
+  - bun test
+`
+  );
+}
+
+function writeSimpleRecipe(cwd: string, id: string, fileName: string): void {
+  const targetPath = path.join(cwd, "docs/agent-memory/recipes/auth", fileName);
+  fs.writeFileSync(
+    targetPath,
+    `id: ${id}
+title: Student OAuth tenant recipe
+system: auth
+status: current
+
+required_claims:
+  - auth.student_oauth.uid_is_tenant_scoped
+
+intent_triggers:
+  - student oauth tenant
+
+relevant_files:
+  - src/auth.js
+
+steps:
+  - Review tenant-scoped OAuth behavior.
+
+verification:
+  - bun test
+`
+  );
 }

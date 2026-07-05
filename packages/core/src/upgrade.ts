@@ -45,6 +45,8 @@ const CONFIG_SCHEMA: ConfigSchema = {
   graphs: true,
   indexes: true,
   recipes: true,
+  plans: true,
+  profiles: true,
   waivers: true,
   agent_skills: {
     codex: {
@@ -73,6 +75,12 @@ const CONFIG_SCHEMA: ConfigSchema = {
     default_budget: true,
     default_depth: true,
     include_inferred_edges_by_default: true,
+    recipe_match_limit: true,
+    profile_trait_limit: true,
+    plan_template_suggestion_limit: true,
+    include_profile_traits: true,
+    include_recipe_diagnostics: true,
+    include_profile_diagnostics: true,
     include_inferred_edges: true
   }
 };
@@ -82,6 +90,7 @@ const DEPRECATED_CONFIG_FIELDS = new Map<string, string>([
 ]);
 
 const AGENT_TARGETS = ["codex", "generic"] satisfies AgentTarget[];
+const MEMORY_SCAFFOLD_DIRS = ["claims", "graph", "indexes", "recipes", "plans", "profiles", "waivers"];
 
 export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
   const repo = findRepoRoot(options.cwd);
@@ -113,6 +122,7 @@ export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
     options,
     actions
   });
+  upgradeMemoryScaffold(repo.root, config, options, actions, warnings);
   upgradeAgentsFile(repo.root, options, actions);
   upgradeMemoryWrapper(repo.root, options, actions, warnings);
   upgradeSkillFiles(repo.root, config, options, actions, warnings);
@@ -124,6 +134,66 @@ export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
     actions,
     warnings
   };
+}
+
+function upgradeMemoryScaffold(
+  repoRoot: string,
+  config: AgentMemoryConfig,
+  options: UpgradeOptions,
+  actions: UpgradeAction[],
+  warnings: string[]
+): void {
+  for (const memoryDir of MEMORY_SCAFFOLD_DIRS) {
+    const relativeGitkeepPath = memoryScaffoldGitkeepPath(repoRoot, config.memory_root, memoryDir);
+    const absolutePath = tryResolveMemoryScaffoldPath(repoRoot, relativeGitkeepPath, actions, warnings);
+
+    if (absolutePath === null) {
+      continue;
+    }
+
+    const directoryPath = path.dirname(absolutePath);
+    const displayPath = displayRepoPath(repoRoot, absolutePath);
+
+    if (fs.existsSync(directoryPath) && !fs.statSync(directoryPath).isDirectory()) {
+      warnings.push(`Memory scaffold path ${displayRepoPath(repoRoot, directoryPath)} is not a directory; skipping.`);
+      actions.push({ path: displayPath, status: "skipped", detail: "parent path is not a directory" });
+      continue;
+    }
+
+    if (fs.existsSync(absolutePath) || (fs.existsSync(directoryPath) && fs.readdirSync(directoryPath).length > 0)) {
+      actions.push({ path: displayPath, status: "skipped", detail: "memory directory already exists" });
+      continue;
+    }
+
+    if (options.write) {
+      fs.mkdirSync(directoryPath, { recursive: true });
+      fs.writeFileSync(absolutePath, "");
+      actions.push({ path: displayPath, status: "created", detail: "scaffolded memory directory" });
+      continue;
+    }
+
+    actions.push({ path: displayPath, status: "would_create", detail: "scaffold memory directory" });
+  }
+}
+
+function memoryScaffoldGitkeepPath(repoRoot: string, memoryRoot: string, memoryDir: string): string {
+  const gitkeepPath = path.join(memoryRoot, memoryDir, ".gitkeep");
+  return path.isAbsolute(memoryRoot) ? path.relative(repoRoot, gitkeepPath) : gitkeepPath;
+}
+
+function tryResolveMemoryScaffoldPath(
+  repoRoot: string,
+  relativeGitkeepPath: string,
+  actions: UpgradeAction[],
+  warnings: string[]
+): string | null {
+  try {
+    return resolveRepoOutputPath(repoRoot, relativeGitkeepPath);
+  } catch {
+    warnings.push(`Memory scaffold path ${relativeGitkeepPath} escapes the repository root; skipping to avoid unintended writes.`);
+    actions.push({ path: relativeGitkeepPath, status: "skipped", detail: "relative path escapes repository root" });
+    return null;
+  }
 }
 
 function upgradeMemoryWrapper(repoRoot: string, options: UpgradeOptions, actions: UpgradeAction[], warnings: string[]): void {

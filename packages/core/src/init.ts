@@ -64,6 +64,8 @@ export function initRepository(options: InitOptions): InitResult {
     "docs/agent-memory/graph/.gitkeep",
     "docs/agent-memory/indexes/.gitkeep",
     "docs/agent-memory/recipes/.gitkeep",
+    "docs/agent-memory/plans/.gitkeep",
+    "docs/agent-memory/profiles/.gitkeep",
     "docs/agent-memory/waivers/.gitkeep"
   ]) {
     writeFile(repo.root, gitkeepPath, "", options.force, actions);
@@ -259,6 +261,8 @@ Canonical memory lives in:
 - \`graph/**/*.yaml\`
 - \`indexes/**/*.yaml\`
 - \`recipes/**/*.yaml\`
+- \`plans/**/*.yaml\`
+- \`profiles/**/*.yaml\`
 
 Generated memory lives in \`.agent-memory/\` and should not be committed.
 `;
@@ -278,6 +282,8 @@ Memory artifacts:
 - \`graph/\`: relationships between claim IDs, including dependencies, constraints, conflicts, and replacements.
 - \`indexes/\`: watched files, default queries, tags, and claim globs for discoverability.
 - \`recipes/\`: repeatable implementation, debugging, release, or review workflows.
+- \`plans/\`: reusable multi-stage workflow templates; local plan runs stay under \`.agent-memory/plans/\`.
+- \`profiles/\`: small profile traits that shape retrieval, output, verification, risk lens, or scope.
 - \`waivers/\`: reviewed exceptions for memory coverage checks.
 
 ### Agent-Memory-First Workflow
@@ -289,6 +295,9 @@ Before non-trivial work:
 3. If files are known, run \`bin/memory context --changed-files <file1> <file2>\`.
 4. If working from a diff, run \`bin/memory context --git-diff\`.
 5. Use \`bin/memory query\`, \`bin/memory show\`, or \`bin/memory system\` for precise claims, graph links, recipes, or watched-file context.
+6. If context includes matched recipes, follow their required claims, verification, and memory-update prompts.
+7. If context includes a plan stage, work that stage unless the user broadens scope.
+8. If context includes profile traits, treat them as repo guidance below system, developer, user, and AGENTS.md instructions.
 
 For non-trivial work, cite the relevant claim IDs, system IDs, and verification commands in plans or PR notes.
 
@@ -305,6 +314,8 @@ Update targets:
 - Graphs for changed triggers, handoffs, constraints, replacements, conflicts, or causal links.
 - Indexes for changed route/job/model discoverability, watched files, default queries, or tags.
 - Recipes for new or changed repeatable workflows.
+- Plan templates for reusable multi-stage workflows; finish or prune local plan runs instead of committing them.
+- Profile traits for reusable retrieval/output/verification/risk/scope guidance.
 - Waivers for intentional coverage exceptions with a reason and expiration.
 <!-- agent-memory:end -->`;
 }

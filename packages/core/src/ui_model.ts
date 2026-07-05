@@ -1,14 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
 import { compileMemory, type CompileResult } from "./compiler";
-import { loadConfig } from "./config";
+import { loadConfig, renderYamlScalar } from "./config";
 import { doctorMemory, type DoctorResult } from "./doctor";
 import { AgentMemoryError, NotFoundError } from "./errors";
 import { discoverCanonicalMemoryFiles, resolveConfiguredPath, toPosix } from "./files";
 import { parseMarkdown } from "./markdown";
-import { loadMemory, type LoadedMemory, type MemoryClaim, type MemoryGraphEdge } from "./memory";
+import {
+  loadMemory,
+  type LoadedMemory,
+  type MemoryClaim,
+  type MemoryGraphEdge,
+  type MemoryPlanTemplate,
+  type MemoryProfileTrait,
+  type MemoryRecipe
+} from "./memory";
+import { blockPlanStage, completePlanStage, type PlanRunDetail, type PlanRunStageStatus } from "./plans";
 import { commandPrefixForRepo } from "./skills";
 import { validateRepository, type ValidationResult } from "./validator";
+import { parseYaml } from "./yaml";
 
 export const CLAIM_STATUSES = [
   "current",
@@ -35,6 +45,7 @@ export interface UiMemoryModel {
   health: UiHealth;
   graph: UiGraphSummary;
   files: UiFileNode;
+  workflowSummary: UiWorkflowSummary;
   validation: ValidationResult;
   doctor: DoctorResult;
   reviewQueue: UiReviewItem[];
@@ -86,9 +97,105 @@ export interface UiRelation {
 export interface UiFileNode {
   name: string;
   path: string;
-  kind: "directory" | "claim" | "graph" | "index" | "recipe" | "waiver" | "file";
+  kind: "directory" | "claim" | "graph" | "index" | "recipe" | "plan" | "profile" | "waiver" | "file";
   claimId?: string;
   children?: UiFileNode[];
+}
+
+export interface UiWorkflowSummary {
+  recipeCount: number;
+  planTemplateCount: number;
+  profileTraitCount: number;
+  activePlanRunCount: number;
+  completedPlanRunCount: number;
+  abandonedPlanRunCount: number;
+  blockedPlanRunCount: number;
+  warnings: string[];
+}
+
+export interface UiRecipeSummary {
+  id: string;
+  title: string;
+  system: string;
+  status: string;
+  sourcePath: string;
+  requiredClaims: string[];
+  intentTriggers: string[];
+  steps: string[];
+  verification: string[];
+  raw: Record<string, unknown>;
+}
+
+export interface UiPlanTemplateStageSummary {
+  id: string;
+  title: string;
+  goal: string;
+  sequence: number;
+  claimRefs: string[];
+  recipeRefs: string[];
+  profileTraits: string[];
+  sourceFiles: string[];
+  verification: string[];
+  doneWhen: string[];
+  memoryUpdates: string[];
+}
+
+export interface UiPlanTemplateSummary {
+  id: string;
+  title: string;
+  system: string;
+  status: string;
+  sourcePath: string;
+  intentTriggers: string[];
+  stages: UiPlanTemplateStageSummary[];
+  raw: Record<string, unknown>;
+}
+
+export interface UiProfileTraitSummary {
+  id: string;
+  title: string;
+  status: string;
+  category: string;
+  priority: string;
+  sourcePath: string;
+  appliesWhen: Record<string, unknown>;
+  snippet: string;
+  conflictsWith: string[];
+  raw: Record<string, unknown>;
+}
+
+export interface UiPlanRunStageSummary {
+  id: string;
+  title: string;
+  goal: string;
+  status: PlanRunStageStatus;
+  claimRefs: string[];
+  recipeRefs: string[];
+  profileTraits: string[];
+  sourceFiles: string[];
+  verification: string[];
+  doneWhen: string[];
+  memoryUpdates: string[];
+  startedAt?: string;
+  completedAt?: string;
+  blockedAt?: string;
+  evidence: string[];
+  reason?: string;
+}
+
+export interface UiPlanRunSummary {
+  id: string;
+  templateId?: string;
+  task: string;
+  status: string;
+  currentStage: string;
+  branch?: string;
+  baseCommit?: string;
+  createdAt: string;
+  updatedAt: string;
+  path: string;
+  warnings: string[];
+  stages: UiPlanRunStageSummary[];
 }
 
 export interface UiReviewItem {
@@ -156,6 +263,27 @@ export interface ReviewClaimResult {
   doctor?: DoctorResult;
 }
 
+export interface UpdateUiPlanRunStageOptions {
+  cwd?: string;
+  id: string;
+  stageId: string;
+  status: "complete" | "blocked";
+  evidence?: string;
+  reason?: string;
+}
+
+export interface UpdateUiWorkflowArtifactOptions {
+  cwd?: string;
+  kind: "recipe" | "plan" | "profile";
+  id: string;
+  patch: Record<string, unknown>;
+}
+
+export interface UpdateUiWorkflowArtifactResult {
+  artifact: UiRecipeSummary | UiPlanTemplateSummary | UiProfileTraitSummary;
+  validation: ValidationResult;
+}
+
 export async function buildUiMemoryModel(cwd?: string): Promise<UiMemoryModel> {
   const loaded = loadConfig({ cwd });
   const memory = loadMemory(cwd);
@@ -166,6 +294,7 @@ export async function buildUiMemoryModel(cwd?: string): Promise<UiMemoryModel> {
   const doctor = await doctorMemory({ cwd });
   const claims = memory.claims.map(toUiClaimSummary);
   const relations = buildUiRelations(memory);
+  const planRuns = readUiPlanRuns(repoRoot);
 
   return {
     repoRoot,
@@ -179,9 +308,106 @@ export async function buildUiMemoryModel(cwd?: string): Promise<UiMemoryModel> {
     },
     graph: buildUiGraphSummary(claims, relations),
     files: buildFileTree(repoRoot, memoryRoot, loaded.config, claims),
+    workflowSummary: buildWorkflowSummary(memory, planRuns),
     validation,
     doctor,
     reviewQueue: buildReviewQueue(claims)
+  };
+}
+
+export function getUiRecipes(cwd?: string): UiRecipeSummary[] {
+  return loadMemory(cwd).recipes.map(toUiRecipeSummary);
+}
+
+export function getUiPlans(cwd?: string): UiPlanTemplateSummary[] {
+  return loadMemory(cwd).plans.map(toUiPlanTemplateSummary);
+}
+
+export function getUiProfiles(cwd?: string): UiProfileTraitSummary[] {
+  return loadMemory(cwd).profiles.map(toUiProfileTraitSummary);
+}
+
+export function getUiPlanRuns(cwd?: string): { runs: UiPlanRunSummary[]; warnings: string[] } {
+  const loaded = loadConfig({ cwd });
+  return readUiPlanRuns(loaded.repo.root);
+}
+
+export function updateUiPlanRunStage(options: UpdateUiPlanRunStageOptions): UiPlanRunSummary {
+  try {
+    const loaded = loadConfig({ cwd: options.cwd });
+    const result =
+      options.status === "complete"
+        ? completePlanStage({
+            cwd: options.cwd,
+            id: options.id,
+            stageId: options.stageId,
+            evidence: options.evidence ?? ""
+          })
+        : blockPlanStage({
+            cwd: options.cwd,
+            id: options.id,
+            stageId: options.stageId,
+            reason: options.reason ?? ""
+          });
+
+    return toUiPlanRunSummary(result.run, result.path, loaded.repo.root, result.warnings);
+  } catch (error) {
+    if (error instanceof AgentMemoryError && error.code === "NOT_FOUND") {
+      throw error;
+    }
+
+    if (error instanceof AgentMemoryError) {
+      throw new AgentMemoryError(error.message, {
+        code: "BAD_REQUEST",
+        details: error.details,
+        cause: error
+      });
+    }
+
+    throw error;
+  }
+}
+
+export function updateUiWorkflowArtifact(options: UpdateUiWorkflowArtifactOptions): UpdateUiWorkflowArtifactResult {
+  const loaded = loadConfig({ cwd: options.cwd });
+  const memoryRoot = resolveConfiguredPath(loaded.repo.root, loaded.config.memory_root);
+  const memory = loadMemory(options.cwd);
+
+  if (options.kind === "recipe") {
+    const recipe = memory.recipes.find((candidate) => candidate.id === options.id);
+    if (!recipe) {
+      throw new NotFoundError(`Recipe not found: ${options.id}`);
+    }
+
+    updateYamlFile(path.join(memoryRoot, recipe.sourcePath), recipePatchOperations(options.patch));
+    return {
+      artifact: toUiRecipeSummary(loadMemory(options.cwd).recipes.find((candidate) => candidate.id === options.id) ?? recipe),
+      validation: validateRepository({ cwd: options.cwd })
+    };
+  }
+
+  if (options.kind === "plan") {
+    const plan = memory.plans.find((candidate) => candidate.id === options.id);
+    if (!plan) {
+      throw new NotFoundError(`Plan template not found: ${options.id}`);
+    }
+
+    updateYamlFile(path.join(memoryRoot, plan.sourcePath), planPatchOperations(options.patch));
+    return {
+      artifact: toUiPlanTemplateSummary(loadMemory(options.cwd).plans.find((candidate) => candidate.id === options.id) ?? plan),
+      validation: validateRepository({ cwd: options.cwd })
+    };
+  }
+
+  const profile = memory.profiles.find((candidate) => candidate.id === options.id);
+  if (!profile) {
+    throw new NotFoundError(`Profile trait not found: ${options.id}`);
+  }
+
+  updateYamlFile(path.join(memoryRoot, profile.sourcePath), profilePatchOperations(options.patch));
+  return {
+    artifact: toUiProfileTraitSummary(loadMemory(options.cwd).profiles.find((candidate) => candidate.id === options.id) ?? profile),
+    validation: validateRepository({ cwd: options.cwd })
   };
 }
 
@@ -303,6 +529,171 @@ function toUiClaim(memoryRoot: string, claim: MemoryClaim): UiClaim {
     verification: claim.verification,
     body: parsed.body,
     raw: claim.raw
+  };
+}
+
+function toUiRecipeSummary(recipe: MemoryRecipe): UiRecipeSummary {
+  return {
+    id: recipe.id,
+    title: recipe.title,
+    system: recipe.system,
+    status: recipe.status,
+    sourcePath: toPosix(recipe.sourcePath),
+    requiredClaims: recipe.requiredClaims,
+    intentTriggers: recipe.intentTriggers,
+    steps: recipe.steps,
+    verification: recipe.verification,
+    raw: recipe.raw
+  };
+}
+
+function toUiPlanTemplateSummary(plan: MemoryPlanTemplate): UiPlanTemplateSummary {
+  return {
+    id: plan.id,
+    title: plan.title,
+    system: plan.system,
+    status: plan.status,
+    sourcePath: toPosix(plan.sourcePath),
+    intentTriggers: plan.intentTriggers,
+    stages: plan.stages.map((stage) => ({
+      id: stage.id,
+      title: stage.title,
+      goal: stage.goal,
+      sequence: stage.sequence,
+      claimRefs: readStringArray(stage.raw, "claim_refs"),
+      recipeRefs: readStringArray(stage.raw, "recipe_refs"),
+      profileTraits: readStringArray(stage.raw, "profile_traits"),
+      sourceFiles: readStringArray(stage.raw, "source_files"),
+      verification: readStringArray(stage.raw, "verification"),
+      doneWhen: readStringArray(stage.raw, "done_when"),
+      memoryUpdates: readStringArray(stage.raw, "memory_updates")
+    })),
+    raw: plan.raw
+  };
+}
+
+function toUiProfileTraitSummary(profile: MemoryProfileTrait): UiProfileTraitSummary {
+  return {
+    id: profile.id,
+    title: profile.title,
+    status: profile.status,
+    category: profile.category,
+    priority: profile.priority,
+    sourcePath: toPosix(profile.sourcePath),
+    appliesWhen: profile.appliesWhen,
+    snippet: profile.snippet,
+    conflictsWith: readStringArray(profile.raw, "conflicts_with"),
+    raw: profile.raw
+  };
+}
+
+function buildWorkflowSummary(memory: LoadedMemory, planRuns: { runs: UiPlanRunSummary[]; warnings: string[] }): UiWorkflowSummary {
+  const activePlanRunCount = planRuns.runs.filter((run) => run.status === "active").length;
+  const completedPlanRunCount = planRuns.runs.filter((run) => run.status === "complete").length;
+  const abandonedPlanRunCount = planRuns.runs.filter((run) => run.status === "abandoned").length;
+  const blockedPlanRunCount = planRuns.runs.filter((run) => run.status === "blocked").length;
+
+  return {
+    recipeCount: memory.recipes.length,
+    planTemplateCount: memory.plans.length,
+    profileTraitCount: memory.profiles.length,
+    activePlanRunCount,
+    completedPlanRunCount,
+    abandonedPlanRunCount,
+    blockedPlanRunCount,
+    warnings: planRuns.warnings
+  };
+}
+
+function readUiPlanRuns(repoRoot: string): { runs: UiPlanRunSummary[]; warnings: string[] } {
+  const root = path.join(repoRoot, ".agent-memory/plans");
+  const warnings: string[] = [];
+  const runs: UiPlanRunSummary[] = [];
+
+  if (!fs.existsSync(root)) {
+    return { runs, warnings };
+  }
+
+  for (const filePath of walkYamlFiles(root)) {
+    try {
+      const run = parseUiPlanRunFile(filePath);
+      runs.push(toUiPlanRunSummary(run, filePath, repoRoot, []));
+    } catch (error) {
+      warnings.push(`${toPosix(path.relative(repoRoot, filePath))}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  runs.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
+  return { runs, warnings };
+}
+
+function parseUiPlanRunFile(filePath: string): PlanRunDetail {
+  const data = readRecord(parseYaml(fs.readFileSync(filePath, "utf8")));
+
+  return {
+    id: readString(data, "id"),
+    templateId: readOptionalString(data, "template_id"),
+    templateSnapshotHash: readOptionalString(data, "template_snapshot_hash"),
+    task: readString(data, "task"),
+    createdAt: readString(data, "created_at"),
+    updatedAt: readString(data, "updated_at"),
+    status: readString(data, "status") as PlanRunDetail["status"],
+    currentStage: readString(data, "current_stage"),
+    branch: readOptionalString(data, "branch"),
+    baseCommit: readOptionalString(data, "base_commit"),
+    path: filePath,
+    stages: readRecords(data, "stages").map((stage) => ({
+      id: readString(stage, "id"),
+      title: readString(stage, "title"),
+      goal: readString(stage, "goal"),
+      status: readString(stage, "status") as PlanRunStageStatus,
+      claimRefs: readStringArray(stage, "claim_refs"),
+      recipeRefs: readStringArray(stage, "recipe_refs"),
+      profileTraits: readStringArray(stage, "profile_traits"),
+      sourceFiles: readStringArray(stage, "source_files"),
+      verification: readStringArray(stage, "verification"),
+      doneWhen: readStringArray(stage, "done_when"),
+      memoryUpdates: readStringArray(stage, "memory_updates"),
+      startedAt: readOptionalString(stage, "started_at"),
+      completedAt: readOptionalString(stage, "completed_at"),
+      blockedAt: readOptionalString(stage, "blocked_at"),
+      evidence: readStringArray(stage, "evidence"),
+      reason: readOptionalString(stage, "reason")
+    }))
+  };
+}
+
+function toUiPlanRunSummary(run: PlanRunDetail, filePath: string, repoRoot: string, warnings: string[]): UiPlanRunSummary {
+  return {
+    id: run.id,
+    templateId: run.templateId,
+    task: run.task,
+    status: run.status,
+    currentStage: run.currentStage,
+    branch: run.branch,
+    baseCommit: run.baseCommit,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    path: toPosix(path.relative(repoRoot, filePath)),
+    warnings,
+    stages: run.stages.map((stage) => ({
+      id: stage.id,
+      title: stage.title,
+      goal: stage.goal,
+      status: stage.status,
+      claimRefs: stage.claimRefs,
+      recipeRefs: stage.recipeRefs,
+      profileTraits: stage.profileTraits,
+      sourceFiles: stage.sourceFiles,
+      verification: stage.verification,
+      doneWhen: stage.doneWhen,
+      memoryUpdates: stage.memoryUpdates,
+      startedAt: stage.startedAt,
+      completedAt: stage.completedAt,
+      blockedAt: stage.blockedAt,
+      evidence: stage.evidence,
+      reason: stage.reason
+    }))
   };
 }
 
@@ -648,6 +1039,8 @@ function buildFileTree(
     graphs: string[];
     indexes: string[];
     recipes: string[];
+    plans?: string[];
+    profiles?: string[];
     waivers: string[];
   },
   claims: Array<Pick<UiClaimSummary, "id" | "sourcePath">>
@@ -694,6 +1087,8 @@ function fileKind(
     graphs: string[];
     indexes: string[];
     recipes: string[];
+    plans?: string[];
+    profiles?: string[];
     waivers: string[];
   },
   claim: boolean
@@ -712,6 +1107,14 @@ function fileKind(
 
   if (relativePath.startsWith("recipes/")) {
     return "recipe";
+  }
+
+  if (relativePath.startsWith("plans/")) {
+    return "plan";
+  }
+
+  if (relativePath.startsWith("profiles/")) {
+    return "profile";
   }
 
   if (relativePath.startsWith("waivers/")) {
@@ -737,6 +1140,283 @@ function sortFileTree(node: UiFileNode): void {
   for (const child of node.children ?? []) {
     sortFileTree(child);
   }
+}
+
+type YamlPatchOperation =
+  | { type: "scalar"; key: string; value: string }
+  | { type: "array"; key: string; values: string[] }
+  | { type: "planStages"; stages: Array<{ id: string; title?: string; goal?: string }> };
+
+function recipePatchOperations(patch: Record<string, unknown>): YamlPatchOperation[] {
+  return allowedWorkflowOperations(patch, {
+    scalars: ["title", "status"],
+    arrays: ["intent_triggers"]
+  });
+}
+
+function planPatchOperations(patch: Record<string, unknown>): YamlPatchOperation[] {
+  const operations = allowedWorkflowOperations(patch, {
+    scalars: ["title", "status"],
+    arrays: ["intent_triggers"]
+  });
+  const stages = readPatchStages(patch);
+
+  if (stages.length > 0) {
+    operations.push({ type: "planStages", stages });
+  }
+
+  return operations;
+}
+
+function profilePatchOperations(patch: Record<string, unknown>): YamlPatchOperation[] {
+  return allowedWorkflowOperations(patch, {
+    scalars: ["title", "status", "priority", "snippet"],
+    arrays: ["conflicts_with"]
+  });
+}
+
+function allowedWorkflowOperations(
+  patch: Record<string, unknown>,
+  options: { scalars: string[]; arrays: string[] }
+): YamlPatchOperation[] {
+  const operations: YamlPatchOperation[] = [];
+
+  for (const key of options.scalars) {
+    if (patch[key] !== undefined) {
+      operations.push({ type: "scalar", key, value: readPatchString(patch[key], key) });
+    }
+  }
+
+  for (const key of options.arrays) {
+    if (patch[key] !== undefined) {
+      operations.push({ type: "array", key, values: readPatchStringArray(patch[key], key) });
+    }
+  }
+
+  return operations;
+}
+
+function readPatchStages(patch: Record<string, unknown>): Array<{ id: string; title?: string; goal?: string }> {
+  const value = patch.stages;
+
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new AgentMemoryError("Workflow patch field stages must be an array.", { code: "BAD_REQUEST" });
+  }
+
+  return value.map((item) => {
+    const record = readRecord(item);
+    const id = readPatchString(record.id, "stages.id");
+    const stage: { id: string; title?: string; goal?: string } = { id };
+
+    if (record.title !== undefined) {
+      stage.title = readPatchString(record.title, "stages.title");
+    }
+
+    if (record.goal !== undefined) {
+      stage.goal = readPatchString(record.goal, "stages.goal");
+    }
+
+    return stage;
+  });
+}
+
+function readPatchString(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new AgentMemoryError(`Workflow patch field ${field} must be a string.`, { code: "BAD_REQUEST" });
+  }
+
+  return value.trim();
+}
+
+function readPatchStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw new AgentMemoryError(`Workflow patch field ${field} must be a string array.`, { code: "BAD_REQUEST" });
+  }
+
+  return value.map((item) => item.trim()).filter((item) => item.length > 0);
+}
+
+function updateYamlFile(filePath: string, operations: YamlPatchOperation[]): void {
+  if (operations.length === 0) {
+    throw new AgentMemoryError("Workflow patch did not include editable fields.", { code: "BAD_REQUEST" });
+  }
+
+  let content = fs.readFileSync(filePath, "utf8");
+
+  for (const operation of operations) {
+    if (operation.type === "scalar") {
+      content = replaceTopLevelScalar(content, operation.key, operation.value);
+    } else if (operation.type === "array") {
+      content = replaceTopLevelArray(content, operation.key, operation.values);
+    } else {
+      content = replacePlanStages(content, operation.stages);
+    }
+  }
+
+  writeFileAtomic(filePath, content.endsWith("\n") ? content : `${content}\n`);
+}
+
+function writeFileAtomic(filePath: string, content: string): void {
+  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+
+  try {
+    fs.writeFileSync(tempPath, content);
+    fs.renameSync(tempPath, filePath);
+  } finally {
+    if (fs.existsSync(tempPath)) {
+      fs.unlinkSync(tempPath);
+    }
+  }
+}
+
+function replaceTopLevelScalar(content: string, key: string, value: string): string {
+  const lines = content.split("\n");
+  const rendered = `${key}: ${renderYamlScalar(value)}`;
+  const index = lines.findIndex((line) => line.startsWith(`${key}:`));
+
+  if (index >= 0) {
+    lines[index] = rendered;
+    return lines.join("\n");
+  }
+
+  lines.push(rendered);
+  return lines.join("\n");
+}
+
+function replaceTopLevelArray(content: string, key: string, values: string[]): string {
+  const lines = content.split("\n");
+  const index = lines.findIndex((line) => line.startsWith(`${key}:`));
+  const rendered = renderYamlArrayField(key, values, 0);
+
+  if (index < 0) {
+    lines.push(rendered);
+    return lines.join("\n");
+  }
+
+  const end = nextTopLevelIndex(lines, index + 1);
+  lines.splice(index, end - index, rendered);
+  return lines.join("\n");
+}
+
+function replacePlanStages(content: string, stages: Array<{ id: string; title?: string; goal?: string }>): string {
+  const lines = content.split("\n");
+  const stagePatches = new Map(stages.map((stage) => [stage.id, stage]));
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^  - id: (.+)$/.exec(lines[index]);
+
+    if (!match) {
+      continue;
+    }
+
+    const stageId = unquoteYamlScalar(match[1].trim());
+    const patch = stagePatches.get(stageId);
+
+    if (!patch) {
+      continue;
+    }
+
+    const end = nextStageIndex(lines, index + 1);
+    replaceIndentedScalar(lines, index + 1, end, "title", patch.title, 4);
+    replaceIndentedScalar(lines, index + 1, end, "goal", patch.goal, 4);
+  }
+
+  return lines.join("\n");
+}
+
+function replaceIndentedScalar(lines: string[], start: number, end: number, key: string, value: string | undefined, indent: number): void {
+  if (value === undefined) {
+    return;
+  }
+
+  const prefix = `${" ".repeat(indent)}${key}:`;
+  const index = lines.slice(start, end).findIndex((line) => line.startsWith(prefix));
+  const rendered = `${" ".repeat(indent)}${key}: ${renderYamlScalar(value)}`;
+
+  if (index >= 0) {
+    lines[start + index] = rendered;
+  }
+}
+
+function nextTopLevelIndex(lines: string[], start: number): number {
+  for (let index = start; index < lines.length; index += 1) {
+    if (/^[A-Za-z0-9_./-]+:/.test(lines[index])) {
+      return index;
+    }
+  }
+
+  return lines.length;
+}
+
+function nextStageIndex(lines: string[], start: number): number {
+  for (let index = start; index < lines.length; index += 1) {
+    if (/^  - id: /.test(lines[index])) {
+      return index;
+    }
+  }
+
+  return lines.length;
+}
+
+function renderYamlArrayField(key: string, values: string[], indent: number): string {
+  const prefix = " ".repeat(indent);
+
+  if (values.length === 0) {
+    return `${prefix}${key}: []`;
+  }
+
+  return `${prefix}${key}:\n${values.map((value) => `${prefix}  - ${renderYamlScalar(value)}`).join("\n")}`;
+}
+
+function unquoteYamlScalar(value: string): string {
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+
+  return value;
+}
+
+function walkYamlFiles(root: string): string[] {
+  const files: string[] = [];
+
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const entryPath = path.join(root, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...walkYamlFiles(entryPath));
+    } else if (entry.isFile() && (entry.name.endsWith(".yaml") || entry.name.endsWith(".yml"))) {
+      files.push(entryPath);
+    }
+  }
+
+  return files.sort();
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function readRecords(data: Record<string, unknown>, field: string): Array<Record<string, unknown>> {
+  const value = data[field];
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null && !Array.isArray(item)) : [];
+}
+
+function readString(data: Record<string, unknown>, field: string): string {
+  return typeof data[field] === "string" ? data[field] : "";
+}
+
+function readOptionalString(data: Record<string, unknown>, field: string): string | undefined {
+  const value = data[field];
+  return typeof value === "string" ? value : undefined;
+}
+
+function readStringArray(data: Record<string, unknown>, field: string): string[] {
+  const value = data[field];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function buildReviewQueue(claims: UiClaimSummary[]): UiReviewItem[] {

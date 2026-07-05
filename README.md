@@ -8,9 +8,12 @@ The source of truth stays in the consuming repository:
 - `docs/agent-memory/graph/**/*.yaml`
 - `docs/agent-memory/indexes/**/*.yaml`
 - `docs/agent-memory/recipes/**/*.yaml`
+- `docs/agent-memory/plans/**/*.yaml`
+- `docs/agent-memory/profiles/**/*.yaml`
 - `docs/agent-memory/waivers/**/*.yaml`
 
 The generated cache lives at `.agent-memory/memory.sqlite` by default and should not be committed.
+Generated one-off plan runs live under `.agent-memory/plans/` and should not be committed unless they are explicitly promoted into reusable plan templates.
 
 ## Requirements
 
@@ -51,7 +54,7 @@ agent-memory --help
 `init` bootstraps a repository so agents have a stable memory contract and local commands:
 
 - `agent-memory.config.yaml`: memory paths, validation defaults, context defaults, and agent skill locations.
-- `docs/agent-memory/`: canonical memory root with `claims/`, `graph/`, `indexes/`, `recipes/`, and `waivers/`.
+- `docs/agent-memory/`: canonical memory root with `claims/`, `graph/`, `indexes/`, `recipes/`, `plans/`, `profiles/`, and `waivers/`.
 - `bin/memory`: repository-local wrapper around the installed or globally available CLI.
 - `.gitignore`: adds `.agent-memory/` so generated SQLite stays out of commits.
 - `AGENTS.md`: creates or refreshes a managed Agent Memory section that points agents to the repo-memory skill, requires context lookup before non-trivial work, and requires memory updates when durable knowledge changes.
@@ -88,6 +91,16 @@ bin/memory context --changed-files src/auth.js
 bin/memory context --git-diff
 ```
 
+When a repository has workflow memory, `context` can also include matched recipes, plan-stage context, and task-specific profile traits:
+
+```bash
+bin/memory recipes search "student oauth"
+bin/memory plans suggest --task "change student oauth provider"
+bin/memory plans new --template plan_template.auth.oauth_change --task "change student oauth provider"
+bin/memory context --plan plan_run.20260702.oauth_change.1234abcd --stage inspect
+bin/memory profiles match --task "review auth changes" --changed-files src/auth.js
+```
+
 Open the local browser UI when you want to inspect memory visually:
 
 ```bash
@@ -116,11 +129,14 @@ Use `agent-memory help <command>` for full usage and examples.
 | `templates list` | List built-in claim templates. |
 | `templates show claim:fact` | Print a built-in claim template. |
 | `new claim` | Create one atomic claim from a template. |
-| `validate` | Validate config, claims, graphs, indexes, recipes, and waivers. |
+| `validate` | Validate config, claims, graphs, indexes, recipes, plans, profiles, and waivers. |
 | `compile` | Build the repo-local SQLite cache from canonical memory. |
 | `query` | Search compiled memory by text and metadata. |
 | `show` | Show one claim and optionally graph-related claims. |
 | `system` | Summarize claims, recipes, watched files, and graph activity for one system. |
+| `recipes` | List, search, and show reusable workflow recipes. |
+| `plans` | Search plan templates and manage generated local plan runs. |
+| `profiles` | List, inspect, and match task-specific profile traits. |
 | `context` | Build task-ready context from a task, changed files, or git diff. |
 | `coverage` | Check whether changed watched files have related memory updates or waivers. |
 | `audit` | Audit changed memory for deterministic stale-claim risks. |
@@ -147,7 +163,24 @@ Command usage cheat sheet:
 | `query` | Search text. | `--system`, `--status`, `--limit`, `--include-stale`, `--json` |
 | `show` | Claim ID. | `--include-related`, `--depth <n>`, `--json` |
 | `system` | System ID, such as `auth`. | `--json` |
-| `context` | One of `--task`, `--changed-files`, or `--git-diff`. | `--budget small`, `--budget medium`, `--budget full`, `--depth <n>`, `--include-inferred`, `--no-include-inferred`, `--json` |
+| `recipes list` | None. | `--include-inactive`, `--json` |
+| `recipes search` | Search text. | `--changed-files <files...>`, `--limit <n>`, `--include-inactive`, `--json` |
+| `recipes show` | Recipe ID. | `--json` |
+| `plans templates list` | None. | `--json` |
+| `plans templates show` | Plan template ID. | `--json` |
+| `plans suggest` | `--task <task>`. | `--json` |
+| `plans new` | `--task <task>`, with optional `--template <id>`. | `--json` |
+| `plans show` | Plan run ID. | `--json` |
+| `plans next` | Plan run ID. | `--json` |
+| `plans complete-stage` | Plan run ID, `--stage <id>`, and `--evidence <text>`. | `--allow-empty-evidence`, `--json` |
+| `plans block-stage` | Plan run ID, `--stage <id>`, and `--reason <text>`. | `--json` |
+| `plans finish` | Plan run ID. | `--confirm-unresolved`, `--archive`, `--abandon-blocked`, `--reason <text>`, `--json` |
+| `plans prune` | A selector such as `--completed`, `--abandoned`, or `--include-blocked`. | `--older-than <age>`, `--dry-run`, `--json` |
+| `plans promote` | Plan run ID and `--to-template`. | `--system <system>`, `--title <title>`, `--finish-after-promote`, `--json` |
+| `profiles list` | None. | `--include-inactive`, `--json` |
+| `profiles show` | Profile trait ID. | `--json` |
+| `profiles match` | Task, changed files, recipe, system, alias, or explicit trait. | `--task <task>`, `--changed-files <files...>`, `--recipe <id>`, `--system <system>`, `--profile <alias>`, `--profile-trait <id>`, `--json` |
+| `context` | One of `--task`, `--changed-files`, `--git-diff`, `--recipe`, or `--plan`. | `--stage <id>`, `--profile <alias>`, `--profile-trait <id>`, `--budget small`, `--budget medium`, `--budget full`, `--depth <n>`, `--include-inferred`, `--no-include-inferred`, `--json` |
 | `coverage` | `--changed-files` or `--git-diff`. | `--base <ref>` with `--git-diff`, `--json` |
 | `audit` | `--changed-files` or `--git-diff`. | `--base <ref>` with `--git-diff`, `--json` |
 | `doctor` | None. | `--json` |
@@ -165,6 +198,13 @@ Useful examples:
 bin/memory query "student oauth tenant" --system auth
 bin/memory show auth.student_oauth.uid_is_tenant_scoped --include-related
 bin/memory system auth --json
+bin/memory recipes search "student oauth"
+bin/memory context --recipe recipe.auth.modify_student_oauth
+bin/memory plans suggest --task "change student oauth provider"
+bin/memory plans next plan_run.20260702.oauth_change.1234abcd
+bin/memory plans finish plan_run.20260702.oauth_change.1234abcd --confirm-unresolved
+bin/memory profiles match --task "review auth changes" --profile review
+bin/memory context --task "review auth changes" --profile review
 bin/memory ui --port 0
 bin/memory init --yes --agent codex --skill-location .agents
 bin/memory install-skill --agent codex --location .codex
@@ -174,6 +214,66 @@ bin/memory migrate-docs --from docs/legacy --system auth --automatic
 bin/memory upgrade --write
 bin/memory agent-manifest --json
 ```
+
+## Contextual Workflow Guide
+
+Contextual workflows layer reusable procedures, staged work plans, and task-specific guidance on top of claims and graph relationships. They are optional: repositories without recipes, plans, or profiles still use the same claim retrieval commands.
+
+### Recipes
+
+Recipes are reusable workflow procedures stored under `docs/agent-memory/recipes/**/*.yaml`. Use them for repeatable project work such as "modify student OAuth", "add a billing webhook", or "review a migration".
+
+```bash
+bin/memory recipes search "student oauth"
+bin/memory recipes show recipe.auth.modify_student_oauth
+bin/memory context --recipe recipe.auth.modify_student_oauth
+```
+
+`context --task` automatically includes matching recipes when they are relevant. Recipe `required_claims` are pulled into context so the agent does not need a second lookup for the constraints that make the recipe safe to follow.
+
+### Plans
+
+Plan templates are reusable staged workflows stored under `docs/agent-memory/plans/**/*.yaml`. Plan runs are local generated state stored under `.agent-memory/plans/`.
+
+```bash
+bin/memory plans suggest --task "change student oauth provider"
+bin/memory plans new --template plan_template.auth.oauth_change --task "change student oauth provider"
+bin/memory plans next plan_run.20260702.oauth_change.1234abcd
+bin/memory context --plan plan_run.20260702.oauth_change.1234abcd --stage inspect
+```
+
+Use plan runs for multi-step work where each stage needs different claims, recipes, files, and verification. Complete or block stages as work progresses:
+
+```bash
+bin/memory plans complete-stage plan_run.20260702.oauth_change.1234abcd --stage inspect --evidence "Reviewed callback contract"
+bin/memory plans block-stage plan_run.20260702.oauth_change.1234abcd --stage implement --reason "Waiting on provider docs"
+```
+
+Finish plan runs when they are done, and prune old local runs so `.agent-memory/plans` does not accumulate stale state:
+
+```bash
+bin/memory plans finish plan_run.20260702.oauth_change.1234abcd --confirm-unresolved
+bin/memory plans finish plan_run.20260702.oauth_change.1234abcd --abandon-blocked --reason "Provider change was cancelled"
+bin/memory plans prune --completed --older-than 7d
+```
+
+Do not commit `.agent-memory/plans` files. If a one-off run becomes a reusable workflow, promote it into a proposed canonical template:
+
+```bash
+bin/memory plans promote plan_run.20260702.oauth_change.1234abcd --to-template --system auth --title "OAuth provider behavior change"
+```
+
+### Profiles
+
+Profile traits are small pieces of task-specific guidance stored under `docs/agent-memory/profiles/**/*.yaml`. Use them for guidance that depends on intent, changed files, systems, recipes, plan templates, or profile aliases such as `review`.
+
+```bash
+bin/memory profiles match --task "review auth changes" --changed-files src/auth.js
+bin/memory profiles show profile_trait.review.findings_first
+bin/memory context --task "review auth changes" --profile review
+```
+
+Profile traits are context, not instruction hierarchy. Treat them as repository guidance below system, developer, user, and local `AGENTS.md` instructions.
 
 ## Local Web UI
 
@@ -204,9 +304,10 @@ Keep the process running while the browser is open. The UI serves only from the 
 The UI includes:
 
 - Graph view: pan, zoom, drag, minimap, claim nodes, explicit graph edges, optional inferred/recipe/replacement relations, filters, and search.
-- File view: tree rooted at `memory_root`, including claims, graph files, indexes, recipes, and waivers.
+- File view: tree rooted at `memory_root`, including claims, graph files, indexes, recipes, plans, profiles, and waivers.
 - Detail drawer: claim metadata, Markdown body, related claims, source files, tags, review controls, and copy helpers.
 - Review queue: claims sorted by review risk, including `needs_review`, `needs_verification`, `proposed`, migrated low-confidence claims, stale claims, and deprecated claims.
+- Workflows: recipe, plan template, profile trait, and local plan-run summaries, with token-protected edits for workflow metadata and plan-stage updates.
 - Health banner: validation errors, doctor warnings, missing or stale database state, and sync status.
 
 Review actions update only claim frontmatter and preserve the Markdown body plus unknown frontmatter fields. `Approve` sets:

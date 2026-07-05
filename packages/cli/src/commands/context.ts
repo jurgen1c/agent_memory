@@ -19,6 +19,11 @@ interface ContextCommandOptions {
   depth?: number;
   json: boolean;
   includeInferred?: boolean;
+  recipeIds: string[];
+  planId?: string;
+  stageId?: string;
+  profileAlias?: string;
+  profileTraitIds: string[];
 }
 
 export async function runContextCommand(args: string[], context: ContextCommandContext = {}): Promise<ContextCommandResult> {
@@ -30,7 +35,12 @@ export async function runContextCommand(args: string[], context: ContextCommandC
     gitDiff: options.gitDiff,
     budget: options.budget,
     depth: options.depth,
-    includeInferred: options.includeInferred
+    includeInferred: options.includeInferred,
+    recipeIds: options.recipeIds,
+    planId: options.planId,
+    stageId: options.stageId,
+    profileAlias: options.profileAlias,
+    profileTraitIds: options.profileTraitIds
   });
 
   return {
@@ -43,7 +53,9 @@ function parseContextArgs(args: string[]): ContextCommandOptions {
   const options: ContextCommandOptions = {
     changedFiles: [],
     gitDiff: false,
-    json: false
+    json: false,
+    recipeIds: [],
+    profileTraitIds: []
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -92,6 +104,61 @@ function parseContextArgs(args: string[]): ContextCommandOptions {
       continue;
     }
 
+    if (arg === "--recipe") {
+      options.recipeIds.push(readValue(args, index, "--recipe"));
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--recipe=")) {
+      options.recipeIds.push(arg.slice("--recipe=".length));
+      continue;
+    }
+
+    if (arg === "--plan") {
+      options.planId = readValue(args, index, "--plan");
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--plan=")) {
+      options.planId = arg.slice("--plan=".length);
+      continue;
+    }
+
+    if (arg === "--stage") {
+      options.stageId = readValue(args, index, "--stage");
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--stage=")) {
+      options.stageId = arg.slice("--stage=".length);
+      continue;
+    }
+
+    if (arg === "--profile") {
+      options.profileAlias = readValue(args, index, "--profile");
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--profile=")) {
+      options.profileAlias = arg.slice("--profile=".length);
+      continue;
+    }
+
+    if (arg === "--profile-trait") {
+      options.profileTraitIds.push(readValue(args, index, "--profile-trait"));
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--profile-trait=")) {
+      options.profileTraitIds.push(arg.slice("--profile-trait=".length));
+      continue;
+    }
+
     if (arg === "--budget") {
       options.budget = parseBudget(readValue(args, index, "--budget"));
       index += 1;
@@ -119,10 +186,22 @@ function parseContextArgs(args: string[]): ContextCommandOptions {
     });
   }
 
-  if (!options.task && options.changedFiles.length === 0 && !options.gitDiff) {
-    throw new AgentMemoryError("context requires --task, --changed-files, or --git-diff.", {
-      details: ['Example: agent-memory context --task "fix student oauth"']
+  if (
+    !options.task &&
+    options.changedFiles.length === 0 &&
+    !options.gitDiff &&
+    options.recipeIds.length === 0 &&
+    !options.planId &&
+    !options.profileAlias &&
+    options.profileTraitIds.length === 0
+  ) {
+    throw new AgentMemoryError("context requires --task, --changed-files, --git-diff, --recipe, --plan, --profile, or --profile-trait.", {
+      details: ['Example: agent-memory context --task "fix student oauth"', "Example: agent-memory context --plan plan_run.20260702.auth_work.1234abcd --stage inspect"]
     });
+  }
+
+  if (options.stageId && !options.planId) {
+    throw new AgentMemoryError("context --stage requires --plan.");
   }
 
   return options;
@@ -141,6 +220,23 @@ function renderContext(context: AgentContext): string {
 
   if (context.warnings.length > 0) {
     lines.push("", "## Warnings", "", ...context.warnings.map((warning) => `- ${warning}`));
+  }
+
+  if (context.planStage) {
+    lines.push(
+      "",
+      "## Plan Stage",
+      "",
+      `Plan: ${context.planStage.planId}`,
+      `Stage: ${context.planStage.id}`,
+      `Status: ${context.planStage.status}`,
+      "",
+      context.planStage.goal
+    );
+
+    if (context.planStage.doneWhen.length > 0) {
+      lines.push("", "Done when:", ...context.planStage.doneWhen.map((item) => `- ${item}`));
+    }
   }
 
   if (context.criticalRules.length > 0) {
@@ -183,16 +279,47 @@ function renderContext(context: AgentContext): string {
     lines.push("", "## Relevant Files", "", ...context.relevantFiles.map((file) => `- ${file}`));
   }
 
-  if (context.recipes.length > 0) {
-    lines.push("", "## Related Recipes");
+  if (context.matchedRecipes.length > 0) {
+    lines.push("", "## Matched Recipes");
 
-    for (const recipe of context.recipes) {
+    for (const recipe of context.matchedRecipes) {
       lines.push("", `### ${recipe.id}`, "", `${recipe.title} (${recipe.status})`);
 
+      if (recipe.reasons.length > 0) {
+        lines.push("", "Matched because:", ...recipe.reasons.map((reason) => `- ${reason.code}: ${reason.detail}`));
+      }
+
+      if (recipe.requiredClaims.length > 0) {
+        lines.push("", "Required claims:", ...recipe.requiredClaims.map((claimId) => `- ${claimId}`));
+      }
+
       if (recipe.steps.length > 0) {
+        lines.push("", "Steps:");
         lines.push("", ...recipe.steps.map((step, index) => `${index + 1}. ${step}`));
       }
+
+      if (recipe.verification.length > 0) {
+        lines.push("", "Verification:", ...recipe.verification.map((step) => `- ${step}`));
+      }
     }
+  }
+
+  if (context.profileTraits.length > 0) {
+    lines.push("", "## Selected Profile Traits");
+
+    for (const trait of context.profileTraits) {
+      lines.push("", `### ${trait.id}`, "", `${trait.title} (${trait.category}, ${trait.priority})`);
+
+      if (trait.reasons.length > 0) {
+        lines.push("", "Selected because:", ...trait.reasons.map((reason) => `- ${reason.code}: ${reason.detail}`));
+      }
+
+      lines.push("", "Guidance:", "", trait.snippet);
+    }
+  }
+
+  if (context.droppedProfileTraits.length > 0) {
+    lines.push("", "## Dropped Profile Traits", "", ...context.droppedProfileTraits.map((trait) => `- ${trait.id}: ${trait.reason}`));
   }
 
   if (context.verificationSteps.length > 0) {

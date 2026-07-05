@@ -92,6 +92,71 @@ const TOPICS: HelpTopic[] = [
     phase: "Phase 6"
   },
   {
+    name: "recipes",
+    purpose: "List, search, and show reusable workflow recipes.",
+    usage: [
+      "agent-memory recipes list",
+      "agent-memory recipes list --include-inactive",
+      'agent-memory recipes search "student oauth"',
+      'agent-memory recipes search "student oauth" --changed-files src/auth.js',
+      "agent-memory recipes search \"student oauth\" --limit 5",
+      "agent-memory recipes search \"student oauth\" --include-inactive",
+      "agent-memory recipes show recipe.auth.modify_student_oauth",
+      "agent-memory recipes show recipe.auth.modify_student_oauth --json"
+    ],
+    examples: ['agent-memory recipes search "student oauth"', "agent-memory recipes show recipe.auth.modify_student_oauth"],
+    agentNotes: ["Requires a compiled SQLite database. Search hides stale, deprecated, and rejected recipes unless --include-inactive is passed."],
+    phase: "Phase 11"
+  },
+  {
+    name: "plans",
+    purpose: "Search plan templates and manage local generated plan runs.",
+    usage: [
+      "agent-memory plans templates list",
+      "agent-memory plans templates show plan_template.auth.oauth_change",
+      'agent-memory plans suggest --task "change student oauth provider"',
+      'agent-memory plans new --task "change student oauth provider"',
+      'agent-memory plans new --template plan_template.auth.oauth_change --task "change student oauth provider"',
+      "agent-memory plans show plan_run.20260702.oauth_change.1234abcd",
+      "agent-memory plans next plan_run.20260702.oauth_change.1234abcd",
+      "agent-memory plans complete-stage plan_run.20260702.oauth_change.1234abcd --stage inspect --evidence \"tests passed\"",
+      "agent-memory plans block-stage plan_run.20260702.oauth_change.1234abcd --stage inspect --reason \"waiting on API docs\"",
+      "agent-memory plans finish plan_run.20260702.oauth_change.1234abcd --confirm-unresolved",
+      "agent-memory plans prune --completed --older-than 7d",
+      "agent-memory plans promote plan_run.20260702.oauth_change.1234abcd --to-template"
+    ],
+    examples: [
+      'agent-memory plans suggest --task "change student oauth provider"',
+      'agent-memory plans new --template plan_template.auth.oauth_change --task "change student oauth provider"',
+      "agent-memory context --plan plan_run.20260702.oauth_change.1234abcd --stage inspect"
+    ],
+    agentNotes: ["Plan runs are generated local state under .agent-memory/plans. Finish or prune them instead of treating completed runs as durable memory."],
+    phase: "Contextual Workflows Phase 4"
+  },
+  {
+    name: "profiles",
+    purpose: "List, inspect, and match small profile traits for task-specific context guidance.",
+    usage: [
+      "agent-memory profiles list",
+      "agent-memory profiles list --include-inactive",
+      "agent-memory profiles show profile_trait.review.findings_first",
+      'agent-memory profiles match --task "review auth changes"',
+      'agent-memory profiles match --task "review auth changes" --changed-files src/auth.js',
+      "agent-memory profiles match --recipe recipe.auth.modify_student_oauth",
+      "agent-memory profiles match --system auth",
+      "agent-memory profiles match --profile review",
+      "agent-memory profiles match --profile-trait profile_trait.review.findings_first",
+      "agent-memory profiles match --task \"review auth changes\" --json"
+    ],
+    examples: [
+      'agent-memory profiles match --task "review auth changes"',
+      "agent-memory profiles show profile_trait.review.findings_first",
+      "agent-memory context --task \"review auth changes\" --profile review"
+    ],
+    agentNotes: ["Profile traits are memory context, not instruction hierarchy. Treat them as lower priority than system, developer, user, and repository instructions."],
+    phase: "Contextual Workflows Phase 5"
+  },
+  {
     name: "templates",
     purpose: "List, show, or copy built-in claim templates.",
     usage: [
@@ -133,6 +198,10 @@ const TOPICS: HelpTopic[] = [
       "agent-memory context --task \"fix auth\" --depth 2",
       "agent-memory context --task \"fix auth\" --include-inferred",
       "agent-memory context --task \"fix auth\" --no-include-inferred",
+      "agent-memory context --recipe recipe.auth.modify_student_oauth",
+      "agent-memory context --plan plan_run.20260702.oauth_change.1234abcd --stage inspect",
+      "agent-memory context --task \"review auth\" --profile review",
+      "agent-memory context --task \"review auth\" --profile-trait profile_trait.review.findings_first",
       "agent-memory context --task \"fix auth\" --json"
     ],
     examples: ['agent-memory context --changed-files src/auth.js', "agent-memory context --git-diff"],
@@ -296,6 +365,9 @@ export function renderHelp(topicName?: string): string {
     "  query                Search compiled claims.",
     "  show                 Show one compiled claim.",
     "  system               Summarize compiled memory for one system.",
+    "  recipes              List, search, and show reusable workflow recipes.",
+    "  plans                Search workflow templates and manage generated plan runs.",
+    "  profiles             Match task-specific profile traits for context guidance.",
     "  context              Build agent-ready task or file context.",
     "  coverage             Check watched-file memory coverage.",
     "  audit                Audit deterministic stale-claim risks.",

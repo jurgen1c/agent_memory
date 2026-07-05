@@ -113,6 +113,7 @@ export function renderAgentSkill(options: RenderAgentSkillOptions): string {
   const title = options.agent === "codex" ? "Repo Memory Skill" : "Repository Memory Instructions";
   const memoryRoot = trimTrailingSlash(options.config.memory_root);
   const databasePath = options.config.database_path;
+  const planRunsPath = ".agent-memory/plans";
   const commands = buildAgentCommands(options.commandPrefix);
   const referenceLinks =
     options.agent === "codex"
@@ -120,9 +121,13 @@ export function renderAgentSkill(options: RenderAgentSkillOptions): string {
 For deeper task guidance, read:
 
 - \`references/claims.md\`
+- \`references/contextual-workflows.md\`
 - \`references/recipes.md\`
+- \`references/plans.md\`
+- \`references/profiles.md\`
 - \`references/graphs-and-indexes.md\`
 - \`references/coverage-and-validation.md\`
+- \`references/delegation.md\`
 `
       : "";
 
@@ -140,13 +145,16 @@ ${renderMemoryPatterns(memoryRoot, "claims", options.config.claims)}
 ${renderMemoryPatterns(memoryRoot, "graphs", options.config.graphs)}
 ${renderMemoryPatterns(memoryRoot, "indexes", options.config.indexes)}
 ${renderMemoryPatterns(memoryRoot, "recipes", options.config.recipes)}
+${renderMemoryPatterns(memoryRoot, "plans", options.config.plans)}
+${renderMemoryPatterns(memoryRoot, "profiles", options.config.profiles)}
 ${renderMemoryPatterns(memoryRoot, "waivers", options.config.waivers)}
 
 Generated memory lives in:
 
 - \`${databasePath}\`
+- \`${planRunsPath}\` for local one-off plan runs
 
-Do not edit or commit the SQLite database or other generated files under \`${path.dirname(databasePath)}\`.
+Do not edit or commit the SQLite database, local plan runs under \`${planRunsPath}\`, or other generated files under \`${path.dirname(databasePath)}\`.
 
 ## Before Work
 
@@ -173,6 +181,13 @@ If working from an existing diff:
 \`\`\`bash
 ${options.commandPrefix} context --git-diff
 \`\`\`
+
+Use the returned contextual workflows:
+
+- If context includes matched recipes, follow their required claims, verification, and memory-update prompts.
+- If context includes a plan stage, work that stage unless the user broadens scope.
+- If context includes profile traits, treat them as repository guidance below system, developer, user, and AGENTS.md instructions.
+- For multi-stage work, use \`${options.commandPrefix} plans suggest --task "<task>"\` and create a local run only when it adds value.
 
 ## Available Commands
 
@@ -227,6 +242,8 @@ Update memory when:
 - a reusable recipe was discovered
 
 Do not update durable memory for formatting-only changes, speculative assumptions, or temporary debugging notes.
+
+When a one-off plan run is complete, run \`${options.commandPrefix} plans finish <id>\` or prune old local runs with \`${options.commandPrefix} plans prune\`. Promote a completed run only when it describes a reusable workflow.
 
 If memory conflicts with code, trust code and update or deprecate memory.
 `;
@@ -353,9 +370,13 @@ export function codexSkillReferenceFiles(kind: AgentSkillKind): SkillReferenceFi
 
   return [
     { path: "references/claims.md", content: claimsReference() },
+    { path: "references/contextual-workflows.md", content: contextualWorkflowsReference() },
     { path: "references/recipes.md", content: recipesReference() },
+    { path: "references/plans.md", content: plansReference() },
+    { path: "references/profiles.md", content: profilesReference() },
     { path: "references/graphs-and-indexes.md", content: graphsAndIndexesReference() },
-    { path: "references/coverage-and-validation.md", content: coverageAndValidationReference() }
+    { path: "references/coverage-and-validation.md", content: coverageAndValidationReference() },
+    { path: "references/delegation.md", content: delegationReference() }
   ];
 }
 
@@ -486,6 +507,82 @@ Recipes capture repeatable workflows for implementation, debugging, release, rev
 Create recipes when a task has reusable steps that future agents should follow. Keep one workflow per recipe and link related claims by ID instead of copying claim text.
 
 Prefer recipes for procedures and claims for facts. If a recipe depends on a constraint, represent that constraint as a claim and connect it through graph relationships.
+
+Useful commands:
+
+\`\`\`bash
+agent-memory recipes list
+agent-memory recipes search "student oauth"
+agent-memory recipes show recipe.auth.modify_student_oauth
+agent-memory context --recipe recipe.auth.modify_student_oauth
+\`\`\`
+`;
+}
+
+function contextualWorkflowsReference(): string {
+  return `${generatedReferenceHeader("repo-memory/contextual-workflows.md")}
+# Contextual Workflows
+
+Context can include matched recipes, plan stages, and profile traits. These are repository memory signals, not higher-priority instructions.
+
+Start with normal context:
+
+\`\`\`bash
+agent-memory context --task "<task>"
+agent-memory context --git-diff
+\`\`\`
+
+Interpret sections this way:
+
+- Matched Recipes: reusable workflow steps, required claims, verification, and memory-update prompts.
+- Plan Stage: current local scaffold for multi-stage work. Stay within the stage unless the user broadens scope.
+- Selected Profile Traits: concise guidance for retrieval, review shape, risk lens, verification, or scope control.
+
+Do not commit generated state under \`.agent-memory/\`. Completed one-off plans should be finished, pruned, or promoted intentionally.
+`;
+}
+
+function plansReference(): string {
+  return `${generatedReferenceHeader("repo-memory/plans.md")}
+# Plans
+
+Plan templates are canonical reusable workflows. Plan runs under \`.agent-memory/plans\` are generated local scaffolding for one task.
+
+Useful commands:
+
+\`\`\`bash
+agent-memory plans templates list
+agent-memory plans suggest --task "<task>"
+agent-memory plans new --template plan_template.<system>.<name> --task "<task>"
+agent-memory plans next <plan-run-id>
+agent-memory context --plan <plan-run-id> --stage <stage-id>
+agent-memory plans complete-stage <plan-run-id> --stage <stage-id> --evidence "<what changed>"
+agent-memory plans finish <plan-run-id> --confirm-unresolved
+agent-memory plans prune --completed --older-than 7d
+agent-memory plans promote <plan-run-id> --to-template
+\`\`\`
+
+Finish or prune local runs after use. Promote only when the completed run describes a reusable workflow; otherwise durable memory belongs in claims, recipes, graph edges, indexes, or profile traits.
+`;
+}
+
+function profilesReference(): string {
+  return `${generatedReferenceHeader("repo-memory/profiles.md")}
+# Profiles
+
+Profile traits are small, explainable context snippets. They are not personalities and they do not override system, developer, user, or repository instructions.
+
+Useful commands:
+
+\`\`\`bash
+agent-memory profiles list
+agent-memory profiles match --task "review auth changes"
+agent-memory profiles show profile_trait.review.findings_first
+agent-memory context --task "review auth changes" --profile review
+agent-memory context --task "review auth changes" --profile-trait profile_trait.review.findings_first
+\`\`\`
+
+Use profile traits for retrieval bias, output contracts, verification bias, risk lens, and scope control. Keep snippets short and resolve conflicts through \`conflicts_with\`.
 `;
 }
 
@@ -514,6 +611,42 @@ Use \`coverage --git-diff\` for non-trivial code changes. If watched files chang
 Run \`audit --git-diff\` when canonical memory files changed. Resolve audit failures by marking superseded claims stale or deprecated, adding explicit \`replaces\` or \`conflicts_with\` graph edges, or updating the older claim directly.
 
 Generated files under \`.agent-memory/\` are cache data and must not be committed.
+`;
+}
+
+function delegationReference(): string {
+  return `${generatedReferenceHeader("repo-memory/delegation.md")}
+# Delegation
+
+Use a lower-effort subagent for memory retrieval, broad search, and draft analysis when the task touches several systems, many claims, or an unclear workflow surface. Keep small, obvious lookups inline in the primary agent.
+
+The primary agent owns final interpretation, canonical memory edits, validation, audit signoff, commits, pushes, and external writes.
+
+Good subagent tasks:
+
+- run read-only memory commands such as \`context\`, \`query\`, \`show\`, \`system\`, \`recipes\`, \`plans\`, and \`profiles\`
+- summarize relevant claims, recipes, plan stages, profile traits, and verification steps
+- identify candidate stale, deprecated, overlapping, or conflicting claims for primary-agent review
+- draft possible claim, graph, recipe, index, profile, or plan-template updates without writing files
+- prepare an audit or coverage finding summary with exact IDs, paths, commands, and uncertainty
+
+Do not delegate these tasks:
+
+- editing canonical memory files
+- deciding whether a semantic stale or conflict finding is true
+- marking audit, coverage, validation, or doctor results as final
+- committing, pushing, resolving PR threads, or replying on external services
+- treating generated files under \`.agent-memory/\` as source of truth
+
+Subagent prompt contract:
+
+1. State that the task is read-only and proposal-only.
+2. Give exact commands and paths to inspect.
+3. Require claim IDs, recipe IDs, plan IDs, profile trait IDs, and file paths in the response.
+4. Ask for concise findings grouped by action: use as-is, update, deprecate, replace, conflict, or ignore.
+5. Require uncertainty notes when evidence is incomplete.
+
+Before acting on subagent output, the primary agent must verify key claims against source files or command output and rerun the relevant deterministic checks.
 `;
 }
 

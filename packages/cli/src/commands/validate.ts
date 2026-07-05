@@ -78,7 +78,9 @@ function renderValidationResult(result: ValidationResult): string {
     `Claims: ${result.counts.claims}`,
     `Graphs: ${result.counts.graphs}`,
     `Indexes: ${result.counts.indexes}`,
-    `Recipes: ${result.counts.recipes}`
+    `Recipes: ${result.counts.recipes}`,
+    `Plans: ${result.counts.plans}`,
+    `Profiles: ${result.counts.profiles}`
   ];
 
   if (result.errors.length > 0) {
