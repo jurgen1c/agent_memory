@@ -316,6 +316,25 @@ describe("agent-manifest command", () => {
     });
   });
 
+  test("reports plan-run warnings in deterministic path order", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    writeWorkflowArtifact(repoRoot, ".agent-memory/plans/z-last.yaml", "- invalid\n");
+    writeWorkflowArtifact(repoRoot, ".agent-memory/plans/a-first.yaml", "- invalid\n");
+    writeWorkflowArtifact(repoRoot, ".agent-memory/plans/middle/b-nested.yml", "- invalid\n");
+
+    const result = await dispatch(["agent-manifest", "--json"], { cwd: repoRoot });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.workflow_summary.warnings.map((warning: string) => warning.match(/\.agent-memory\/plans\/[^:]+/)?.[0])).toEqual([
+      ".agent-memory/plans/a-first.yaml",
+      ".agent-memory/plans/middle/b-nested.yml",
+      ".agent-memory/plans/z-last.yaml"
+    ]);
+  });
+
   test("renders command help for phase 10 commands", async () => {
     const installSkill = await dispatch(["help", "install-skill"]);
     const manifest = await dispatch(["help", "agent-manifest"]);

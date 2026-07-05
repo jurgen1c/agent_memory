@@ -158,15 +158,18 @@ function countPlanRuns(repoRoot: string, warnings: string[]): { active: number; 
 }
 
 function walkYamlFiles(root: string): string[] {
-  return fs.readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
-    const entryPath = path.join(root, entry.name);
+  return fs
+    .readdirSync(root, { withFileTypes: true })
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .flatMap((entry) => {
+      const entryPath = path.join(root, entry.name);
 
-    if (entry.isDirectory()) {
-      return walkYamlFiles(entryPath);
-    }
+      if (entry.isDirectory()) {
+        return walkYamlFiles(entryPath);
+      }
 
-    return entry.isFile() && isYamlFile(entry.name) ? [entryPath] : [];
-  });
+      return entry.isFile() && isYamlFile(entry.name) ? [entryPath] : [];
+    });
 }
 
 function isYamlFile(fileName: string): boolean {
