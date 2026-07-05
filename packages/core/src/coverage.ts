@@ -59,6 +59,10 @@ interface MemoryFile {
   sourcePath: string;
 }
 
+interface RecipeCoverageFile extends MemoryFile {
+  relevantFiles: string[];
+}
+
 interface PlanTemplateCoverageRow {
   id: string;
   sourcePath: string;
@@ -99,7 +103,7 @@ export async function checkCoverage(options: CoverageOptions = {}): Promise<Cove
   try {
     const indexes = loadCoverageIndexes(database);
     const claims = database.all<MemoryFile>("SELECT id, source_path AS sourcePath FROM claims");
-    const recipes = database.all<MemoryFile>("SELECT id, source_path AS sourcePath FROM recipes");
+    const recipes = loadRecipeCoverageFiles(database);
     const changedFileSet = new Set(changedFiles);
     const changes = changedFiles.map((file) =>
       coverageForFile(file, changedFileSet, indexes, claims, recipes, waivers, database, memoryRootRelative)
@@ -125,7 +129,7 @@ function coverageForFile(
   changedFileSet: Set<string>,
   indexes: CoverageIndex[],
   claims: MemoryFile[],
-  recipes: MemoryFile[],
+  recipes: RecipeCoverageFile[],
   waivers: CoverageWaiver[],
   database: SqliteDatabase,
   memoryRootRelative: string
@@ -187,7 +191,7 @@ function relatedMemoryFilesFor(
   changedFile: string,
   indexes: CoverageIndex[],
   claims: MemoryFile[],
-  recipes: MemoryFile[],
+  recipes: RecipeCoverageFile[],
   database: SqliteDatabase,
   memoryRootRelative: string
 ): string[] {
@@ -219,10 +223,9 @@ function relatedMemoryFilesFor(
     files.add(memoryPath(memoryRootRelative, row.sourcePath));
   }
 
-  for (const row of database.all<{ sourcePath: string; metadataJson: string }>("SELECT source_path AS sourcePath, metadata_json AS metadataJson FROM recipes")) {
-    const metadata = parseJson(row.metadataJson);
-    if (readStringArray(metadata, "relevant_files").some((pattern) => pathMatchesPattern(pattern, changedFile))) {
-      files.add(memoryPath(memoryRootRelative, row.sourcePath));
+  for (const recipe of recipes) {
+    if (recipe.relevantFiles.some((pattern) => pathMatchesPattern(pattern, changedFile))) {
+      files.add(memoryPath(memoryRootRelative, recipe.sourcePath));
     }
   }
 
@@ -333,6 +336,14 @@ function loadCoverageIndexes(database: SqliteDatabase): CoverageIndex[] {
       recipeGlobs: readStringArray(metadata, "recipe_globs")
     };
   });
+}
+
+function loadRecipeCoverageFiles(database: SqliteDatabase): RecipeCoverageFile[] {
+  return database.all<{ id: string; sourcePath: string; metadataJson: string }>("SELECT id, source_path AS sourcePath, metadata_json AS metadataJson FROM recipes").map((row) => ({
+    id: row.id,
+    sourcePath: row.sourcePath,
+    relevantFiles: readStringArray(parseJson(row.metadataJson), "relevant_files")
+  }));
 }
 
 function loadCoverageWaivers(memoryRoot: string, patterns: string[]): CoverageWaiver[] {

@@ -44,6 +44,27 @@ describe("coverage command", () => {
     expect(parsed.changes.find((change: { path: string }) => change.path === "src/auth.js").status).toBe("covered");
   });
 
+  test("uses recipe relevant files across multiple watched changes", async () => {
+    const cwd = await compiledMockAppWithoutRecipeGlobs();
+    const result = await dispatch(
+      [
+        "coverage",
+        "--changed-files",
+        "src/auth.js",
+        "src/tenant.js",
+        "docs/agent-memory/recipes/auth/modify_student_oauth.yaml",
+        "--json"
+      ],
+      { cwd }
+    );
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.changes.find((change: { path: string }) => change.path === "src/auth.js").status).toBe("covered");
+    expect(parsed.changes.find((change: { path: string }) => change.path === "src/tenant.js").status).toBe("covered");
+  });
+
   test("warns when an active local plan run is staged", async () => {
     const cwd = await compiledMockApp();
     writePlanRun(cwd, "active");
