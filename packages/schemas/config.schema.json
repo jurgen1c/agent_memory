@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Agent Memory Config",
   "type": "object",
-  "required": ["version", "memory_root", "database_path", "claims", "graphs", "indexes", "recipes", "waivers"],
+  "required": ["version", "memory_root", "database_path", "claims", "graphs", "indexes", "recipes", "plans", "profiles", "waivers"],
   "properties": {
     "version": { "const": 1 },
     "memory_root": { "type": "string" },

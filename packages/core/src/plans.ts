@@ -5,6 +5,7 @@ import path from "node:path";
 import { loadConfig, renderYamlScalar } from "./config";
 import { AgentMemoryError, NotFoundError } from "./errors";
 import { resolveConfiguredPath } from "./files";
+import { commandPrefixForRepo } from "./skills";
 import { parseYaml } from "./yaml";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
 
@@ -224,7 +225,8 @@ export function showPlanRun(options: { cwd?: string; id: string }): PlanRunResul
 export function nextPlanStage(options: { cwd?: string; id: string }): PlanNextResult {
   const result = showPlanRun(options);
   const stage = currentOrNextStage(result.run);
-  const contextCommand = `bin/memory context --plan ${result.run.id} --stage ${stage.id}`;
+  const loaded = loadConfig({ cwd: options.cwd });
+  const contextCommand = `${commandPrefixForRepo(loaded.repo.root)} context --plan ${result.run.id} --stage ${stage.id}`;
   return { ...result, stage, contextCommand };
 }
 
@@ -523,15 +525,26 @@ function planRunsRoot(repoRoot: string): string {
 function loadPlanRun(repoRoot: string, id: string): { run: PlanRunDetail; path: string } {
   const root = planRunsRoot(repoRoot);
   const files = fs.existsSync(root) ? walkPlanRunFiles(root) : [];
-  const filePath = files.find((candidate) => parsePlanRunFile(candidate).id === id || planRunFileStem(candidate) === id);
-
-  if (!filePath) {
-    throw new NotFoundError(`Plan run not found: ${id}`);
+  const stemMatch = files.find((candidate) => planRunFileStem(candidate) === id);
+  if (stemMatch) {
+    const run = parsePlanRunFile(stemMatch);
+    run.path = stemMatch;
+    return { run, path: stemMatch };
   }
 
-  const run = parsePlanRunFile(filePath);
-  run.path = filePath;
-  return { run, path: filePath };
+  for (const filePath of files) {
+    try {
+      const run = parsePlanRunFile(filePath);
+      if (run.id === id) {
+        run.path = filePath;
+        return { run, path: filePath };
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  throw new NotFoundError(`Plan run not found: ${id}`);
 }
 
 function parsePlanRunFile(filePath: string): PlanRunDetail {

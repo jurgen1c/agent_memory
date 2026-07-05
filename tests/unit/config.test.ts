@@ -5,6 +5,8 @@ import path from "node:path";
 import { defaultConfig, loadConfig, renderConfigTemplate } from "../../packages/core/src/config";
 import { ConfigError } from "../../packages/core/src/errors";
 
+const repoRoot = path.resolve(".");
+
 describe("loadConfig", () => {
   test("loads repository config with defaults and nested values", () => {
     const repoRoot = makeTempRepo(`
@@ -134,6 +136,13 @@ context:
     expect(loaded.config.claims).toEqual(["null", "**/*.md", "{claims}/**/*.md", "1.2", "01", "1e3"]);
     expect(loaded.config.git.hooks).toEqual(["~"]);
     expect(loaded.config.agent_skills.codex.path).toBe("false");
+  });
+
+  test("schema requires contextual workflow path globs", () => {
+    const schema = JSON.parse(fs.readFileSync(path.join(repoRoot, "packages/schemas/config.schema.json"), "utf8"));
+
+    expect(schema.required).toContain("plans");
+    expect(schema.required).toContain("profiles");
   });
 });
 

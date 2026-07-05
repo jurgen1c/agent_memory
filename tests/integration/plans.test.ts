@@ -60,7 +60,14 @@ describe("plans command", () => {
 
     const next = await dispatch(["plans", "next", parsed.run.id], { cwd });
     expect(next.exitCode).toBe(0);
-    expect(next.stdout).toContain(`Context: bin/memory context --plan ${parsed.run.id} --stage inspect`);
+    expect(next.stdout).toContain(`Context: agent-memory context --plan ${parsed.run.id} --stage inspect`);
+
+    const wrapperPath = path.join(cwd, "bin/memory");
+    fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
+    fs.writeFileSync(wrapperPath, "#!/usr/bin/env bash\nexec agent-memory \"$@\"\n");
+    const nextWithWrapper = await dispatch(["plans", "next", parsed.run.id], { cwd });
+    expect(nextWithWrapper.exitCode).toBe(0);
+    expect(nextWithWrapper.stdout).toContain(`Context: bin/memory context --plan ${parsed.run.id} --stage inspect`);
 
     const context = await dispatch(["context", "--plan", parsed.run.id, "--stage", "inspect", "--json"], { cwd });
     const contextJson = JSON.parse(context.stdout);
@@ -97,6 +104,23 @@ describe("plans command", () => {
 
     expect(show.exitCode).toBe(0);
     expect(showJson.run.id).toBe("plan_run.manual_stem");
+  });
+
+  test("ignores malformed unrelated plan runs when loading by ID or filename stem", async () => {
+    const cwd = await compiledMockAppWithPlan();
+    writePlanRun(cwd, ".agent-memory/plans/manual-stem.yml", "plan_run.manual_stem");
+    const malformedPath = path.join(cwd, ".agent-memory/plans/broken.yaml");
+    fs.writeFileSync(malformedPath, "- invalid\n");
+
+    const byId = await dispatch(["plans", "show", "plan_run.manual_stem", "--json"], { cwd });
+    const byIdJson = JSON.parse(byId.stdout);
+    expect(byId.exitCode).toBe(0);
+    expect(byIdJson.run.id).toBe("plan_run.manual_stem");
+
+    const byStem = await dispatch(["plans", "show", "manual-stem", "--json"], { cwd });
+    const byStemJson = JSON.parse(byStem.stdout);
+    expect(byStem.exitCode).toBe(0);
+    expect(byStemJson.run.id).toBe("plan_run.manual_stem");
   });
 
   test("requires stage evidence, advances stages, and deletes finished runs by default", async () => {
