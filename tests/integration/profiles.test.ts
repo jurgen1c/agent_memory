@@ -153,6 +153,18 @@ describe("profiles command", () => {
     expect(smallBudgetJson.profileTraits.length).toBeLessThanOrEqual(2);
   });
 
+  test("context suppresses profile diagnostics when configured", async () => {
+    const cwd = await compiledMockAppWithProfiles((config) => `${config}\ncontext:\n  include_profile_diagnostics: false\n`);
+    const result = await dispatch(["context", "--profile-trait", "profile_trait.implementer.keep_scope_tight", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.profileTraits.map((trait: { id: string }) => trait.id)).toContain("profile_trait.implementer.keep_scope_tight");
+    expect(parsed.profileDiagnostics).toEqual({ intents: [], warnings: [] });
+    expect(parsed.droppedProfileTraits).toEqual([]);
+    expect(parsed.warnings).not.toContain("profile_trait.implementer.keep_scope_tight is broad; keep profile traits small and specific.");
+  });
+
   test("context includes plan-stage profile traits explicitly", async () => {
     const cwd = await compiledMockAppWithProfiles();
     writePlan(cwd);

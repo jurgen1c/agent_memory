@@ -94,7 +94,19 @@ function buildWorkflowCapabilities(): AgentManifest["capabilities"] {
     },
     plans: {
       enabled: true,
-      commands: ["plans suggest", "plans new", "plans next", "plans finish", "plans prune", "plans promote"],
+      commands: [
+        "plans templates list",
+        "plans templates show",
+        "plans suggest",
+        "plans new",
+        "plans show",
+        "plans next",
+        "plans complete-stage",
+        "plans block-stage",
+        "plans finish",
+        "plans prune",
+        "plans promote"
+      ],
       context_flags: ["--plan", "--stage"],
       run_root: ".agent-memory/plans"
     },

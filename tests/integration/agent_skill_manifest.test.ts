@@ -277,6 +277,19 @@ describe("agent-manifest command", () => {
     expect(parsed.commands.find((command: { name: string }) => command.name === "context").examples[0]).toContain("bin/memory");
     expect(parsed.capabilities.contextual_workflows).toBe(true);
     expect(parsed.capabilities.recipes.commands).toContain("recipes search");
+    expect(parsed.capabilities.plans.commands).toEqual([
+      "plans templates list",
+      "plans templates show",
+      "plans suggest",
+      "plans new",
+      "plans show",
+      "plans next",
+      "plans complete-stage",
+      "plans block-stage",
+      "plans finish",
+      "plans prune",
+      "plans promote"
+    ]);
     expect(parsed.capabilities.plans.context_flags).toEqual(["--plan", "--stage"]);
     expect(parsed.capabilities.plans.run_root).toBe(".agent-memory/plans");
     expect(parsed.capabilities.profiles.context_flags).toContain("--profile-trait");

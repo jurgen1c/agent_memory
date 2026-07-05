@@ -202,12 +202,13 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
           includeInactive: explicitProfileTraitIds.length > 0
         })
       : emptyProfileResult();
+    const profileDiagnosticWarnings = opened.contextDefaults.include_profile_diagnostics ? profileResult.diagnostics.warnings : [];
     const warnings = [
       ...(planContext?.warnings ?? []),
       ...warningLines([...claimsById.values()]),
       ...recipeWarningLines(opened.database, recipes),
       ...planStageWarningLines(opened.database, planContext?.stage),
-      ...profileResult.diagnostics.warnings
+      ...profileDiagnosticWarnings
     ];
 
     return {
