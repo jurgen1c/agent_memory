@@ -27,7 +27,7 @@ export interface RecipeMatchReason {
   code:
     | "explicit_recipe"
     | "trigger_match"
-    | "title_fts"
+    | "fts_match"
     | "step_fts"
     | "system_match"
     | "changed_file_match"
@@ -222,7 +222,7 @@ function applyTextMatches(
     const detail = query.trim();
     const score = 10 + scoreFromRank(row.rank_score);
 
-    addScore(scores, reasons, row.id, score, { code: "title_fts", detail });
+    addScore(scores, reasons, row.id, score, { code: "fts_match", detail });
 
     if (matchesAny(query, readStringArray(metadata, "intent_triggers"))) {
       addScore(scores, reasons, row.id, 50, { code: "trigger_match", detail: matchedValue(query, readStringArray(metadata, "intent_triggers")) ?? detail });

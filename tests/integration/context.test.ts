@@ -92,6 +92,7 @@ describe("context command", () => {
     expect(parsed.relatedClaims.some((related: { claim: { id: string } }) => related.claim.id === "tenancy.current_tenant.required_for_student_auth")).toBe(true);
     expect(parsed.matchedRecipes[0].id).toBe("recipe.auth.modify_student_oauth");
     expect(parsed.matchedRecipes[0].reasons.length).toBeGreaterThan(0);
+    expect(parsed.matchedRecipes[0].reasons.some((reason: { code: string }) => reason.code === "fts_match")).toBe(true);
     expect(parsed.verificationSteps).toContain("bun test");
   });
 

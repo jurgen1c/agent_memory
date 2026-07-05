@@ -396,7 +396,7 @@ Reason codes:
 
 - `explicit_recipe`
 - `trigger_match`
-- `title_fts`
+- `fts_match`
 - `summary_fts`
 - `step_fts`
 - `system_match`

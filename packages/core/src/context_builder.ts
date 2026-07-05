@@ -510,7 +510,7 @@ function mergeRecipeMatches(database: SqliteDatabase, matches: RecipeMatch[], re
     byId.set(recipe.id, {
       ...(hydrated ? toContextRecipe(hydrated) : recipe),
       score: 1,
-      reasons: includeDiagnostics ? [{ code: "required_claim_already_matched", detail: recipe.requiredClaims[0] ?? recipe.id }] : []
+      reasons: includeDiagnostics ? [{ code: "required_claim_already_matched", detail: "related matched claim" }] : []
     });
   }
 

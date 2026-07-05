@@ -15,6 +15,7 @@ describe("recipes command", () => {
 
     expect(result.exitCode).toBe(0);
     expect(parsed.matches[0].recipe.id).toBe("recipe.auth.modify_student_oauth");
+    expect(parsed.matches[0].reasons.some((reason: { code: string }) => reason.code === "fts_match")).toBe(true);
     expect(parsed.matches[0].reasons.some((reason: { code: string }) => reason.code === "trigger_match")).toBe(true);
 
     const text = await dispatch(["recipes", "search", "fix student login"], { cwd });
