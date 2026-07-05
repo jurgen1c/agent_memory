@@ -178,7 +178,7 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
     );
     const criticalRules = criticalRulesForClaims(opened.database, matched).slice(0, limits.matched);
     const related = relatedClaims(opened.database, matched, depth, includeInferred).slice(0, limits.related);
-    const recipes = mergeRecipeMatches(
+    const matchedRecipes = mergeRecipeMatches(
       opened.database,
       recipeMatches,
       relatedRecipes(opened.database, matched, uniqueChangedFiles),
@@ -191,7 +191,7 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
           task: options.task,
           changedFiles: uniqueChangedFiles,
           systems: Array.from(new Set([...claimsById.values()].map((claim) => claim.system))),
-          recipeIds: recipes.map((recipe) => recipe.id),
+          recipeIds: matchedRecipes.map((recipe) => recipe.id),
           planId: planContext?.planId ?? options.planId,
           stageId: planContext?.stage.id ?? options.stageId,
           claimTypes: Array.from(new Set([...claimsById.values()].map((claim) => claim.type))),
@@ -206,7 +206,7 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
     const warnings = [
       ...(planContext?.warnings ?? []),
       ...warningLines([...claimsById.values()]),
-      ...recipeWarningLines(opened.database, recipes),
+      ...recipeWarningLines(opened.database, matchedRecipes),
       ...planStageWarningLines(opened.database, planContext?.stage),
       ...profileDiagnosticWarnings
     ];
@@ -221,13 +221,13 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
       matchedClaims: matched,
       relatedClaims: related,
       planStage: planContext ? toContextPlanStage(planContext.planId, planContext.stage) : undefined,
-      relevantFiles: collectRelevantFiles([...claimsById.values()], recipes, uniqueChangedFiles),
-      recipes,
-      matchedRecipes: recipes,
+      relevantFiles: collectRelevantFiles([...claimsById.values()], matchedRecipes, uniqueChangedFiles),
+      recipes: matchedRecipes.map(toPlainContextRecipe),
+      matchedRecipes,
       profileTraits: profileResult.traits.map(toContextProfileTrait),
       droppedProfileTraits: opened.contextDefaults.include_profile_diagnostics ? profileResult.droppedTraits : [],
       profileDiagnostics: opened.contextDefaults.include_profile_diagnostics ? profileResult.diagnostics : { intents: [], warnings: [] },
-      verificationSteps: collectVerificationSteps([...claimsById.values()], recipes, planContext?.stage),
+      verificationSteps: collectVerificationSteps([...claimsById.values()], matchedRecipes, planContext?.stage),
       warnings
     };
   } finally {
@@ -573,6 +573,22 @@ function hydrateRecipe(database: SqliteDatabase, id: string): ContextRecipe | nu
 }
 
 function toContextRecipe(recipe: Recipe): ContextRecipe {
+  return {
+    id: recipe.id,
+    system: recipe.system,
+    title: recipe.title,
+    status: recipe.status,
+    requiredClaims: recipe.requiredClaims,
+    optionalClaims: recipe.optionalClaims,
+    relevantFiles: recipe.relevantFiles,
+    intentTriggers: recipe.intentTriggers,
+    steps: recipe.steps,
+    verification: recipe.verification,
+    memoryUpdates: recipe.memoryUpdates
+  };
+}
+
+function toPlainContextRecipe(recipe: ContextRecipe): ContextRecipe {
   return {
     id: recipe.id,
     system: recipe.system,

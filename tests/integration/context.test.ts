@@ -90,7 +90,11 @@ describe("context command", () => {
     expect(result.exitCode).toBe(0);
     expect(parsed.matchedClaims.some((claim: { id: string }) => claim.id === "auth.student_oauth.uid_is_tenant_scoped")).toBe(true);
     expect(parsed.relatedClaims.some((related: { claim: { id: string } }) => related.claim.id === "tenancy.current_tenant.required_for_student_auth")).toBe(true);
+    expect(parsed.recipes[0].id).toBe("recipe.auth.modify_student_oauth");
+    expect(parsed.recipes[0].score).toBeUndefined();
+    expect(parsed.recipes[0].reasons).toBeUndefined();
     expect(parsed.matchedRecipes[0].id).toBe("recipe.auth.modify_student_oauth");
+    expect(parsed.matchedRecipes[0].score).toBeGreaterThan(0);
     expect(parsed.matchedRecipes[0].reasons.length).toBeGreaterThan(0);
     expect(parsed.matchedRecipes[0].reasons.some((reason: { code: string }) => reason.code === "fts_match")).toBe(true);
     expect(parsed.verificationSteps).toContain("bun test");
