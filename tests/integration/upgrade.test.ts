@@ -92,6 +92,19 @@ describe("upgrade command", () => {
     expect(fs.readFileSync(path.join(repoRoot, "memory/plans/example.yaml"), "utf8")).toBe("id: plan_template.example\n");
   });
 
+  test("skips absolute memory scaffold paths outside the repository", async () => {
+    const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-outside-memory-"));
+    const repoRoot = makeRepo(oldConfig().replace("memory_root: memory", `memory_root: ${outsideRoot}`));
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Memory scaffold path");
+    expect(result.stdout).toContain("escapes the repository root");
+    expect(fs.existsSync(path.join(outsideRoot, "plans/.gitkeep"))).toBe(false);
+    expect(fs.existsSync(path.join(outsideRoot, "profiles/.gitkeep"))).toBe(false);
+  });
+
   test("preserves custom skill references unless forced", async () => {
     const repoRoot = makeRepo(oldConfig());
     const skillPath = path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md");

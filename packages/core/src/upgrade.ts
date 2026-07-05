@@ -144,7 +144,7 @@ function upgradeMemoryScaffold(
   warnings: string[]
 ): void {
   for (const memoryDir of MEMORY_SCAFFOLD_DIRS) {
-    const relativeGitkeepPath = path.join(config.memory_root, memoryDir, ".gitkeep");
+    const relativeGitkeepPath = memoryScaffoldGitkeepPath(repoRoot, config.memory_root, memoryDir);
     const absolutePath = tryResolveMemoryScaffoldPath(repoRoot, relativeGitkeepPath, actions, warnings);
 
     if (absolutePath === null) {
@@ -174,6 +174,11 @@ function upgradeMemoryScaffold(
 
     actions.push({ path: displayPath, status: "would_create", detail: "scaffold memory directory" });
   }
+}
+
+function memoryScaffoldGitkeepPath(repoRoot: string, memoryRoot: string, memoryDir: string): string {
+  const gitkeepPath = path.join(memoryRoot, memoryDir, ".gitkeep");
+  return path.isAbsolute(memoryRoot) ? path.relative(repoRoot, gitkeepPath) : gitkeepPath;
 }
 
 function tryResolveMemoryScaffoldPath(
