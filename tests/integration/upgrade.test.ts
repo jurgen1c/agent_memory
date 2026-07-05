@@ -63,6 +63,8 @@ describe("upgrade command", () => {
     expect(skill).toContain("memory audit --git-diff");
     expect(skill).toContain("memory/claims/**/*.md");
     expect(skill).toContain("memory/plans/**/*.yaml");
+    expect(skill).toContain("`.agent-memory/plans` for local one-off plan runs");
+    expect(skill).not.toContain("`cache/plans`");
     expect(skill).toContain("If context includes matched recipes");
     expect(skill).toContain("references/claims.md");
     expect(skill).toContain("references/contextual-workflows.md");

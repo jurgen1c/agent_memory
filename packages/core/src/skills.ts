@@ -113,6 +113,7 @@ export function renderAgentSkill(options: RenderAgentSkillOptions): string {
   const title = options.agent === "codex" ? "Repo Memory Skill" : "Repository Memory Instructions";
   const memoryRoot = trimTrailingSlash(options.config.memory_root);
   const databasePath = options.config.database_path;
+  const planRunsPath = ".agent-memory/plans";
   const commands = buildAgentCommands(options.commandPrefix);
   const referenceLinks =
     options.agent === "codex"
@@ -151,9 +152,9 @@ ${renderMemoryPatterns(memoryRoot, "waivers", options.config.waivers)}
 Generated memory lives in:
 
 - \`${databasePath}\`
-- \`${path.dirname(databasePath)}/plans\` for local one-off plan runs
+- \`${planRunsPath}\` for local one-off plan runs
 
-Do not edit or commit the SQLite database or other generated files under \`${path.dirname(databasePath)}\`.
+Do not edit or commit the SQLite database, local plan runs under \`${planRunsPath}\`, or other generated files under \`${path.dirname(databasePath)}\`.
 
 ## Before Work
 

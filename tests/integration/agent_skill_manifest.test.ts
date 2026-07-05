@@ -84,6 +84,22 @@ user-invocable: false
     expect(fs.readFileSync(skillPath, "utf8")).not.toContain("references/claims.md");
   });
 
+  test("documents the fixed local plan-run path when database_path is customized", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes", "--agent", "generic"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    rewriteDatabasePath(repoRoot, "tmp/custom-memory.sqlite");
+
+    const result = await dispatch(["install-skill", "--agent", "codex", "--force"], { cwd: repoRoot });
+    const skillPath = path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md");
+    const content = fs.readFileSync(skillPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(content).toContain("`tmp/custom-memory.sqlite`");
+    expect(content).toContain("`.agent-memory/plans` for local one-off plan runs");
+    expect(content).not.toContain("`tmp/plans`");
+  });
+
   test("installs the codex skill under a custom location", async () => {
     const repoRoot = makeGitRepo();
     const init = await dispatch(["init", "--yes", "--agent", "generic"], { cwd: repoRoot });
@@ -323,6 +339,12 @@ function rewriteGenericSkillPath(repoRoot: string, skillPath: string): void {
   const configPath = path.join(repoRoot, "agent-memory.config.yaml");
   const config = fs.readFileSync(configPath, "utf8");
   fs.writeFileSync(configPath, config.replace("    path: docs/agent-memory/AGENT_SKILL.md", `    path: ${skillPath}`));
+}
+
+function rewriteDatabasePath(repoRoot: string, databasePath: string): void {
+  const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+  const config = fs.readFileSync(configPath, "utf8");
+  fs.writeFileSync(configPath, config.replace("database_path: .agent-memory/memory.sqlite", `database_path: ${databasePath}`));
 }
 
 function writeWorkflowArtifact(repoRoot: string, relativePath: string, content: string): void {
