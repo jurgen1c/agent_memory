@@ -24,6 +24,17 @@ export interface DoctorResult {
   checks: DoctorCheck[];
 }
 
+interface PlanRunSummary {
+  status: string;
+  updatedAt: string;
+  path: string;
+}
+
+interface PlanRunReadFailure {
+  path: string;
+  message: string;
+}
+
 export interface DoctorOptions {
   cwd?: string;
 }
@@ -173,9 +184,24 @@ function localPlanRunChecks(repoRoot: string): DoctorCheck[] {
   }
 
   const warnings: DoctorCheck[] = [];
-  const runs = walkYamlFiles(root)
-    .map((filePath) => readPlanRunSummary(filePath))
-    .filter((run): run is { status: string; updatedAt: string; path: string } => run !== null);
+  const runs: PlanRunSummary[] = [];
+
+  for (const filePath of walkYamlFiles(root)) {
+    const summary = readPlanRunSummary(filePath);
+    if ("message" in summary) {
+      warnings.push(
+        warn(
+          "plan_runs_unreadable",
+          `Unable to inspect local plan run ${path.relative(repoRoot, summary.path)}: ${summary.message}`,
+          "Fix or remove malformed local plan-run YAML before relying on plan-run hygiene checks."
+        )
+      );
+      continue;
+    }
+
+    runs.push(summary);
+  }
+
   const completedOrAbandoned = runs.filter((run) => run.status === "complete" || run.status === "abandoned");
 
   if (completedOrAbandoned.length > COMPLETED_PLAN_RUN_WARNING_COUNT) {
@@ -223,15 +249,15 @@ function walkYamlFiles(root: string): string[] {
   return files.sort();
 }
 
-function readPlanRunSummary(filePath: string): { status: string; updatedAt: string; path: string } | null {
+function readPlanRunSummary(filePath: string): PlanRunSummary | PlanRunReadFailure {
   try {
     const data = parseYaml(fs.readFileSync(filePath, "utf8"));
     const raw = typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
     const status = typeof raw.status === "string" ? raw.status : "";
     const updatedAt = typeof raw.updated_at === "string" ? raw.updated_at : typeof raw.created_at === "string" ? raw.created_at : "";
     return { status, updatedAt, path: filePath };
-  } catch {
-    return null;
+  } catch (error) {
+    return { path: filePath, message: error instanceof Error ? error.message : String(error) };
   }
 }
 

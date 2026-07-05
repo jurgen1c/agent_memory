@@ -133,6 +133,28 @@ describe("doctor command", () => {
       })
     );
   });
+
+  test("warns when local plan runs cannot be inspected", async () => {
+    const cwd = copyFixture(mockApp);
+    await dispatch(["compile"], { cwd });
+    const brokenPath = path.join(cwd, ".agent-memory/plans/broken.yaml");
+    fs.mkdirSync(path.dirname(brokenPath), { recursive: true });
+    fs.writeFileSync(brokenPath, "- invalid\n");
+
+    const result = await dispatch(["doctor", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(5);
+    expect(parsed.checks).toContainEqual(
+      expect.objectContaining({
+        name: "plan_runs_unreadable",
+        status: "warning"
+      })
+    );
+    expect(parsed.checks.find((check: { name: string }) => check.name === "plan_runs_unreadable").message).toContain(
+      ".agent-memory/plans/broken.yaml"
+    );
+  });
 });
 
 describe("sync command", () => {
