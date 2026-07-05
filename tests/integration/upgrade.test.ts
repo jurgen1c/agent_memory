@@ -20,8 +20,11 @@ describe("upgrade command", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("dry run");
     expect(result.stdout).toContain("would_update");
+    expect(result.stdout).toContain("memory/plans/.gitkeep");
+    expect(result.stdout).toContain("would_create");
     expect(fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8")).toBe(originalConfig);
     expect(fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")).toBe(originalAgents);
+    expect(fs.existsSync(path.join(repoRoot, "memory/plans/.gitkeep"))).toBe(false);
   });
 
   test("writes commented config defaults and refreshes managed support files", async () => {
@@ -52,6 +55,9 @@ describe("upgrade command", () => {
     expect(agents).toContain("Keep local instructions.");
     expect(agents).toContain("### Agent-Memory-First Workflow");
     expect(agents).not.toContain("Old managed text");
+    expect(fs.existsSync(path.join(repoRoot, "memory/recipes/.gitkeep"))).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, "memory/plans/.gitkeep"))).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, "memory/profiles/.gitkeep"))).toBe(true);
     expect(fs.readFileSync(path.join(repoRoot, "bin/memory"), "utf8")).toBe(wrapperTemplate("npm"));
     expect(skill).toContain("## Available Commands");
     expect(skill).toContain("memory audit --git-diff");
@@ -68,6 +74,20 @@ describe("upgrade command", () => {
     expect(profilesReference).toContain("profiles match");
     expect(coverageReference).toContain("## Stale Review");
     expect(delegationReference).toContain("Subagent prompt contract");
+  });
+
+  test("does not add gitkeep files to populated memory directories", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    fs.mkdirSync(path.join(repoRoot, "memory/plans"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "memory/plans/example.yaml"), "id: plan_template.example\n");
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("memory/plans/.gitkeep");
+    expect(result.stdout).toContain("memory directory already exists");
+    expect(fs.existsSync(path.join(repoRoot, "memory/plans/.gitkeep"))).toBe(false);
+    expect(fs.readFileSync(path.join(repoRoot, "memory/plans/example.yaml"), "utf8")).toBe("id: plan_template.example\n");
   });
 
   test("preserves custom skill references unless forced", async () => {

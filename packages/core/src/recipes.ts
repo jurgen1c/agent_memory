@@ -127,6 +127,13 @@ export function searchRecipeMatches(database: SqliteDatabase, input: Omit<Recipe
 
   for (const recipeId of input.recipeIds ?? []) {
     if (!recipesById.has(recipeId)) {
+      const explicitRecipe = recipeRow(database, recipeId);
+      if (explicitRecipe) {
+        recipesById.set(explicitRecipe.id, explicitRecipe);
+      }
+    }
+
+    if (!recipesById.has(recipeId)) {
       continue;
     }
 
@@ -255,8 +262,12 @@ function recipeRows(database: SqliteDatabase, includeInactive: boolean): RecipeR
   );
 }
 
+function recipeRow(database: SqliteDatabase, id: string): RecipeRow | null {
+  return database.get<RecipeRow>("SELECT * FROM recipes WHERE id = ?", [id]);
+}
+
 function hydrateRecipe(database: SqliteDatabase, id: string): Recipe | null {
-  const row = database.get<RecipeRow>("SELECT * FROM recipes WHERE id = ?", [id]);
+  const row = recipeRow(database, id);
 
   if (!row) {
     return null;

@@ -168,6 +168,55 @@ describe("profiles command", () => {
     expect(parsed.profileTraits.map((trait: { id: string }) => trait.id)).toContain("profile_trait.review.findings_first");
     expect(parsed.profileTraits[0].reasons.some((reason: { code: string }) => reason.code === "explicit_trait")).toBe(true);
   });
+
+  test("context resolves inactive recipe and profile refs from plan stages", async () => {
+    const cwd = await compiledMockAppWithProfiles();
+    writePlan(cwd);
+    replaceStatus(path.join(cwd, "docs/agent-memory/recipes/auth/modify_student_oauth.yaml"), "stale");
+    replaceStatus(path.join(cwd, "docs/agent-memory/profiles/review/findings_first.yaml"), "stale");
+    const compile = await dispatch(["compile"], { cwd });
+    expect(compile.exitCode).toBe(0);
+
+    const created = await dispatch(["plans", "new", "--template", "plan_template.auth.review_oauth", "--task", "review oauth change", "--json"], { cwd });
+    const run = JSON.parse(created.stdout).run;
+    const context = await dispatch(["context", "--plan", run.id, "--stage", "review", "--json"], { cwd });
+    const parsed = JSON.parse(context.stdout);
+    const matchedRecipe = parsed.matchedRecipes.find((recipe: { id: string }) => recipe.id === "recipe.auth.modify_student_oauth");
+    const matchedProfile = parsed.profileTraits.find((trait: { id: string }) => trait.id === "profile_trait.review.findings_first");
+
+    expect(context.exitCode).toBe(0);
+    expect(matchedRecipe).toMatchObject({
+      id: "recipe.auth.modify_student_oauth",
+      status: "stale"
+    });
+    expect(matchedRecipe.reasons).toContainEqual({
+      code: "explicit_recipe",
+      detail: "recipe.auth.modify_student_oauth"
+    });
+    expect(matchedProfile).toMatchObject({
+      id: "profile_trait.review.findings_first",
+      status: "stale"
+    });
+    expect(matchedProfile.reasons).toContainEqual({
+      code: "explicit_trait",
+      detail: "profile_trait.review.findings_first"
+    });
+    expect(parsed.warnings).toContain("recipe.auth.modify_student_oauth has status stale.");
+
+    const explicit = await dispatch(["context", "--profile-trait", "profile_trait.review.findings_first", "--json"], { cwd });
+    const explicitJson = JSON.parse(explicit.stdout);
+    const explicitProfile = explicitJson.profileTraits.find((trait: { id: string }) => trait.id === "profile_trait.review.findings_first");
+
+    expect(explicit.exitCode).toBe(0);
+    expect(explicitProfile).toMatchObject({
+      id: "profile_trait.review.findings_first",
+      status: "stale"
+    });
+    expect(explicitProfile.reasons).toContainEqual({
+      code: "explicit_trait",
+      detail: "profile_trait.review.findings_first"
+    });
+  });
 });
 
 async function compiledMockAppWithProfiles(updateConfig?: (config: string) => string): Promise<string> {
@@ -275,6 +324,10 @@ applies_when:
 ${conflicts}snippet: ${JSON.stringify(options.snippet)}
 `
   );
+}
+
+function replaceStatus(filePath: string, nextStatus: string): void {
+  fs.writeFileSync(filePath, fs.readFileSync(filePath, "utf8").replace("status: current", `status: ${nextStatus}`));
 }
 
 function writePlan(cwd: string): void {

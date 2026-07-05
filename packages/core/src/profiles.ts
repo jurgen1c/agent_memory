@@ -155,6 +155,17 @@ export function selectProfileTraits(
 ): Omit<ProfileMatchResult, "databasePath"> {
   const includeInactive = input.includeInactive ?? false;
   const rows = profileRows(database, includeInactive);
+  if (!includeInactive) {
+    const rowIds = new Set(rows.map((row) => row.id));
+    for (const traitId of input.traitIds ?? []) {
+      const explicitRow = profileRow(database, traitId);
+      if (explicitRow && !rowIds.has(explicitRow.id)) {
+        rows.push(explicitRow);
+        rowIds.add(explicitRow.id);
+      }
+    }
+  }
+
   const traits = rows.map((row) => hydrateProfileTrait(row));
   const traitsById = new Map(traits.map((trait) => [trait.id, trait]));
   const explicitTraitIds = input.traitIds ?? [];
@@ -448,6 +459,10 @@ function profileRows(database: SqliteDatabase, includeInactive: boolean): Profil
     `SELECT * FROM profile_traits WHERE status IN (${ACTIVE_PROFILE_STATUSES.map(() => "?").join(",")}) ORDER BY id`,
     ACTIVE_PROFILE_STATUSES
   );
+}
+
+function profileRow(database: SqliteDatabase, id: string): ProfileTraitRow | null {
+  return database.get<ProfileTraitRow>("SELECT * FROM profile_traits WHERE id = ?", [id]);
 }
 
 function hydrateProfileTrait(row: ProfileTraitRow): ProfileTraitDetail {

@@ -154,6 +154,7 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
 
     const uniqueChangedFiles = Array.from(new Set(changedFiles));
     const explicitRecipeIds = Array.from(new Set([...(options.recipeIds ?? []), ...(planContext?.stage.recipeRefs ?? [])]));
+    const explicitProfileTraitIds = Array.from(new Set([...(options.profileTraitIds ?? []), ...(planContext?.stage.profileTraits ?? [])]));
     const limits = BUDGET_LIMITS[budget];
     const recipeLimit = Math.min(opened.contextDefaults.recipe_match_limit, limits.recipes);
     const initialMatched = rankClaims(opened.database, {
@@ -167,6 +168,7 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
       changedFiles: uniqueChangedFiles,
       claimIds: initialMatched.map((claim) => claim.id),
       recipeIds: explicitRecipeIds,
+      includeInactive: explicitRecipeIds.length > 0,
       limit: recipeLimit
     });
     const matched = expandExplicitClaims(
@@ -194,9 +196,10 @@ export async function buildContext(options: BuildContextOptions): Promise<AgentC
           stageId: planContext?.stage.id ?? options.stageId,
           claimTypes: Array.from(new Set([...claimsById.values()].map((claim) => claim.type))),
           profileAlias: options.profileAlias,
-          traitIds: Array.from(new Set([...(options.profileTraitIds ?? []), ...(planContext?.stage.profileTraits ?? [])])),
+          traitIds: explicitProfileTraitIds,
           limit: Math.min(opened.contextDefaults.profile_trait_limit, limits.profiles),
-          strictExplicit: true
+          strictExplicit: true,
+          includeInactive: explicitProfileTraitIds.length > 0
         })
       : emptyProfileResult();
     const warnings = [

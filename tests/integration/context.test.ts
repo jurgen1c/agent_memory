@@ -112,6 +112,27 @@ describe("context command", () => {
     expect(parsed.verificationSteps).toContain("bun test");
   });
 
+  test("resolves explicit inactive recipes", async () => {
+    const cwd = copyFixture(mockApp);
+    replaceStatus(path.join(cwd, "docs/agent-memory/recipes/auth/modify_student_oauth.yaml"), "stale");
+    const compile = await dispatch(["compile"], { cwd });
+    expect(compile.exitCode).toBe(0);
+
+    const result = await dispatch(["context", "--recipe", "recipe.auth.modify_student_oauth", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.matchedRecipes[0]).toMatchObject({
+      id: "recipe.auth.modify_student_oauth",
+      status: "stale"
+    });
+    expect(parsed.matchedRecipes[0].reasons).toContainEqual({
+      code: "explicit_recipe",
+      detail: "recipe.auth.modify_student_oauth"
+    });
+    expect(parsed.warnings).toContain("recipe.auth.modify_student_oauth has status stale.");
+  });
+
   test("caps required claims expanded from explicit recipes", async () => {
     const cwd = copyFixture(mockApp);
     const requiredClaimIds = [
@@ -340,6 +361,10 @@ last_verified_commit: null
 # ${claim.title}
 `
   );
+}
+
+function replaceStatus(filePath: string, nextStatus: string): void {
+  fs.writeFileSync(filePath, fs.readFileSync(filePath, "utf8").replace("status: current", `status: ${nextStatus}`));
 }
 
 function writeRecipe(cwd: string, requiredClaimIds: string[]): void {
