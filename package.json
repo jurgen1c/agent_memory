@@ -3,6 +3,7 @@
   "version": "0.2.0",
   "description": "Repository-local agent memory CLI based on atomic claims and generated indexes.",
   "license": "MIT",
+  "main": "dist/agent-memory.js",
   "repository": {
     "type": "git",
     "url": "https://github.com/jurgen1c/agent_memory"

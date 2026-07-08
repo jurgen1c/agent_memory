@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "@jurgen1c/agent-memory-cli",
@@ -22,32 +23,35 @@
         "vite": "^7.3.6",
       },
     },
+    "packages/agent-tools": {
+      "name": "@jurgen1c/agent-tools",
+      "version": "0.2.0",
+    },
+    "packages/agentflow": {
+      "name": "@jurgen1c/agentflow",
+      "version": "0.2.0",
+      "dependencies": {
+        "@jurgen1c/agent-tools": "workspace:*",
+      },
+    },
     "packages/cli": {
-      "name": "@agent-memory/cli",
-      "version": "0.1.0",
+      "name": "@jurgen1c/agent-memory-cli-workspace",
+      "version": "0.2.0",
     },
     "packages/core": {
-      "name": "@agent-memory/core",
-      "version": "0.1.0",
+      "name": "@jurgen1c/agent-memory-core",
+      "version": "0.2.0",
     },
     "packages/schemas": {
-      "name": "@agent-memory/schemas",
-      "version": "0.1.0",
+      "name": "@jurgen1c/agent-memory-schemas",
+      "version": "0.2.0",
     },
     "packages/web": {
-      "name": "@agent-memory/web",
-      "version": "0.1.0",
+      "name": "@jurgen1c/agent-memory-web",
+      "version": "0.2.0",
     },
   },
   "packages": {
-    "@agent-memory/cli": ["@agent-memory/cli@workspace:packages/cli"],
-
-    "@agent-memory/core": ["@agent-memory/core@workspace:packages/core"],
-
-    "@agent-memory/schemas": ["@agent-memory/schemas@workspace:packages/schemas"],
-
-    "@agent-memory/web": ["@agent-memory/web@workspace:packages/web"],
-
     "@babel/code-frame": ["@babel/code-frame@7.29.7", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.29.7", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw=="],
 
     "@babel/compat-data": ["@babel/compat-data@7.29.7", "", {}, "sha512-locTkQyKvwIEgBzVrn8693ebc97F2U8ZHjbXwDXJ5Fn2TCpNwTlKcaKLkdHop5c/icOFE7qt7Q9JC5hnKNa6Gg=="],
@@ -171,6 +175,18 @@
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.5", "", {}, "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og=="],
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
+
+    "@jurgen1c/agent-memory-cli-workspace": ["@jurgen1c/agent-memory-cli-workspace@workspace:packages/cli"],
+
+    "@jurgen1c/agent-memory-core": ["@jurgen1c/agent-memory-core@workspace:packages/core"],
+
+    "@jurgen1c/agent-memory-schemas": ["@jurgen1c/agent-memory-schemas@workspace:packages/schemas"],
+
+    "@jurgen1c/agent-memory-web": ["@jurgen1c/agent-memory-web@workspace:packages/web"],
+
+    "@jurgen1c/agent-tools": ["@jurgen1c/agent-tools@workspace:packages/agent-tools"],
+
+    "@jurgen1c/agentflow": ["@jurgen1c/agentflow@workspace:packages/agentflow"],
 
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.0-rc.3", "", {}, "sha512-eybk3TjzzzV97Dlj5c+XrBFW57eTNhzod66y9HrBlzJ6NsCrWCp/2kaPS3K9wJmurBC0Tdw4yPjXKZqlznim3Q=="],
 
