@@ -89,11 +89,16 @@ function isPlannedRuntimeCommand(command: string): boolean {
 }
 
 function readRootPackageVersion(): string {
-  for (const packageUrl of [new URL("../package.json", import.meta.url), new URL("../../../package.json", import.meta.url)]) {
-    try {
-      const packageJson = JSON.parse(fs.readFileSync(packageUrl, "utf8")) as { version?: unknown };
+  const candidates = [
+    new URL("../package.json", import.meta.url),
+    new URL("../../../package.json", import.meta.url)
+  ];
 
-      if (typeof packageJson.version === "string" && packageJson.version.length > 0) {
+  for (const packageUrl of candidates) {
+    try {
+      const packageJson = JSON.parse(fs.readFileSync(packageUrl, "utf8")) as { name?: unknown; version?: unknown };
+
+      if (packageJson.name === "@jurgen1c/agent-memory-cli" && typeof packageJson.version === "string" && packageJson.version.length > 0) {
         return packageJson.version;
       }
     } catch {
