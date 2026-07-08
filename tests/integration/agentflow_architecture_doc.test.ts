@@ -17,6 +17,9 @@ describe("Agentflow monorepo architecture doc", () => {
       "@jurgen1c/agentflow",
       "@jurgen1c/agentflow-examples",
       "@jurgen1c/agent-tools",
+      "@agent-memory/cli",
+      "root `package.json` publishes the package",
+      "packages/agent-tools",
       "packages/web"
     ]) {
       expect(doc).toContain(required);
