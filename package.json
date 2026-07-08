@@ -17,7 +17,8 @@
   ],
   "type": "module",
   "bin": {
-    "agent-memory": "dist/agent-memory.js"
+    "agent-memory": "dist/agent-memory.js",
+    "agentflow": "dist/agentflow.js"
   },
   "dependencies": {
     "@xyflow/react": "^12.0.0",
@@ -50,7 +51,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bun run build:web && bun build packages/cli/src/index.ts --target=node --outfile=dist/agent-memory.js",
+    "build": "bun run build:web && bun build packages/cli/src/index.ts --target=node --outfile=dist/agent-memory.js && bun build packages/agentflow-cli/src/index.ts --target=node --outfile=dist/agentflow.js",
     "build:web": "bun run --cwd packages/web build",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/web/tsconfig.json",
     "audit": "bun audit --audit-level moderate",

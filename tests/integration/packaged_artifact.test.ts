@@ -11,9 +11,12 @@ describe("packaged artifact", () => {
   test("runs the installed CLI, generated wrapper, and UI static asset path", async () => {
     const appRoot = installPackedCli();
     const cliPath = path.join(appRoot, "node_modules/.bin/agent-memory");
+    const agentflowPath = path.join(appRoot, "node_modules/.bin/agentflow");
     const packageRoot = path.join(appRoot, "node_modules/@jurgen1c/agent-memory-cli");
 
     expect(runCommand(cliPath, ["--version"], appRoot).stdout).toContain(`agent-memory ${rootPackage.version}`);
+    expect(runCommand(agentflowPath, ["--version"], appRoot).stdout).toContain(`agentflow ${rootPackage.version}`);
+    expect(runCommand(agentflowPath, ["help"], appRoot).stdout).toContain("No workflow execution commands are active yet.");
     expect(runCommand(cliPath, ["upgrade", "--write"], appRoot).stdout).toContain("upgrade applied");
     expect(runCommand(cliPath, ["compile"], appRoot).stdout).toContain("Agent Memory compiled.");
 
@@ -67,6 +70,7 @@ function packedTarballName(packDir: string, stdout: string): string {
 function installBinShim(appRoot: string): void {
   const binDir = path.join(appRoot, "node_modules/.bin");
   const binPath = path.join(binDir, "agent-memory");
+  const agentflowBinPath = path.join(binDir, "agentflow");
 
   fs.mkdirSync(binDir, { recursive: true });
   fs.writeFileSync(
@@ -78,6 +82,15 @@ exec node "\${SCRIPT_DIR}/../@jurgen1c/agent-memory-cli/dist/agent-memory.js" "$
 `
   );
   fs.chmodSync(binPath, 0o755);
+  fs.writeFileSync(
+    agentflowBinPath,
+    `#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")" && pwd)"
+exec node "\${SCRIPT_DIR}/../@jurgen1c/agent-memory-cli/dist/agentflow.js" "$@"
+`
+  );
+  fs.chmodSync(agentflowBinPath, 0o755);
 }
 
 function runCommand(command: string, args: string[], cwd: string, timeout = 30000): { stdout: string; stderr: string } {
