@@ -1,8 +1,11 @@
 {
-  "name": "@agent-memory/web",
+  "name": "@jurgen1c/agent-memory-web",
   "version": "0.2.0",
   "type": "module",
   "private": true,
+  "exports": {
+    ".": "./src/App.tsx"
+  },
   "scripts": {
     "build": "vite build"
   }

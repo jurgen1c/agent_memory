@@ -1,6 +1,10 @@
 {
-  "name": "@agent-memory/cli",
+  "name": "@jurgen1c/agent-memory-cli-workspace",
   "version": "0.2.0",
   "type": "module",
-  "private": true
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./router": "./src/router.ts"
+  }
 }

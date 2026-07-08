@@ -1,6 +1,15 @@
 {
-  "name": "@agent-memory/schemas",
+  "name": "@jurgen1c/agent-memory-schemas",
   "version": "0.2.0",
   "type": "module",
-  "private": true
+  "private": true,
+  "exports": {
+    "./claim": "./claim.schema.json",
+    "./config": "./config.schema.json",
+    "./graph": "./graph.schema.json",
+    "./index": "./index.schema.json",
+    "./plan": "./plan.schema.json",
+    "./profile": "./profile.schema.json",
+    "./recipe": "./recipe.schema.json"
+  }
 }
