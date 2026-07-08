@@ -203,15 +203,35 @@ function workspacePackageNames(): string[] {
   const workspaces = rootPackage.workspaces ?? [];
 
   return workspaces
-    .flatMap((workspace) => {
-      const basePath = workspace.replace(/\/\*$/, "");
-
-      return fs
-        .readdirSync(path.join(repoRoot, basePath), { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => readPackage(path.join(basePath, entry.name, "package.json")).name);
-    })
+    .flatMap((workspace) => packagePathsForWorkspace(workspace))
+    .map((packagePath) => readPackage(packagePath).name)
     .sort();
+}
+
+function packagePathsForWorkspace(workspace: string): string[] {
+  if (!workspace.includes("*")) {
+    const packagePath = path.join(workspace, "package.json");
+
+    return fs.existsSync(path.join(repoRoot, packagePath)) ? [packagePath] : [];
+  }
+
+  const wildcardIndex = workspace.indexOf("*");
+  const baseDir = workspace.slice(0, wildcardIndex).replace(/\/+$/, "");
+  const suffix = workspace.slice(wildcardIndex + 1);
+  const absoluteBaseDir = path.join(repoRoot, baseDir);
+
+  if (!fs.existsSync(absoluteBaseDir)) {
+    return [];
+  }
+
+  return fs
+    .readdirSync(absoluteBaseDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) => {
+      const packagePath = path.join(baseDir, entry.name, suffix, "package.json");
+
+      return fs.existsSync(path.join(repoRoot, packagePath)) ? [packagePath] : [];
+    });
 }
 
 function verificationPlan(mode: VerificationPlan["mode"]): VerificationPlan {
