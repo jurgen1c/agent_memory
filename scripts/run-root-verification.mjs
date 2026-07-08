@@ -205,19 +205,37 @@ function workspacePackageJsonPaths(workspaces) {
       ? workspaces.packages
       : [];
 
-  return patterns.flatMap((pattern) => packageJsonPathsForPattern(pattern)).sort();
+  const includedPackagePaths = new Set(
+    patterns
+      .filter(isIncludedWorkspacePattern)
+      .flatMap((pattern) => packageJsonPathsForPattern(pattern))
+  );
+  const excludedPackagePaths = new Set(
+    patterns
+      .filter(isExcludedWorkspacePattern)
+      .flatMap((pattern) => packageJsonPathsForPattern(pattern.trim().slice(1)))
+  );
+
+  return [...includedPackagePaths]
+    .filter((packagePath) => !excludedPackagePaths.has(packagePath))
+    .sort();
 }
 
 function packageJsonPathsForPattern(pattern) {
-  const normalizedPattern = pattern.split("/").filter(Boolean);
-  const starIndex = normalizedPattern.indexOf("*");
-
-  if (starIndex === -1) {
-    const packagePath = path.join(repoRoot, pattern, "package.json");
-    return fs.existsSync(packagePath) ? [packagePath] : [];
+  if (!isIncludedWorkspacePattern(pattern)) {
+    return [];
   }
 
-  const basePath = path.join(repoRoot, ...normalizedPattern.slice(0, starIndex));
+  const trimmedPattern = pattern.trim();
+  const starIndex = trimmedPattern.indexOf("*");
+
+  if (starIndex === -1) {
+    return packageJsonPathIfPresent(trimmedPattern);
+  }
+
+  const baseDir = trimmedPattern.slice(0, starIndex).replace(/\/+$/, "");
+  const suffixSegments = trimmedPattern.slice(starIndex + 1).split("/").filter(Boolean);
+  const basePath = path.join(repoRoot, baseDir);
 
   if (!fs.existsSync(basePath)) {
     return [];
@@ -226,8 +244,21 @@ function packageJsonPathsForPattern(pattern) {
   return fs
     .readdirSync(basePath, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(basePath, entry.name, ...normalizedPattern.slice(starIndex + 1), "package.json"))
-    .filter((packagePath) => fs.existsSync(packagePath));
+    .flatMap((entry) => packageJsonPathIfPresent(path.join(baseDir, entry.name, ...suffixSegments)));
+}
+
+function packageJsonPathIfPresent(workspacePath) {
+  const packagePath = path.join(repoRoot, workspacePath, "package.json");
+
+  return fs.existsSync(packagePath) ? [packagePath] : [];
+}
+
+function isIncludedWorkspacePattern(pattern) {
+  return typeof pattern === "string" && pattern.trim().length > 0 && !pattern.trim().startsWith("!");
+}
+
+function isExcludedWorkspacePattern(pattern) {
+  return typeof pattern === "string" && pattern.trim().startsWith("!") && pattern.trim().slice(1).trim().length > 0;
 }
 
 function readJson(filePath) {
