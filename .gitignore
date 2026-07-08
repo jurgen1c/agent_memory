@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .agent-memory/
+.agentflow/runs/
 coverage/
 tmp/
 *.log
