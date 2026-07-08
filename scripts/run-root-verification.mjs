@@ -80,7 +80,13 @@ for (const task of tasks) {
   console.log(`\n> ${task.label}`);
 
   if (task.kind === "internal") {
-    task.run();
+    try {
+      task.run();
+    } catch (error) {
+      console.error(`${task.label} failed: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+
     continue;
   }
 

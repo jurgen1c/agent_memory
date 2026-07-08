@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const repoRoot = path.resolve(".");
@@ -192,6 +193,50 @@ describe("workspace package layout", () => {
     expect(workspaceCheck?.packages.sort()).toEqual(workspaceNames);
     expect(buildPlan.tasks.find((task) => task.label === "bundle:agent-memory-cli")?.packages).toContain("@jurgen1c/agent-memory-core");
     expect(buildPlan.tasks.find((task) => task.label === "bundle:agentflow-cli")?.packages).toContain("@jurgen1c/agentflow-core");
+  });
+
+  test("reports internal verification failures without stack traces", () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-root-verification-"));
+    fs.mkdirSync(path.join(fixtureRoot, "scripts"), { recursive: true });
+    fs.mkdirSync(path.join(fixtureRoot, "packages/bad/src"), { recursive: true });
+    fs.copyFileSync(
+      path.join(repoRoot, "scripts/run-root-verification.mjs"),
+      path.join(fixtureRoot, "scripts/run-root-verification.mjs")
+    );
+    fs.writeFileSync(
+      path.join(fixtureRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "@example/root",
+          workspaces: ["packages/*"]
+        },
+        null,
+        2
+      )
+    );
+    fs.writeFileSync(
+      path.join(fixtureRoot, "packages/bad/package.json"),
+      JSON.stringify(
+        {
+          name: "@example/bad",
+          dependencies: {
+            "@example/missing": "workspace:*"
+          }
+        },
+        null,
+        2
+      )
+    );
+
+    const result = Bun.spawnSync(["node", "scripts/run-root-verification.mjs", "typecheck"], { cwd: fixtureRoot });
+    const stderr = new TextDecoder().decode(result.stderr);
+
+    expect(result.exitCode).toBe(1);
+    expect(stderr).toContain(
+      "check:workspace-packages failed: packages/bad/package.json references unknown workspace dependency @example/missing"
+    );
+    expect(stderr).not.toContain("Error:");
+    expect(stderr).not.toContain("at ");
   });
 });
 
