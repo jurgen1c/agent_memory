@@ -1,4 +1,4 @@
-import type { AgentToolPackageBoundary } from "../../agent-tools/src";
+import type { AgentToolPackageBoundary } from "@jurgen1c/agent-tools";
 
 export interface AgentflowPackageBoundary {
   packageName: "@jurgen1c/agentflow";

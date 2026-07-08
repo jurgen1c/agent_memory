@@ -79,10 +79,13 @@ describe("workspace package layout", () => {
     const agentflow = readPackage("packages/agentflow/package.json");
     const core = readPackage("packages/core/package.json");
     const cli = readPackage("packages/cli/package.json");
+    const agentflowSource = fs.readFileSync(path.join(repoRoot, "packages/agentflow/src/index.ts"), "utf8");
 
     expect(agentflow.dependencies).toEqual({
       "@jurgen1c/agent-tools": "workspace:*"
     });
+    expect(agentflowSource).toContain('from "@jurgen1c/agent-tools"');
+    expect(agentflowSource).not.toContain("../../agent-tools");
     expect(core.dependencies ?? {}).not.toHaveProperty("@jurgen1c/agentflow");
     expect(cli.dependencies ?? {}).not.toHaveProperty("@jurgen1c/agentflow");
   });
