@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -216,12 +215,11 @@ function workspacePackageNames(): string[] {
 }
 
 function verificationPlan(mode: VerificationPlan["mode"]): VerificationPlan {
-  const result = spawnSync("bun", ["scripts/run-root-verification.mjs", mode, "--plan"], {
-    cwd: repoRoot,
-    encoding: "utf8"
-  });
+  const result = Bun.spawnSync(["node", "scripts/run-root-verification.mjs", mode, "--plan"], { cwd: repoRoot });
+  const stdout = new TextDecoder().decode(result.stdout);
+  const stderr = new TextDecoder().decode(result.stderr);
 
-  expect(result.status, result.stderr).toBe(0);
+  expect(result.exitCode, stderr).toBe(0);
 
-  return JSON.parse(result.stdout) as VerificationPlan;
+  return JSON.parse(stdout) as VerificationPlan;
 }
