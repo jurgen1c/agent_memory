@@ -23,7 +23,8 @@ describe("workspace package layout", () => {
     expect(rootPackage.name).toBe("@jurgen1c/agent-memory-cli");
     expect(rootPackage.main).toBe("dist/agent-memory.js");
     expect(rootPackage.bin).toEqual({
-      "agent-memory": "dist/agent-memory.js"
+      "agent-memory": "dist/agent-memory.js",
+      "agentflow": "dist/agentflow.js"
     });
     expect(rootPackage.files).toContain("dist/");
     expect(rootPackage.files).toContain("packages/");
@@ -38,6 +39,22 @@ describe("workspace package layout", () => {
       "packages/agentflow/package.json": {
         name: "@jurgen1c/agentflow",
         exports: { ".": "./src/index.ts" }
+      },
+      "packages/agentflow-agent-memory-adapter/package.json": {
+        name: "@jurgen1c/agentflow-agent-memory-adapter",
+        exports: { ".": "./src/index.ts" }
+      },
+      "packages/agentflow-cli/package.json": {
+        name: "@jurgen1c/agentflow-cli",
+        exports: { ".": "./src/index.ts", "./router": "./src/router.ts" }
+      },
+      "packages/agentflow-core/package.json": {
+        name: "@jurgen1c/agentflow-core",
+        exports: { ".": "./src/index.ts" }
+      },
+      "packages/agentflow-schemas/package.json": {
+        name: "@jurgen1c/agentflow-schemas",
+        exports: { ".": "./src/index.ts", "./config": "./config.schema.json", "./workflow": "./workflow.schema.json" }
       },
       "packages/cli/package.json": {
         name: "@jurgen1c/agent-memory-cli-workspace",
@@ -77,17 +94,32 @@ describe("workspace package layout", () => {
 
   test("keeps Agentflow dependent on shared tools without coupling Agent Memory to Agentflow", () => {
     const agentflow = readPackage("packages/agentflow/package.json");
+    const agentflowAdapter = readPackage("packages/agentflow-agent-memory-adapter/package.json");
+    const agentflowCli = readPackage("packages/agentflow-cli/package.json");
+    const agentflowCore = readPackage("packages/agentflow-core/package.json");
     const core = readPackage("packages/core/package.json");
     const cli = readPackage("packages/cli/package.json");
     const agentflowSource = fs.readFileSync(path.join(repoRoot, "packages/agentflow/src/index.ts"), "utf8");
 
     expect(agentflow.dependencies).toEqual({
-      "@jurgen1c/agent-tools": "workspace:*"
+      "@jurgen1c/agentflow-core": "workspace:*"
     });
-    expect(agentflowSource).toContain('from "@jurgen1c/agent-tools"');
-    expect(agentflowSource).not.toContain("../../agent-tools");
+    expect(agentflowCore.dependencies).toEqual({
+      "@jurgen1c/agent-tools": "workspace:*",
+      "@jurgen1c/agentflow-schemas": "workspace:*"
+    });
+    expect(agentflowCli.dependencies).toEqual({
+      "@jurgen1c/agentflow-core": "workspace:*"
+    });
+    expect(agentflowAdapter.dependencies).toEqual({
+      "@jurgen1c/agent-memory-core": "workspace:*",
+      "@jurgen1c/agentflow-core": "workspace:*"
+    });
+    expect(agentflowSource).toContain('from "@jurgen1c/agentflow-core"');
     expect(core.dependencies ?? {}).not.toHaveProperty("@jurgen1c/agentflow");
     expect(cli.dependencies ?? {}).not.toHaveProperty("@jurgen1c/agentflow");
+    expect(core.dependencies ?? {}).not.toHaveProperty("@jurgen1c/agentflow-core");
+    expect(cli.dependencies ?? {}).not.toHaveProperty("@jurgen1c/agentflow-core");
   });
 });
 

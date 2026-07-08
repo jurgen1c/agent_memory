@@ -31,8 +31,35 @@
       "name": "@jurgen1c/agentflow",
       "version": "0.2.0",
       "dependencies": {
-        "@jurgen1c/agent-tools": "workspace:*",
+        "@jurgen1c/agentflow-core": "workspace:*",
       },
+    },
+    "packages/agentflow-agent-memory-adapter": {
+      "name": "@jurgen1c/agentflow-agent-memory-adapter",
+      "version": "0.2.0",
+      "dependencies": {
+        "@jurgen1c/agent-memory-core": "workspace:*",
+        "@jurgen1c/agentflow-core": "workspace:*",
+      },
+    },
+    "packages/agentflow-cli": {
+      "name": "@jurgen1c/agentflow-cli",
+      "version": "0.2.0",
+      "dependencies": {
+        "@jurgen1c/agentflow-core": "workspace:*",
+      },
+    },
+    "packages/agentflow-core": {
+      "name": "@jurgen1c/agentflow-core",
+      "version": "0.2.0",
+      "dependencies": {
+        "@jurgen1c/agent-tools": "workspace:*",
+        "@jurgen1c/agentflow-schemas": "workspace:*",
+      },
+    },
+    "packages/agentflow-schemas": {
+      "name": "@jurgen1c/agentflow-schemas",
+      "version": "0.2.0",
     },
     "packages/cli": {
       "name": "@jurgen1c/agent-memory-cli-workspace",
@@ -187,6 +214,14 @@
     "@jurgen1c/agent-tools": ["@jurgen1c/agent-tools@workspace:packages/agent-tools"],
 
     "@jurgen1c/agentflow": ["@jurgen1c/agentflow@workspace:packages/agentflow"],
+
+    "@jurgen1c/agentflow-agent-memory-adapter": ["@jurgen1c/agentflow-agent-memory-adapter@workspace:packages/agentflow-agent-memory-adapter"],
+
+    "@jurgen1c/agentflow-cli": ["@jurgen1c/agentflow-cli@workspace:packages/agentflow-cli"],
+
+    "@jurgen1c/agentflow-core": ["@jurgen1c/agentflow-core@workspace:packages/agentflow-core"],
+
+    "@jurgen1c/agentflow-schemas": ["@jurgen1c/agentflow-schemas@workspace:packages/agentflow-schemas"],
 
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.0-rc.3", "", {}, "sha512-eybk3TjzzzV97Dlj5c+XrBFW57eTNhzod66y9HrBlzJ6NsCrWCp/2kaPS3K9wJmurBC0Tdw4yPjXKZqlznim3Q=="],
 
