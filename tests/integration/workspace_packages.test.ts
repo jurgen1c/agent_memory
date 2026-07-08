@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -19,6 +20,20 @@ interface PackageJson {
   scripts?: Record<string, string>;
   types?: string;
   workspaces?: string[];
+}
+
+interface VerificationPlan {
+  mode: "build" | "typecheck";
+  rootPackage: string;
+  workspacePackages: Array<{ name: string; path: string }>;
+  coveredPackageNames: string[];
+  tasks: Array<{
+    label: string;
+    kind: "command" | "internal";
+    command: string | null;
+    args: string[] | null;
+    packages: string[];
+  }>;
 }
 
 const rootPackage = readPackage("package.json");
@@ -141,8 +156,72 @@ describe("workspace package layout", () => {
     expect(core.dependencies ?? {}).not.toHaveProperty("@jurgen1c/agentflow-core");
     expect(cli.dependencies ?? {}).not.toHaveProperty("@jurgen1c/agentflow-core");
   });
+
+  test("routes root verification through every workspace package", () => {
+    expect(rootPackage.scripts?.build).toBe("node scripts/run-root-verification.mjs build");
+    expect(rootPackage.scripts?.typecheck).toBe("node scripts/run-root-verification.mjs typecheck");
+    expect(rootPackage.scripts?.test).toBe("bun test");
+
+    const workspaceNames = workspacePackageNames();
+    const buildPlan = verificationPlan("build");
+    const typecheckPlan = verificationPlan("typecheck");
+
+    expect(buildPlan.rootPackage).toBe(rootPackage.name);
+    expect(buildPlan.workspacePackages.map((pkg) => pkg.name).sort()).toEqual(workspaceNames);
+    expect(buildPlan.coveredPackageNames).toEqual([rootPackage.name, ...workspaceNames].sort());
+    expect(typecheckPlan.coveredPackageNames).toContain("@jurgen1c/agent-memory-core");
+    expect(typecheckPlan.coveredPackageNames).toContain("@jurgen1c/agentflow-core");
+    expect(typecheckPlan.coveredPackageNames).toContain("@jurgen1c/agent-memory-web");
+
+    expect(buildPlan.tasks.map((task) => task.label)).toEqual([
+      "check:workspace-packages",
+      "typecheck:packages",
+      "typecheck:web",
+      "build:web",
+      "build:agent-tools",
+      "bundle:agent-memory-cli",
+      "bundle:agentflow-cli"
+    ]);
+    expect(typecheckPlan.tasks.map((task) => task.label)).toEqual([
+      "check:workspace-packages",
+      "typecheck:packages",
+      "typecheck:web"
+    ]);
+
+    const workspaceCheck = buildPlan.tasks.find((task) => task.label === "check:workspace-packages");
+    expect(workspaceCheck?.kind).toBe("internal");
+    expect(workspaceCheck?.packages.sort()).toEqual(workspaceNames);
+    expect(buildPlan.tasks.find((task) => task.label === "bundle:agent-memory-cli")?.packages).toContain("@jurgen1c/agent-memory-core");
+    expect(buildPlan.tasks.find((task) => task.label === "bundle:agentflow-cli")?.packages).toContain("@jurgen1c/agentflow-core");
+  });
 });
 
 function readPackage(packagePath: string): PackageJson {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, packagePath), "utf8")) as PackageJson;
+}
+
+function workspacePackageNames(): string[] {
+  const workspaces = rootPackage.workspaces ?? [];
+
+  return workspaces
+    .flatMap((workspace) => {
+      const basePath = workspace.replace(/\/\*$/, "");
+
+      return fs
+        .readdirSync(path.join(repoRoot, basePath), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => readPackage(path.join(basePath, entry.name, "package.json")).name);
+    })
+    .sort();
+}
+
+function verificationPlan(mode: VerificationPlan["mode"]): VerificationPlan {
+  const result = spawnSync("bun", ["scripts/run-root-verification.mjs", mode, "--plan"], {
+    cwd: repoRoot,
+    encoding: "utf8"
+  });
+
+  expect(result.status, result.stderr).toBe(0);
+
+  return JSON.parse(result.stdout) as VerificationPlan;
 }

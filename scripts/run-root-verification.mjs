@@ -1,0 +1,235 @@
+#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const args = process.argv.slice(2);
+const mode = args.find((arg) => !arg.startsWith("-"));
+const planOnly = args.includes("--plan");
+
+if (!mode || !["build", "typecheck"].includes(mode)) {
+  console.error("Usage: node scripts/run-root-verification.mjs <build|typecheck> [--plan]");
+  process.exit(2);
+}
+
+const rootPackage = readJson(path.join(repoRoot, "package.json"));
+const workspacePackages = workspacePackageJsonPaths(rootPackage.workspaces)
+  .map((packageJsonPath) => {
+    const packageJson = readJson(packageJsonPath);
+
+    return {
+      name: packageJson.name,
+      packageJson,
+      packageJsonPath,
+      path: path.dirname(packageJsonPath),
+      relativePath: path.relative(repoRoot, path.dirname(packageJsonPath)).split(path.sep).join("/")
+    };
+  })
+  .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+
+const typecheckTasks = [
+  internalTask("check:workspace-packages", workspacePackages.map((pkg) => pkg.name), checkWorkspacePackages),
+  commandTask("typecheck:packages", ["bun", ["run", "typecheck:packages"]], sourcePackageNames()),
+  commandTask("typecheck:web", ["bun", ["run", "typecheck:web"]], ["@jurgen1c/agent-memory-web"])
+];
+
+const buildTasks = [
+  ...typecheckTasks,
+  commandTask("build:web", ["bun", ["run", "build:web"]], ["@jurgen1c/agent-memory-web"]),
+  commandTask("build:agent-tools", ["bun", ["run", "build:agent-tools"]], ["@jurgen1c/agent-tools"]),
+  commandTask("bundle:agent-memory-cli", ["bun", ["run", "build:agent-memory"]], [
+    rootPackage.name,
+    "@jurgen1c/agent-memory-cli-workspace",
+    "@jurgen1c/agent-memory-core",
+    "@jurgen1c/agent-memory-schemas"
+  ]),
+  commandTask("bundle:agentflow-cli", ["bun", ["run", "build:agentflow"]], [
+    rootPackage.name,
+    "@jurgen1c/agentflow",
+    "@jurgen1c/agentflow-agent-memory-adapter",
+    "@jurgen1c/agentflow-cli",
+    "@jurgen1c/agentflow-core",
+    "@jurgen1c/agentflow-schemas",
+    "@jurgen1c/agent-tools"
+  ])
+];
+
+const tasks = mode === "build" ? buildTasks : typecheckTasks;
+const plan = {
+  mode,
+  rootPackage: rootPackage.name,
+  workspacePackages: workspacePackages.map((pkg) => ({ name: pkg.name, path: pkg.relativePath })),
+  coveredPackageNames: [...new Set([rootPackage.name, ...tasks.flatMap((task) => task.packages)])].sort(),
+  tasks: tasks.map((task) => ({
+    label: task.label,
+    kind: task.kind,
+    command: task.command,
+    args: task.args,
+    packages: task.packages
+  }))
+};
+
+if (planOnly) {
+  console.log(JSON.stringify(plan, null, 2));
+  process.exit(0);
+}
+
+for (const task of tasks) {
+  console.log(`\n> ${task.label}`);
+
+  if (task.kind === "internal") {
+    task.run();
+    continue;
+  }
+
+  const result = spawnSync(task.command, task.args, {
+    cwd: repoRoot,
+    env: process.env,
+    stdio: "inherit"
+  });
+
+  if (result.error) {
+    console.error(`Failed to run ${task.label}: ${result.error.message}`);
+    process.exit(1);
+  }
+
+  if (result.status !== 0) {
+    console.error(`${task.label} failed with exit code ${result.status}.`);
+    process.exit(result.status ?? 1);
+  }
+}
+
+function internalTask(label, packages, run) {
+  return {
+    label,
+    kind: "internal",
+    command: null,
+    args: null,
+    packages,
+    run
+  };
+}
+
+function commandTask(label, [command, args], packages) {
+  return {
+    label,
+    kind: "command",
+    command,
+    args,
+    packages,
+    run: null
+  };
+}
+
+function checkWorkspacePackages() {
+  const seenNames = new Set();
+  const packageNames = new Set(workspacePackages.map((pkg) => pkg.name));
+
+  for (const pkg of workspacePackages) {
+    if (!pkg.name || typeof pkg.name !== "string") {
+      throw new Error(`${pkg.relativePath}/package.json is missing a package name.`);
+    }
+
+    if (seenNames.has(pkg.name)) {
+      throw new Error(`Duplicate workspace package name: ${pkg.name}`);
+    }
+
+    seenNames.add(pkg.name);
+    assertExportTargetsExist(pkg);
+    assertWorkspaceDependenciesExist(pkg, packageNames);
+  }
+}
+
+function assertExportTargetsExist(pkg) {
+  for (const target of exportTargets(pkg.packageJson.exports)) {
+    const targetPath = path.resolve(pkg.path, target);
+
+    if (!target.startsWith("./") || target.startsWith("./dist/")) {
+      continue;
+    }
+
+    if (!fs.existsSync(targetPath)) {
+      throw new Error(`${pkg.relativePath}/package.json exports missing target ${target}`);
+    }
+  }
+}
+
+function assertWorkspaceDependenciesExist(pkg, packageNames) {
+  for (const dependencySetName of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
+    const dependencySet = pkg.packageJson[dependencySetName] ?? {};
+
+    for (const [dependencyName, version] of Object.entries(dependencySet)) {
+      if (version !== "workspace:*") {
+        continue;
+      }
+
+      if (!packageNames.has(dependencyName)) {
+        throw new Error(`${pkg.relativePath}/package.json references unknown workspace dependency ${dependencyName}`);
+      }
+    }
+  }
+}
+
+function exportTargets(exportsField) {
+  if (!exportsField) {
+    return [];
+  }
+
+  if (typeof exportsField === "string") {
+    return [exportsField];
+  }
+
+  if (Array.isArray(exportsField)) {
+    return exportsField.flatMap(exportTargets);
+  }
+
+  if (typeof exportsField === "object") {
+    return Object.values(exportsField).flatMap(exportTargets);
+  }
+
+  return [];
+}
+
+function sourcePackageNames() {
+  return workspacePackages
+    .filter((pkg) => fs.existsSync(path.join(pkg.path, "src")))
+    .map((pkg) => pkg.name);
+}
+
+function workspacePackageJsonPaths(workspaces) {
+  const patterns = Array.isArray(workspaces)
+    ? workspaces
+    : workspaces && typeof workspaces === "object" && Array.isArray(workspaces.packages)
+      ? workspaces.packages
+      : [];
+
+  return patterns.flatMap((pattern) => packageJsonPathsForPattern(pattern)).sort();
+}
+
+function packageJsonPathsForPattern(pattern) {
+  const normalizedPattern = pattern.split("/").filter(Boolean);
+  const starIndex = normalizedPattern.indexOf("*");
+
+  if (starIndex === -1) {
+    const packagePath = path.join(repoRoot, pattern, "package.json");
+    return fs.existsSync(packagePath) ? [packagePath] : [];
+  }
+
+  const basePath = path.join(repoRoot, ...normalizedPattern.slice(0, starIndex));
+
+  if (!fs.existsSync(basePath)) {
+    return [];
+  }
+
+  return fs
+    .readdirSync(basePath, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(basePath, entry.name, ...normalizedPattern.slice(starIndex + 1), "package.json"))
+    .filter((packagePath) => fs.existsSync(packagePath));
+}
+
+function readJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
