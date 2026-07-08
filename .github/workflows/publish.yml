@@ -35,4 +35,6 @@ jobs:
         run: bun run version:check
       - run: bun run ci
       - run: npm pack --dry-run
+      - run: npm pack --workspace @jurgen1c/agent-tools --dry-run
       - run: npm publish --provenance --access public
+      - run: npm publish --workspace @jurgen1c/agent-tools --provenance --access public

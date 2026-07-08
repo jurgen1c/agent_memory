@@ -10,9 +10,14 @@ interface PackageJson {
   private?: boolean;
   bin?: Record<string, string>;
   dependencies?: Record<string, string>;
-  exports?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  exports?: Record<string, string | { types: string; default: string }>;
   files?: string[];
   main?: string;
+  publishConfig?: Record<string, string>;
+  scripts?: Record<string, string>;
+  types?: string;
   workspaces?: string[];
 }
 
@@ -34,7 +39,7 @@ describe("workspace package layout", () => {
     const packages = {
       "packages/agent-tools/package.json": {
         name: "@jurgen1c/agent-tools",
-        exports: { ".": "./src/index.ts" }
+        exports: { ".": { types: "./src/index.ts", default: "./dist/index.js" } }
       },
       "packages/agentflow/package.json": {
         name: "@jurgen1c/agentflow",
@@ -85,7 +90,20 @@ describe("workspace package layout", () => {
     for (const [packagePath, expected] of Object.entries(packages)) {
       const packageJson = readPackage(packagePath);
 
-      expect(packageJson.private).toBe(true);
+      if (packagePath === "packages/agent-tools/package.json") {
+        expect(packageJson.private).toBeUndefined();
+        expect(packageJson.main).toBe("./dist/index.js");
+        expect(packageJson.types).toBe("./src/index.ts");
+        expect(packageJson.publishConfig).toEqual({ access: "public" });
+        expect(packageJson.files).toEqual(["dist/", "src/", "README.md"]);
+        expect(packageJson.scripts).toEqual({ build: "bun build src/index.ts --target=node --outfile=dist/index.js" });
+        expect(packageJson.dependencies ?? {}).toEqual({});
+        expect(packageJson.optionalDependencies ?? {}).toEqual({});
+        expect(packageJson.peerDependencies ?? {}).toEqual({});
+        expect(packageJson.bin ?? {}).toEqual({});
+      } else {
+        expect(packageJson.private).toBe(true);
+      }
       expect(packageJson.version).toBe(rootPackage.version);
       expect(packageJson.name).toBe(expected.name);
       expect(packageJson.exports).toEqual(expected.exports);
@@ -116,6 +134,8 @@ describe("workspace package layout", () => {
       "@jurgen1c/agentflow-core": "workspace:*"
     });
     expect(agentflowSource).toContain('from "@jurgen1c/agentflow-core"');
+    expect(agentflowCore.dependencies).toHaveProperty("@jurgen1c/agent-tools");
+    expect(core.dependencies ?? {}).not.toHaveProperty("@jurgen1c/agent-tools");
     expect(core.dependencies ?? {}).not.toHaveProperty("@jurgen1c/agentflow");
     expect(cli.dependencies ?? {}).not.toHaveProperty("@jurgen1c/agentflow");
     expect(core.dependencies ?? {}).not.toHaveProperty("@jurgen1c/agentflow-core");

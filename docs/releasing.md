@@ -35,6 +35,7 @@ bun run build
 dist/agent-memory.js help
 dist/agent-memory.js --version
 npm pack --dry-run
+npm pack --workspace @jurgen1c/agent-tools --dry-run
 ```
 
 ## Create the Version Commit and Tag
@@ -68,10 +69,11 @@ gh release create vX.Y.Z --title "vX.Y.Z" --notes "Release vX.Y.Z"
 
 This `release: published` event starts `.github/workflows/publish.yml`.
 
-The workflow verifies that the release tag matches `package.json`, installs dependencies, runs audit/lint/tests/build, runs `npm pack --dry-run`, and publishes with provenance:
+The workflow verifies that the release tag matches `package.json`, installs dependencies, runs audit/lint/tests/build, dry-runs both package tarballs, and publishes the root CLI plus the Agent Tools workspace package with provenance:
 
 ```bash
 npm publish --provenance --access public
+npm publish --workspace @jurgen1c/agent-tools --provenance --access public
 ```
 
 ## Monitor the Publish
@@ -87,6 +89,7 @@ Check npm after it completes:
 
 ```bash
 npm view @jurgen1c/agent-memory-cli version
+npm view @jurgen1c/agent-tools version
 ```
 
 ## If You Pushed a Tag but Nothing Ran
