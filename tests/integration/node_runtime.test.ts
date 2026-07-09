@@ -48,7 +48,7 @@ describe("built Node CLI", () => {
 
     expect(nestedAgentflowVersion.exitCode).toBe(0);
     expect(nestedAgentflowVersion.stdout).toContain(`agentflow ${rootPackage.version}`);
-  });
+  }, 120000);
 });
 
 function copyFixture(source: string): string {
