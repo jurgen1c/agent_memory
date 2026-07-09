@@ -16,19 +16,23 @@
   ],
   "type": "module",
   "main": "./dist/router.js",
+  "types": "./src/router.d.ts",
   "bin": {
     "agentflow": "dist/index.js"
   },
   "exports": {
     ".": {
+      "types": "./src/router.d.ts",
       "default": "./dist/router.js"
     },
     "./router": {
+      "types": "./src/router.d.ts",
       "default": "./dist/router.js"
     }
   },
   "files": [
-    "dist/"
+    "dist/",
+    "src/router.d.ts"
   ],
   "publishConfig": {
     "access": "public"

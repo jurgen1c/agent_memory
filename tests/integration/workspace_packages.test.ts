@@ -66,7 +66,10 @@ describe("workspace package layout", () => {
       },
       "packages/agentflow-cli/package.json": {
         name: "@jurgen1c/agentflow-cli",
-        exports: { ".": { default: "./dist/router.js" }, "./router": { default: "./dist/router.js" } }
+        exports: {
+          ".": { types: "./src/router.d.ts", default: "./dist/router.js" },
+          "./router": { types: "./src/router.d.ts", default: "./dist/router.js" }
+        }
       },
       "packages/agentflow-core/package.json": {
         name: "@jurgen1c/agentflow-core",
@@ -122,14 +125,16 @@ describe("workspace package layout", () => {
       } else if (packagePath === "packages/agentflow-cli/package.json") {
         expect(packageJson.private).toBeUndefined();
         expect(packageJson.main).toBe("./dist/router.js");
+        expect(packageJson.types).toBe("./src/router.d.ts");
         expect(packageJson.publishConfig).toEqual({ access: "public" });
-        expect(packageJson.files).toEqual(["dist/"]);
+        expect(packageJson.files).toEqual(["dist/", "src/router.d.ts"]);
         expect(packageJson.scripts).toEqual({
           build: "bun build src/index.ts src/router.ts --target=node --outdir=dist",
           prepack: "bun run build"
         });
         expect(packageJson.bin).toEqual({ agentflow: "dist/index.js" });
         expect(packageJson.dependencies ?? {}).toEqual({});
+        expect(fs.readFileSync(path.join(repoRoot, "packages/agentflow-cli/src/router.d.ts"), "utf8")).not.toContain("@jurgen1c/agentflow-core");
       } else {
         expect(packageJson.private).toBe(true);
       }
