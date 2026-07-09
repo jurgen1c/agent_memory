@@ -6,13 +6,15 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const args = process.argv.slice(2);
-const mode = args.find((arg) => !arg.startsWith("-"));
-const planOnly = args.includes("--plan");
+const parsedArgs = parseArgs(args);
 
-if (!mode || !["build", "typecheck"].includes(mode)) {
+if (!parsedArgs.ok) {
+  console.error(parsedArgs.error);
   console.error("Usage: node scripts/run-root-verification.mjs <build|typecheck> [--plan]");
   process.exit(2);
 }
+
+const { mode, planOnly } = parsedArgs;
 
 let rootPackage;
 let workspacePackages;
@@ -142,6 +144,36 @@ function commandTask(label, [command, args], packages) {
   };
 }
 
+function parseArgs(args) {
+  const modes = [];
+  let planOnly = false;
+
+  for (const arg of args) {
+    if (arg === "--plan") {
+      planOnly = true;
+      continue;
+    }
+
+    if (arg.startsWith("-")) {
+      return { ok: false, error: `Unknown option: ${arg}` };
+    }
+
+    modes.push(arg);
+  }
+
+  if (modes.length !== 1) {
+    return { ok: false, error: "Expected exactly one mode argument." };
+  }
+
+  const [mode] = modes;
+
+  if (!["build", "typecheck"].includes(mode)) {
+    return { ok: false, error: `Unknown mode: ${mode}` };
+  }
+
+  return { ok: true, mode, planOnly };
+}
+
 function checkWorkspacePackages() {
   const seenNames = new Set();
   const packageNames = new Set(workspacePackages.map((pkg) => pkg.name));
@@ -180,7 +212,7 @@ function assertWorkspaceDependenciesExist(pkg, packageNames) {
     const dependencySet = pkg.packageJson[dependencySetName] ?? {};
 
     for (const [dependencyName, version] of Object.entries(dependencySet)) {
-      if (version !== "workspace:*") {
+      if (!isWorkspaceProtocol(version)) {
         continue;
       }
 
@@ -189,6 +221,10 @@ function assertWorkspaceDependenciesExist(pkg, packageNames) {
       }
     }
   }
+}
+
+function isWorkspaceProtocol(version) {
+  return typeof version === "string" && version.startsWith("workspace:");
 }
 
 function exportTargets(exportsField) {

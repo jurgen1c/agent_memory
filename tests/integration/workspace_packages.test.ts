@@ -195,6 +195,19 @@ describe("workspace package layout", () => {
     expect(buildPlan.tasks.find((task) => task.label === "bundle:agentflow-cli")?.packages).toContain("@jurgen1c/agentflow-core");
   });
 
+  test("rejects unknown root verification arguments", () => {
+    const unknownFlag = Bun.spawnSync(["node", "scripts/run-root-verification.mjs", "typecheck", "--plna"], { cwd: repoRoot });
+    const extraMode = Bun.spawnSync(["node", "scripts/run-root-verification.mjs", "typecheck", "build"], { cwd: repoRoot });
+    const unknownFlagStderr = new TextDecoder().decode(unknownFlag.stderr);
+    const extraModeStderr = new TextDecoder().decode(extraMode.stderr);
+
+    expect(unknownFlag.exitCode).toBe(2);
+    expect(unknownFlagStderr).toContain("Unknown option: --plna");
+    expect(unknownFlagStderr).toContain("Usage: node scripts/run-root-verification.mjs <build|typecheck> [--plan]");
+    expect(extraMode.exitCode).toBe(2);
+    expect(extraModeStderr).toContain("Expected exactly one mode argument.");
+  });
+
   test("reports internal verification failures without stack traces", () => {
     const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-root-verification-"));
     fs.mkdirSync(path.join(fixtureRoot, "scripts"), { recursive: true });
@@ -220,7 +233,7 @@ describe("workspace package layout", () => {
         {
           name: "@example/bad",
           dependencies: {
-            "@example/missing": "workspace:*"
+            "@example/missing": "workspace:^"
           }
         },
         null,
