@@ -312,13 +312,17 @@ function resolveRepoPath(...segments) {
   const resolvedPath = path.resolve(repoRoot, ...segments);
   const relativePath = path.relative(repoRoot, resolvedPath);
 
-  if (relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))) {
+  if (!pathEscapesRepo(relativePath)) {
     return resolvedPath;
   }
 
   const requestedPath = segments.join("/");
 
   throw new Error(`Workspace path escapes repository: ${requestedPath}`);
+}
+
+function pathEscapesRepo(relativePath) {
+  return relativePath === ".." || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath);
 }
 
 function isIncludedWorkspacePattern(pattern) {

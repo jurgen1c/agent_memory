@@ -327,6 +327,45 @@ describe("workspace package layout", () => {
     expect(stderr).not.toContain("\n    at ");
   });
 
+  test("allows workspace directories with names that start with dot dot", () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-root-verification-"));
+    fs.mkdirSync(path.join(fixtureRoot, "scripts"), { recursive: true });
+    fs.mkdirSync(path.join(fixtureRoot, "..foo"), { recursive: true });
+    fs.copyFileSync(
+      path.join(repoRoot, "scripts/run-root-verification.mjs"),
+      path.join(fixtureRoot, "scripts/run-root-verification.mjs")
+    );
+    fs.writeFileSync(
+      path.join(fixtureRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "@example/root",
+          workspaces: ["..foo"]
+        },
+        null,
+        2
+      )
+    );
+    fs.writeFileSync(
+      path.join(fixtureRoot, "..foo/package.json"),
+      JSON.stringify(
+        {
+          name: "@example/dotdot-name"
+        },
+        null,
+        2
+      )
+    );
+
+    const result = Bun.spawnSync(["node", "scripts/run-root-verification.mjs", "typecheck", "--plan"], { cwd: fixtureRoot });
+    const stdout = new TextDecoder().decode(result.stdout);
+    const stderr = new TextDecoder().decode(result.stderr);
+    const plan = JSON.parse(stdout) as VerificationPlan;
+
+    expect(result.exitCode, stderr).toBe(0);
+    expect(plan.workspacePackages).toContainEqual({ name: "@example/dotdot-name", path: "..foo" });
+  });
+
   test("reports command task signal termination explicitly", () => {
     const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-root-verification-"));
     const fakeBin = path.join(fixtureRoot, "bin");
