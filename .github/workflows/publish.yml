@@ -22,19 +22,10 @@ jobs:
           node-version: 25
           registry-url: https://registry.npmjs.org
       - run: bun install --frozen-lockfile
-      - name: Verify release tag matches package version
-        run: |
-          package_version="$(node -p "require('./package.json').version")"
-          expected_tag="v${package_version}"
-
-          if [ "$GITHUB_REF_NAME" != "$expected_tag" ]; then
-            echo "Release tag $GITHUB_REF_NAME does not match package version $expected_tag." >&2
-            exit 1
-          fi
+      - name: Verify release tag and public package versions
+        run: node scripts/release-packages.mjs verify-tag
       - name: Verify workspace package versions
         run: bun run version:check
       - run: bun run ci
-      - run: npm pack --dry-run
-      - run: npm pack --workspace @jurgen1c/agent-tools --dry-run
-      - run: npm publish --provenance --access public
-      - run: npm publish --workspace @jurgen1c/agent-tools --provenance --access public
+      - run: node scripts/release-packages.mjs pack-dry-run
+      - run: node scripts/release-packages.mjs publish

@@ -45,8 +45,8 @@
     "packages/agentflow-cli": {
       "name": "@jurgen1c/agentflow-cli",
       "version": "0.2.0",
-      "dependencies": {
-        "@jurgen1c/agentflow-core": "workspace:*",
+      "bin": {
+        "agentflow": "./dist/index.js",
       },
     },
     "packages/agentflow-core": {

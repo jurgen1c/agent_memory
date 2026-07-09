@@ -54,6 +54,7 @@
     "build": "node scripts/run-root-verification.mjs build",
     "build:agent-memory": "bun build packages/cli/src/index.ts --target=node --outfile=dist/agent-memory.js",
     "build:agentflow": "bun build packages/agentflow-cli/src/index.ts --target=node --outfile=dist/agentflow.js",
+    "build:agentflow-cli-package": "bun run --cwd packages/agentflow-cli build",
     "build:agent-tools": "bun run --cwd packages/agent-tools build",
     "build:web": "bun run --cwd packages/web build",
     "typecheck": "node scripts/run-root-verification.mjs typecheck",

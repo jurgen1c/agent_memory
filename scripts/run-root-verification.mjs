@@ -49,6 +49,12 @@ const buildTasks = [
   ...typecheckTasks,
   commandTask("build:web", ["bun", ["run", "build:web"]], ["@jurgen1c/agent-memory-web"]),
   commandTask("build:agent-tools", ["bun", ["run", "build:agent-tools"]], ["@jurgen1c/agent-tools"]),
+  commandTask("build:agentflow-cli-package", ["bun", ["run", "build:agentflow-cli-package"]], [
+    "@jurgen1c/agentflow-cli",
+    "@jurgen1c/agentflow-core",
+    "@jurgen1c/agentflow-schemas",
+    "@jurgen1c/agent-tools"
+  ]),
   commandTask("bundle:agent-memory-cli", ["bun", ["run", "build:agent-memory"]], [
     rootPackage.name,
     "@jurgen1c/agent-memory-cli-workspace",

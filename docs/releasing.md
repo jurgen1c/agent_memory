@@ -1,6 +1,6 @@
 # Releasing
 
-Use this checklist to publish a new `@jurgen1c/agent-memory-cli` version.
+Use this checklist to publish a coordinated Agent Memory and Agentflow release.
 
 Publishing is triggered by a published GitHub Release. Pushing a `vX.Y.Z` tag by itself does not run `.github/workflows/publish.yml`.
 
@@ -12,7 +12,9 @@ Publishing is triggered by a published GitHub Release. Pushing a `vX.Y.Z` tag by
   The `npm version` lifecycle runs `scripts/sync-workspace-versions.mjs --stage`
   for future bumps, but manual edits should keep `packages/*/package.json`
   aligned.
-- Make sure npm Trusted Publishing is configured for `@jurgen1c/agent-memory-cli`.
+- Make sure npm Trusted Publishing is configured for every public package:
+  `@jurgen1c/agent-memory-cli`, `@jurgen1c/agentflow-cli`, and
+  `@jurgen1c/agent-tools`.
 - Make sure the GitHub workflow named `Publish package` is active.
 
 ## Choose the Version
@@ -35,6 +37,7 @@ bun run build
 dist/agent-memory.js help
 dist/agent-memory.js --version
 npm pack --dry-run
+npm pack --workspace @jurgen1c/agentflow-cli --dry-run
 npm pack --workspace @jurgen1c/agent-tools --dry-run
 ```
 
@@ -69,10 +72,14 @@ gh release create vX.Y.Z --title "vX.Y.Z" --notes "Release vX.Y.Z"
 
 This `release: published` event starts `.github/workflows/publish.yml`.
 
-The workflow verifies that the release tag matches `package.json`, installs dependencies, runs audit/lint/tests/build, dry-runs both package tarballs, and publishes the root CLI plus the Agent Tools workspace package with provenance:
+The workflow verifies that the release tag matches `package.json`, verifies all
+public release package versions, installs dependencies, runs audit/lint/tests/build,
+dry-runs each public package tarball, and publishes the packages with npm Trusted
+Publishing provenance in this deterministic order:
 
 ```bash
 npm publish --provenance --access public
+npm publish --workspace @jurgen1c/agentflow-cli --provenance --access public
 npm publish --workspace @jurgen1c/agent-tools --provenance --access public
 ```
 
@@ -89,6 +96,7 @@ Check npm after it completes:
 
 ```bash
 npm view @jurgen1c/agent-memory-cli version
+npm view @jurgen1c/agentflow-cli version
 npm view @jurgen1c/agent-tools version
 ```
 

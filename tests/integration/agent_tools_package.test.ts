@@ -26,9 +26,9 @@ describe("Agent Tools meta package", () => {
         packageName: "@jurgen1c/agentflow-cli",
         binaryName: "agentflow",
         role: "workflow-runtime-cli",
-        packageStatus: "workspace-private",
-        installPackageName: "@jurgen1c/agent-memory-cli",
-        installCommand: "npm install --save-dev @jurgen1c/agent-memory-cli"
+        packageStatus: "published",
+        installPackageName: "@jurgen1c/agentflow-cli",
+        installCommand: "npm install --save-dev @jurgen1c/agentflow-cli"
       }
     ]);
   });
@@ -55,11 +55,14 @@ describe("Agent Tools meta package", () => {
 
   test("is included in the release publish path", () => {
     const publishWorkflow = fs.readFileSync(path.join(repoRoot, ".github/workflows/publish.yml"), "utf8");
+    const releaseScript = fs.readFileSync(path.join(repoRoot, "scripts/release-packages.mjs"), "utf8");
     const releaseDocs = fs.readFileSync(path.join(repoRoot, "docs/releasing.md"), "utf8");
 
-    for (const content of [publishWorkflow, releaseDocs]) {
-      expect(content).toContain("npm pack --workspace @jurgen1c/agent-tools --dry-run");
-      expect(content).toContain("npm publish --workspace @jurgen1c/agent-tools --provenance --access public");
+    expect(publishWorkflow).toContain("node scripts/release-packages.mjs publish");
+
+    for (const content of [releaseScript, releaseDocs]) {
+      expect(content).toContain("@jurgen1c/agentflow-cli");
+      expect(content).toContain("@jurgen1c/agent-tools");
     }
   });
 });
