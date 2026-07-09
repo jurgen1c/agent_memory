@@ -281,5 +281,13 @@ function isExcludedWorkspacePattern(pattern) {
 }
 
 function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const displayPath = path.relative(repoRoot, filePath).split(path.sep).join("/") || path.basename(filePath);
+
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    throw new Error(`${displayPath}: ${message}`);
+  }
 }

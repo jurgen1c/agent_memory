@@ -252,7 +252,37 @@ describe("workspace package layout", () => {
     const stderr = new TextDecoder().decode(result.stderr);
 
     expect(result.exitCode).toBe(1);
-    expect(stderr).toContain("Root verification setup failed:");
+    expect(stderr).toContain("Root verification setup failed: package.json:");
+    expect(stderr).not.toContain("SyntaxError:");
+    expect(stderr).not.toContain("\n    at ");
+  });
+
+  test("reports workspace setup failures with the package path", () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-root-verification-"));
+    fs.mkdirSync(path.join(fixtureRoot, "scripts"), { recursive: true });
+    fs.mkdirSync(path.join(fixtureRoot, "packages/bad"), { recursive: true });
+    fs.copyFileSync(
+      path.join(repoRoot, "scripts/run-root-verification.mjs"),
+      path.join(fixtureRoot, "scripts/run-root-verification.mjs")
+    );
+    fs.writeFileSync(
+      path.join(fixtureRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "@example/root",
+          workspaces: ["packages/*"]
+        },
+        null,
+        2
+      )
+    );
+    fs.writeFileSync(path.join(fixtureRoot, "packages/bad/package.json"), "{ invalid json");
+
+    const result = Bun.spawnSync(["node", "scripts/run-root-verification.mjs", "typecheck"], { cwd: fixtureRoot });
+    const stderr = new TextDecoder().decode(result.stderr);
+
+    expect(result.exitCode).toBe(1);
+    expect(stderr).toContain("Root verification setup failed: packages/bad/package.json:");
     expect(stderr).not.toContain("SyntaxError:");
     expect(stderr).not.toContain("\n    at ");
   });
