@@ -101,6 +101,11 @@ for (const task of tasks) {
     process.exit(1);
   }
 
+  if (result.signal) {
+    console.error(`${task.label} terminated by signal ${result.signal}.`);
+    process.exit(1);
+  }
+
   if (result.status !== 0) {
     console.error(`${task.label} failed with exit code ${result.status}.`);
     process.exit(result.status ?? 1);

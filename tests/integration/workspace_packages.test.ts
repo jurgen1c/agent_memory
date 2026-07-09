@@ -238,6 +238,49 @@ describe("workspace package layout", () => {
     expect(stderr).not.toContain("Error:");
     expect(stderr).not.toContain("at ");
   });
+
+  test("reports command task signal termination explicitly", () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-root-verification-"));
+    const fakeBin = path.join(fixtureRoot, "bin");
+    fs.mkdirSync(path.join(fixtureRoot, "scripts"), { recursive: true });
+    fs.mkdirSync(fakeBin, { recursive: true });
+    fs.copyFileSync(
+      path.join(repoRoot, "scripts/run-root-verification.mjs"),
+      path.join(fixtureRoot, "scripts/run-root-verification.mjs")
+    );
+    fs.writeFileSync(
+      path.join(fixtureRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "@example/root",
+          workspaces: []
+        },
+        null,
+        2
+      )
+    );
+    fs.writeFileSync(
+      path.join(fakeBin, "bun"),
+      [
+        "#!/usr/bin/env node",
+        "process.kill(process.pid, 'SIGTERM');"
+      ].join("\n")
+    );
+    fs.chmodSync(path.join(fakeBin, "bun"), 0o755);
+
+    const result = Bun.spawnSync(["node", "scripts/run-root-verification.mjs", "typecheck"], {
+      cwd: fixtureRoot,
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`
+      }
+    });
+    const stderr = new TextDecoder().decode(result.stderr);
+
+    expect(result.exitCode).toBe(1);
+    expect(stderr).toContain("typecheck:packages terminated by signal SIGTERM.");
+    expect(stderr).not.toContain("exit code null");
+  });
 });
 
 function readPackage(packagePath: string): PackageJson {
