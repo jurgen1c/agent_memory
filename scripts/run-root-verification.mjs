@@ -14,20 +14,28 @@ if (!mode || !["build", "typecheck"].includes(mode)) {
   process.exit(2);
 }
 
-const rootPackage = readJson(path.join(repoRoot, "package.json"));
-const workspacePackages = workspacePackageJsonPaths(rootPackage.workspaces)
-  .map((packageJsonPath) => {
-    const packageJson = readJson(packageJsonPath);
+let rootPackage;
+let workspacePackages;
 
-    return {
-      name: packageJson.name,
-      packageJson,
-      packageJsonPath,
-      path: path.dirname(packageJsonPath),
-      relativePath: path.relative(repoRoot, path.dirname(packageJsonPath)).split(path.sep).join("/")
-    };
-  })
-  .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+try {
+  rootPackage = readJson(path.join(repoRoot, "package.json"));
+  workspacePackages = workspacePackageJsonPaths(rootPackage.workspaces)
+    .map((packageJsonPath) => {
+      const packageJson = readJson(packageJsonPath);
+
+      return {
+        name: packageJson.name,
+        packageJson,
+        packageJsonPath,
+        path: path.dirname(packageJsonPath),
+        relativePath: path.relative(repoRoot, path.dirname(packageJsonPath)).split(path.sep).join("/")
+      };
+    })
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+} catch (error) {
+  console.error(`Root verification setup failed: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
 
 const typecheckTasks = [
   internalTask("check:workspace-packages", workspacePackages.map((pkg) => pkg.name), checkWorkspacePackages),
