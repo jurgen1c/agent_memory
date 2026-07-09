@@ -290,7 +290,7 @@ function packageJsonPathsForPattern(pattern) {
 
   const baseDir = trimmedPattern.slice(0, starIndex).replace(/\/+$/, "");
   const suffixSegments = trimmedPattern.slice(starIndex + 1).split("/").filter(Boolean);
-  const basePath = path.join(repoRoot, baseDir);
+  const basePath = resolveRepoPath(baseDir);
 
   if (!fs.existsSync(basePath)) {
     return [];
@@ -303,9 +303,22 @@ function packageJsonPathsForPattern(pattern) {
 }
 
 function packageJsonPathIfPresent(workspacePath) {
-  const packagePath = path.join(repoRoot, workspacePath, "package.json");
+  const packagePath = resolveRepoPath(workspacePath, "package.json");
 
   return fs.existsSync(packagePath) ? [packagePath] : [];
+}
+
+function resolveRepoPath(...segments) {
+  const resolvedPath = path.resolve(repoRoot, ...segments);
+  const relativePath = path.relative(repoRoot, resolvedPath);
+
+  if (relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))) {
+    return resolvedPath;
+  }
+
+  const requestedPath = segments.join("/");
+
+  throw new Error(`Workspace path escapes repository: ${requestedPath}`);
 }
 
 function isIncludedWorkspacePattern(pattern) {

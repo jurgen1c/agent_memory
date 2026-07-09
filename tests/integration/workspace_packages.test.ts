@@ -300,6 +300,33 @@ describe("workspace package layout", () => {
     expect(stderr).not.toContain("\n    at ");
   });
 
+  test("rejects workspace patterns that escape the repository", () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-root-verification-"));
+    fs.mkdirSync(path.join(fixtureRoot, "scripts"), { recursive: true });
+    fs.copyFileSync(
+      path.join(repoRoot, "scripts/run-root-verification.mjs"),
+      path.join(fixtureRoot, "scripts/run-root-verification.mjs")
+    );
+    fs.writeFileSync(
+      path.join(fixtureRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "@example/root",
+          workspaces: ["../*"]
+        },
+        null,
+        2
+      )
+    );
+
+    const result = Bun.spawnSync(["node", "scripts/run-root-verification.mjs", "typecheck"], { cwd: fixtureRoot });
+    const stderr = new TextDecoder().decode(result.stderr);
+
+    expect(result.exitCode).toBe(1);
+    expect(stderr).toContain("Root verification setup failed: Workspace path escapes repository: ..");
+    expect(stderr).not.toContain("\n    at ");
+  });
+
   test("reports command task signal termination explicitly", () => {
     const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-root-verification-"));
     const fakeBin = path.join(fixtureRoot, "bin");
