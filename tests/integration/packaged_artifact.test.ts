@@ -8,6 +8,39 @@ const repoRoot = path.resolve(".");
 const rootPackage = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { version: string };
 
 describe("packaged artifact", () => {
+  test("smoke-tests built CLI artifacts and public package dry-runs", () => {
+    runCommand("bun", ["run", "build"], repoRoot, 120000);
+
+    const packageRoot = copyBuiltCliPackage();
+    const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-built-cli-smoke-"));
+    const agentMemory = path.join(packageRoot, "dist/agent-memory.js");
+    const agentflow = path.join(packageRoot, "dist/agentflow.js");
+
+    expect(runCommand(agentMemory, ["help"], appRoot).stdout).toContain("Repository-local agent memory");
+    expect(runCommand(agentMemory, ["--version"], appRoot).stdout).toContain(`agent-memory ${rootPackage.version}`);
+    expect(runCommand(agentflow, ["help"], appRoot).stdout).toContain("No workflow execution commands are active yet.");
+    expect(runCommand(agentflow, ["--version"], appRoot).stdout).toContain(`agentflow ${rootPackage.version}`);
+
+    const rootPack = packDryRun(["pack", "--dry-run", "--json", "--ignore-scripts"]);
+    const agentflowPack = packDryRun(["pack", "--workspace", "@jurgen1c/agentflow-cli", "--dry-run", "--json", "--ignore-scripts"]);
+    const agentToolsPack = packDryRun(["pack", "--workspace", "@jurgen1c/agent-tools", "--dry-run", "--json", "--ignore-scripts"]);
+
+    expect(rootPack.name).toBe("@jurgen1c/agent-memory-cli");
+    expect(agentflowPack.name).toBe("@jurgen1c/agentflow-cli");
+    expect(agentToolsPack.name).toBe("@jurgen1c/agent-tools");
+
+    expect(rootPack.paths).toEqual(expect.arrayContaining(["dist/agent-memory.js", "dist/agentflow.js", "package.json"]));
+    expect(agentflowPack.paths).toEqual(expect.arrayContaining(["dist/index.js", "dist/router.js", "src/router.d.ts", "package.json"]));
+    expect(agentToolsPack.paths).toEqual(expect.arrayContaining(["dist/index.js", "src/index.ts", "README.md", "package.json"]));
+
+    expect(agentflowPack.paths).not.toContain("src/router.ts");
+    expect(agentToolsPack.paths).not.toContain("src/index.d.ts");
+
+    for (const pack of [rootPack, agentflowPack, agentToolsPack]) {
+      expectNoGeneratedArtifacts(pack.paths);
+    }
+  }, 120000);
+
   test("runs the installed CLI, generated wrapper, and UI static asset path", async () => {
     const appRoot = installPackedCli();
     const cliPath = path.join(appRoot, "node_modules/.bin/agent-memory");
@@ -29,6 +62,45 @@ describe("packaged artifact", () => {
     await expectUiStaticRoot(cliPath, appRoot, packageRoot);
   }, 120000);
 });
+
+interface PackDryRun {
+  name: string;
+  paths: string[];
+}
+
+function copyBuiltCliPackage(): string {
+  const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-built-package-"));
+
+  fs.mkdirSync(path.join(packageRoot, "dist"), { recursive: true });
+  fs.copyFileSync(path.join(repoRoot, "package.json"), path.join(packageRoot, "package.json"));
+  fs.copyFileSync(path.join(repoRoot, "dist/agent-memory.js"), path.join(packageRoot, "dist/agent-memory.js"));
+  fs.copyFileSync(path.join(repoRoot, "dist/agentflow.js"), path.join(packageRoot, "dist/agentflow.js"));
+
+  return packageRoot;
+}
+
+function packDryRun(args: string[]): PackDryRun {
+  const result = runCommand("npm", args, repoRoot, 120000);
+  const entries = JSON.parse(result.stdout) as Array<{ name: string; files: Array<{ path: string }> }>;
+
+  expect(entries).toHaveLength(1);
+
+  return {
+    name: entries[0].name,
+    paths: entries[0].files.map((file) => file.path).sort()
+  };
+}
+
+function expectNoGeneratedArtifacts(paths: string[]): void {
+  for (const filePath of paths) {
+    expect(filePath.startsWith(".agent-memory/")).toBe(false);
+    expect(filePath.startsWith(".agentflow/runs/")).toBe(false);
+    expect(filePath.startsWith("node_modules/")).toBe(false);
+    expect(filePath.startsWith("dist/.agent-memory/")).toBe(false);
+    expect(filePath.startsWith("agentflow-examples/")).toBe(false);
+    expect(filePath.startsWith("agentflow-workflow-specs/")).toBe(false);
+  }
+}
 
 function installPackedCli(): string {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-packaged-smoke-"));
