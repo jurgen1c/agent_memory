@@ -52,13 +52,13 @@ agent-memory --help
 Agent Memory and Agentflow are also listed through the lightweight
 `@jurgen1c/agent-tools` meta package. The meta package is for discovery and
 install guidance; it does not replace the individual CLIs or couple their
-runtimes. Today the `agentflow` binary is still distributed by the published
-`@jurgen1c/agent-memory-cli` package while the `@jurgen1c/agentflow-cli`
-workspace package remains private:
+runtimes. The `agent-memory` and `agentflow` binaries are published by their
+own CLI packages:
 
 ```bash
 npm install --save-dev @jurgen1c/agent-tools
 npm install --save-dev @jurgen1c/agent-memory-cli
+npm install --save-dev @jurgen1c/agentflow-cli
 ```
 
 ### What `init` Creates

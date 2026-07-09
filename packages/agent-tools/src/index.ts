@@ -12,8 +12,8 @@ export interface AgentToolCliPackage {
   packageName: AgentToolCliPackageName;
   binaryName: AgentToolBinaryName;
   role: "repository-memory-cli" | "workflow-runtime-cli";
-  packageStatus: "published" | "workspace-private";
-  installPackageName: "@jurgen1c/agent-memory-cli";
+  packageStatus: "published";
+  installPackageName: AgentToolCliPackageName;
   installCommand: string;
 }
 
@@ -30,9 +30,9 @@ export const agentToolCliPackages = [
     packageName: "@jurgen1c/agentflow-cli",
     binaryName: "agentflow",
     role: "workflow-runtime-cli",
-    packageStatus: "workspace-private",
-    installPackageName: "@jurgen1c/agent-memory-cli",
-    installCommand: "npm install --save-dev @jurgen1c/agent-memory-cli"
+    packageStatus: "published",
+    installPackageName: "@jurgen1c/agentflow-cli",
+    installCommand: "npm install --save-dev @jurgen1c/agentflow-cli"
   }
 ] as const satisfies readonly AgentToolCliPackage[];
 

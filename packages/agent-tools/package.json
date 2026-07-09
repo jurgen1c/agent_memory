@@ -33,6 +33,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "bun build src/index.ts --target=node --outfile=dist/index.js"
+    "build": "bun build src/index.ts --target=node --outfile=dist/index.js",
+    "prepack": "bun run build"
   }
 }
