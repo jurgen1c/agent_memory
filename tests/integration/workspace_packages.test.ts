@@ -158,7 +158,8 @@ describe("workspace package layout", () => {
     });
     expect(agentflowCore.dependencies).toEqual({
       "@jurgen1c/agent-tools": "workspace:*",
-      "@jurgen1c/agentflow-schemas": "workspace:*"
+      "@jurgen1c/agentflow-schemas": "workspace:*",
+      yaml: "^2.9.0"
     });
     expect(agentflowCli.dependencies ?? {}).toEqual({});
     expect(agentflowAdapter.dependencies).toEqual({
