@@ -36,10 +36,26 @@ export async function runCli(args: string[], streams: AgentflowCliStreams = proc
 export function dispatch(args: string[]): AgentflowCliResult {
   const [command, ...rest] = args;
 
-  if (!command || command === "help" || command === "--help" || command === "-h") {
+  if (!command || command === "--help" || command === "-h") {
     return {
       exitCode: 0,
-      stdout: renderHelp(command === "help" ? rest[0] : undefined)
+      stdout: renderHelp()
+    };
+  }
+
+  if (command === "help") {
+    const topic = rest[0];
+
+    if (topic && !["help", "version", "validate", "lint"].includes(topic) && !isPlannedRuntimeCommand(topic)) {
+      return {
+        exitCode: 7,
+        stderr: `Unknown Agentflow help topic: ${topic}\nRun \`agentflow help\` to see available commands.`
+      };
+    }
+
+    return {
+      exitCode: 0,
+      stdout: renderHelp(topic)
     };
   }
 

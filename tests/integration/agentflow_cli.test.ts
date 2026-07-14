@@ -38,6 +38,21 @@ describe("Agentflow CLI", () => {
     }
   });
 
+  test("distinguishes active, reserved, and unknown help topics", () => {
+    expect(dispatch(["help", "validate"])).toEqual({
+      exitCode: 0,
+      stdout: "agentflow validate\n\nUsage: agentflow validate <workflow>"
+    });
+    expect(dispatch(["help", "run"])).toEqual({
+      exitCode: 0,
+      stdout: "agentflow run\n\nThis command name is reserved for a future Agentflow runtime surface."
+    });
+    expect(dispatch(["help", "missing"])).toEqual({
+      exitCode: 7,
+      stderr: "Unknown Agentflow help topic: missing\nRun `agentflow help` to see available commands."
+    });
+  });
+
   test("validates workflows from the CLI", () => {
     const validPath = path.join(repoRoot, "tests/fixtures/agentflow/workflows/simple-ci.yml");
     const invalidPath = path.join(repoRoot, "tests/fixtures/agentflow/invalid/unsafe-workflow.yml");
