@@ -315,6 +315,58 @@ steps:
     });
   });
 
+  test("rejects session file scopes that are absolute or escape the repository", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: escaping-session-scopes
+version: 1
+style: collaborative
+maturity: draft
+collaboration: { enabled: true }
+sessions:
+  writer:
+    provider: local
+    role: writer
+    authority: { can_modify_files: true }
+    file_scope:
+      include: [/etc/**, ../outside/**, app/../../outside/**, 'C:\\temp\\**']
+steps:
+  - id: parallel_work
+    type: parallel
+    branches:
+      - { id: writer, session: writer }
+`);
+
+    expect(validateAgentflowWorkflow(workflow).errors.filter((issue) =>
+      issue.code === "workflow.parallel.file_scope.invalid"
+    ).map((issue) => issue.path)).toEqual([
+      "sessions.writer.file_scope.include[0]",
+      "sessions.writer.file_scope.include[1]",
+      "sessions.writer.file_scope.include[2]",
+      "sessions.writer.file_scope.include[3]"
+    ]);
+  });
+
+  test("allows normalized repo-relative session file scopes", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: normalized-session-scopes
+version: 1
+style: collaborative
+maturity: draft
+collaboration: { enabled: true }
+sessions:
+  writer:
+    provider: local
+    role: writer
+    authority: { can_modify_files: true }
+    file_scope: { include: [app/../docs/**] }
+steps:
+  - id: parallel_work
+    type: parallel
+    branches:
+      - { id: writer, session: writer }
+`);
+
+    expect(validateAgentflowWorkflow(workflow)).toEqual({ valid: true, errors: [] });
+  });
+
   test("rejects malformed parallel file scope entries without dropping them", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`name: malformed-scopes
 version: 1
@@ -336,6 +388,41 @@ steps:
       path: "steps[0].branches[0].file_scope.include",
       stepId: "parallel_work"
     });
+  });
+
+  test("rejects parallel file scopes that are absolute or escape the repository", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: escaping-parallel-scopes
+version: 1
+style: collaborative
+maturity: draft
+collaboration: { enabled: true }
+sessions:
+  writer: { provider: local, role: writer, authority: { can_modify_files: true } }
+steps:
+  - id: parallel_work
+    type: parallel
+    branches:
+      - id: writer
+        session: writer
+        file_scope: { include: [../outside/**, '\\\\server\\share\\**'] }
+`);
+
+    expect(validateAgentflowWorkflow(workflow).errors.filter((issue) =>
+      issue.code === "workflow.parallel.file_scope.invalid"
+    )).toEqual([
+      {
+        code: "workflow.parallel.file_scope.invalid",
+        message: 'File scope pattern "../outside/**" must be repo-relative and stay within the repository.',
+        path: "steps[0].branches[0].file_scope.include[0]",
+        stepId: "parallel_work"
+      },
+      {
+        code: "workflow.parallel.file_scope.invalid",
+        message: 'File scope pattern "\\\\server\\share\\**" must be repo-relative and stay within the repository.',
+        path: "steps[0].branches[0].file_scope.include[1]",
+        stepId: "parallel_work"
+      }
+    ]);
   });
 
   test("rejects non-mapping file scope overrides", () => {

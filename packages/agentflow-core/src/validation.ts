@@ -200,6 +200,12 @@ function validateSessionDefinitions(workflow: AgentflowWorkflow, errors: Agentfl
             message: "Session file_scope.include must be a list of non-empty strings.",
             path: `sessions.${name}.file_scope.include`
           });
+        } else {
+          validateRepoRelativeScopePatterns(
+            include as string[],
+            `sessions.${name}.file_scope.include`,
+            errors
+          );
         }
       }
     }
@@ -882,6 +888,13 @@ function validateParallelFileScopeEntries(
         path: `${path}.file_scope.include`,
         ...(parallel.id === undefined ? {} : { stepId: parallel.id })
       });
+    } else {
+      validateRepoRelativeScopePatterns(
+        include as string[],
+        `${path}.file_scope.include`,
+        errors,
+        parallel.id
+      );
     }
   }
 
@@ -1523,6 +1536,55 @@ function firstScopeOverlap(left: string[], right: string[]): [string, string] | 
   }
 
   return undefined;
+}
+
+function validateRepoRelativeScopePatterns(
+  patterns: string[],
+  path: string,
+  errors: AgentflowWorkflowIssue[],
+  stepId?: string
+): void {
+  patterns.forEach((pattern, index) => {
+    if (scopePatternEscapesRepo(pattern)) {
+      errors.push({
+        code: "workflow.parallel.file_scope.invalid",
+        message: `File scope pattern "${pattern}" must be repo-relative and stay within the repository.`,
+        path: `${path}[${index}]`,
+        ...(stepId === undefined ? {} : { stepId })
+      });
+    }
+  });
+}
+
+function scopePatternEscapesRepo(pattern: string): boolean {
+  const normalized = pattern.replaceAll("\\", "/");
+
+  if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) {
+    return true;
+  }
+
+  const segments: string[] = [];
+
+  for (const segment of normalized.split("/")) {
+    if (segment.length === 0 || segment === ".") {
+      continue;
+    }
+
+    if (segment !== "..") {
+      segments.push(segment);
+      continue;
+    }
+
+    const parent = segments.at(-1);
+
+    if (parent === undefined || hasGlob(parent)) {
+      return true;
+    }
+
+    segments.pop();
+  }
+
+  return false;
 }
 
 function scopePatternsOverlap(left: string, right: string): boolean {
