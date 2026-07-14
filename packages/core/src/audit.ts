@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
+import { normalizeChangedFiles, readGitDiffSelection } from "./changes";
 import { loadConfig } from "./config";
 import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, configuredPathRelativeToRepo, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
@@ -77,7 +77,6 @@ interface ExplicitRelation {
 
 interface AuditBaseline {
   memory?: LoadedMemory;
-  memoryRootRelative: string;
   warnings: string[];
 }
 
@@ -98,11 +97,11 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
   const memory = loadMemory(repoRoot);
   const memoryRootRelative = configuredPathRelativeToRepo(repoRoot, loaded.config.memory_root);
   const memoryFiles = canonicalMemoryFiles(repoRoot, memoryRootRelative, loaded.config);
+  const gitDiffSelection = options.gitDiff
+    ? readGitDiffSelection(repoRoot, { baseRef: options.baseRef, includeCommittedFallback: true })
+    : undefined;
   const changedFiles = normalizeAuditFiles(
-    [
-      ...(options.changedFiles ?? []),
-      ...(options.gitDiff ? readGitDiffFiles(repoRoot, { baseRef: options.baseRef, includeCommittedFallback: true }) : [])
-    ],
+    [...(options.changedFiles ?? []), ...(gitDiffSelection?.files ?? [])],
     repoRoot
   );
   const changedFileSet = new Set(changedFiles);
@@ -112,7 +111,7 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
   const strict = options.strict ?? false;
 
   if (options.gitDiff && strict && options.baseRef) {
-    resolveBaselineRevision(repoRoot, options.baseRef, changedFiles, []);
+    resolveBaselineRevision(repoRoot, options.baseRef, changedFiles, gitDiffSelection?.usedCommittedFallback ?? false, []);
   }
 
   const scanAllOverlaps = Boolean(options.gitDiff && !strict && changedFiles.some((file) => isConfiguredGraphFile(file, memoryRootRelative, loaded.config)));
@@ -124,9 +123,11 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
     strict,
     scanAllOverlaps
   );
-  const baseline = options.gitDiff && !strict ? loadAuditBaseline(repoRoot, options.baseRef, changedFiles) : undefined;
+  const baseline = options.gitDiff && !strict
+    ? loadAuditBaseline(repoRoot, options.baseRef, changedFiles, gitDiffSelection?.usedCommittedFallback ?? false)
+    : undefined;
   const filteredOverlapFindings = baseline?.memory
-    ? suppressBaselineOverlapFindings(overlapFindings, baseline.memory, baseline.memoryRootRelative)
+    ? suppressBaselineOverlapFindings(overlapFindings, baseline.memory)
     : overlapFindings;
   const findings = uniqueFindings([
     ...filteredOverlapFindings,
@@ -147,15 +148,28 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
   };
 }
 
-function loadAuditBaseline(repoRoot: string, baseRef: string | undefined, changedFiles: string[]): AuditBaseline {
+function loadAuditBaseline(
+  repoRoot: string,
+  baseRef: string | undefined,
+  changedFiles: string[],
+  usedCommittedFallback: boolean
+): AuditBaseline {
   const warnings: string[] = [];
-  const revision = resolveBaselineRevision(repoRoot, baseRef, changedFiles, warnings);
+  const revision = resolveBaselineRevision(repoRoot, baseRef, changedFiles, usedCommittedFallback, warnings);
 
   if (!revision) {
-    return { memoryRootRelative: "", warnings };
+    return { warnings };
   }
 
-  const snapshot = loadMemoryAtRevision(repoRoot, revision);
+  let snapshot: ReturnType<typeof loadMemoryAtRevision>;
+
+  try {
+    snapshot = loadMemoryAtRevision(repoRoot, revision);
+  } catch (error) {
+    const reason = error instanceof Error ? `: ${error.message}` : "";
+    warnings.push(`Could not load Git baseline memory; current-tree overlap findings were retained${reason}.`);
+    return { warnings };
+  }
 
   if (snapshot.warning) {
     warnings.push(snapshot.warning);
@@ -163,12 +177,17 @@ function loadAuditBaseline(repoRoot: string, baseRef: string | undefined, change
 
   return {
     memory: snapshot.memory,
-    memoryRootRelative: snapshot.memoryRootRelative,
     warnings
   };
 }
 
-function resolveBaselineRevision(repoRoot: string, baseRef: string | undefined, changedFiles: string[], warnings: string[]): string | undefined {
+function resolveBaselineRevision(
+  repoRoot: string,
+  baseRef: string | undefined,
+  changedFiles: string[],
+  usedCommittedFallback: boolean,
+  warnings: string[]
+): string | undefined {
   if (baseRef) {
     try {
       return gitOutput(repoRoot, ["merge-base", baseRef, "HEAD"]);
@@ -180,14 +199,12 @@ function resolveBaselineRevision(repoRoot: string, baseRef: string | undefined, 
   }
 
   try {
-    const status = gitOutput(repoRoot, ["status", "--porcelain"]);
-
-    if (status.length > 0) {
-      return gitOutput(repoRoot, ["rev-parse", "HEAD"]);
+    if (usedCommittedFallback) {
+      return gitOutput(repoRoot, ["rev-parse", "HEAD~1"]);
     }
 
     if (changedFiles.length > 0) {
-      return gitOutput(repoRoot, ["rev-parse", "HEAD~1"]);
+      return gitOutput(repoRoot, ["rev-parse", "HEAD"]);
     }
   } catch {
     warnings.push("Could not resolve an implicit Git baseline; overlap findings were evaluated against the current tree only.");
@@ -199,13 +216,13 @@ function resolveBaselineRevision(repoRoot: string, baseRef: string | undefined, 
 function loadMemoryAtRevision(
   repoRoot: string,
   revision: string
-): { memory?: LoadedMemory; memoryRootRelative: string; warning?: string } {
+): { memory?: LoadedMemory; warning?: string } {
   let configSource: string;
 
   try {
     configSource = gitOutput(repoRoot, ["show", `${revision}:agent-memory.config.yaml`], false);
   } catch {
-    return { memoryRootRelative: "" };
+    return {};
   }
 
   const snapshotRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-audit-base-"));
@@ -216,7 +233,6 @@ function loadMemoryAtRevision(
 
     if (path.isAbsolute(loaded.config.memory_root)) {
       return {
-        memoryRootRelative: "",
         warning: "Could not compare audit overlaps with the Git baseline because memory_root is an absolute path."
       };
     }
@@ -250,8 +266,7 @@ function loadMemoryAtRevision(
     }
 
     return {
-      memory: loadMemory(snapshotRoot),
-      memoryRootRelative
+      memory: loadMemory(snapshotRoot)
     };
   } finally {
     fs.rmSync(snapshotRoot, { recursive: true, force: true });
@@ -269,32 +284,28 @@ function relativeToConfiguredRoot(repoFile: string, memoryRootRelative: string):
 
 function suppressBaselineOverlapFindings(
   currentFindings: AuditFinding[],
-  baseMemory: LoadedMemory,
-  baseMemoryRootRelative: string
+  baseMemory: LoadedMemory
 ): AuditFinding[] {
   const baseClaims = baseMemory.claims.map(normalizeClaimForAudit);
-  const baseFindings = findOverlappingChangedClaims(
-    baseClaims,
-    new Set<string>(),
-    baseMemoryRootRelative,
-    explicitRelationsFromGraphs(baseMemory.graphs),
-    false,
-    true
-  );
-  const baseSeverityByPair = new Map<string, AuditSeverity>();
-
-  for (const finding of baseFindings) {
-    const key = finding.claimIds.join("\0");
-    const previous = baseSeverityByPair.get(key);
-
-    if (!previous || AUDIT_SEVERITY_RANK[finding.severity] > AUDIT_SEVERITY_RANK[previous]) {
-      baseSeverityByPair.set(key, finding.severity);
-    }
-  }
+  const baseClaimsById = new Map(baseClaims.map((claim) => [claim.id, claim]));
+  const baseRelations = explicitRelationsFromGraphs(baseMemory.graphs);
 
   return currentFindings.filter((finding) => {
-    const baseSeverity = baseSeverityByPair.get(finding.claimIds.join("\0"));
-    return !baseSeverity || AUDIT_SEVERITY_RANK[baseSeverity] < AUDIT_SEVERITY_RANK[finding.severity];
+    const [leftId, rightId] = finding.claimIds;
+    const left = baseClaimsById.get(leftId);
+    const right = baseClaimsById.get(rightId);
+
+    if (!left || !right || !isActiveClaim(left) || !isActiveClaim(right)) {
+      return true;
+    }
+
+    const sharedValues = sharedAuditValues(left, right);
+
+    if (Object.keys(sharedValues).length === 0 || hasReviewDecision(left, right, baseRelations, false)) {
+      return true;
+    }
+
+    return AUDIT_SEVERITY_RANK[overlapSeverity(left, right, sharedValues)] < AUDIT_SEVERITY_RANK[finding.severity];
   });
 }
 

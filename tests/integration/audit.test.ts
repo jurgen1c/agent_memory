@@ -728,6 +728,38 @@ describe("audit command", () => {
     expect(result.stdout).toContain("claim.overlap_without_review");
   });
 
+  test("uses HEAD~1 for committed fallback even when untracked files exist", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    writeClaim(cwd, "claims/school/fallback_first.md", {
+      id: "school.fallback.first",
+      system: "school",
+      status: "current",
+      sourceFiles: ["app/models/school.rb", "app/services/school_service.rb"],
+      relatedFiles: [],
+      symbols: ["FallbackFirst"],
+      tags: ["fallback-first"]
+    });
+    writeClaim(cwd, "claims/school/fallback_second.md", {
+      id: "school.fallback.second",
+      system: "school",
+      status: "current",
+      sourceFiles: ["app/models/school.rb", "app/services/school_service.rb"],
+      relatedFiles: [],
+      symbols: ["FallbackSecond"],
+      tags: ["fallback-second"]
+    });
+    commitAll(cwd, "Add committed overlap");
+    fs.writeFileSync(path.join(cwd, "untracked-note.txt"), "Keep this untracked.\n");
+
+    const result = await dispatch(["audit", "--git-diff", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as { changedFiles: string[]; findings: Array<{ code: string; severity: string }> };
+
+    expect(result.exitCode).toBe(6);
+    expect(parsed.changedFiles).toContain("untracked-note.txt");
+    expect(parsed.findings.some((finding) => finding.code === "claim.overlap_without_review" && finding.severity === "error")).toBe(true);
+  });
+
   test("does not report an unchanged strong overlap finding from the base revision", async () => {
     const cwd = copyFixture(mockApp);
     initGitHistory(cwd);
@@ -791,6 +823,69 @@ describe("audit command", () => {
 
     expect(result.exitCode).toBe(6);
     expect(parsed.findings.some((finding) => finding.code === "claim.overlap_without_review" && finding.severity === "error")).toBe(true);
+  });
+
+  test("compares only current overlap pairs against a broad-tag baseline", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    let changedClaimPath = "";
+
+    for (let index = 0; index < 500; index += 1) {
+      const claimPath = writeClaim(cwd, `claims/baseline_perf/topic_${index}.md`, {
+        id: `baseline_perf.topic_${index}`,
+        system: "baseline_perf",
+        status: "current",
+        sourceFiles: [`src/baseline-perf-${index}.js`],
+        relatedFiles: [],
+        symbols: [`BaselinePerf${index}`],
+        tags: ["learning"]
+      });
+
+      if (index === 0) {
+        changedClaimPath = claimPath;
+      }
+    }
+
+    commitAll(cwd, "Add broad-tag baseline");
+    const base = gitOutput(cwd, ["rev-parse", "HEAD"]);
+    fs.appendFileSync(path.join(cwd, changedClaimPath), "\nReviewed without changing overlap metadata.\n");
+    const startedAt = performance.now();
+    const result = await dispatch(["audit", "--git-diff", "--base", base, "--json"], { cwd });
+    const elapsedMs = performance.now() - startedAt;
+    const parsed = JSON.parse(result.stdout) as { findings: Array<{ code: string }> };
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.findings.some((finding) => finding.code === "claim.overlap_without_review")).toBe(false);
+    expect(elapsedMs).toBeLessThan(5_000);
+  });
+
+  test("warns and retains current findings when baseline memory cannot be parsed", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const relativePath = "docs/agent-memory/claims/repairs/malformed_base.md";
+    const absolutePath = path.join(cwd, relativePath);
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.writeFileSync(absolutePath, "---\nid: repairs.malformed_base\n");
+    commitAll(cwd, "Add malformed base memory");
+    const base = gitOutput(cwd, ["rev-parse", "HEAD"]);
+    writeClaim(cwd, "claims/repairs/malformed_base.md", {
+      id: "repairs.malformed_base",
+      system: "repairs",
+      status: "current",
+      sourceFiles: ["src/repairs.js"],
+      relatedFiles: [],
+      symbols: ["resolveStudentOAuthIdentity"],
+      tags: ["repairs"]
+    });
+
+    const result = await dispatch(["audit", "--git-diff", "--base", base, "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as { ok: boolean; findings: Array<{ code: string }>; warnings: string[] };
+
+    expect(result.exitCode).toBe(6);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.findings.some((finding) => finding.code === "claim.overlap_without_review")).toBe(true);
+    expect(parsed.warnings.some((warning) => warning.includes("Could not load Git baseline memory"))).toBe(true);
+    expect(parsed.warnings.some((warning) => warning.includes("current-tree overlap findings were retained"))).toBe(true);
   });
 
   test("reports a strong pair when its base review relationship is removed", async () => {
