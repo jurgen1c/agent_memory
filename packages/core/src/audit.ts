@@ -926,7 +926,8 @@ function isActiveClaim(claim: ClaimRecord): boolean {
 }
 
 function intersects(left: string[], right: string[]): boolean {
-  return intersection(left, right).length > 0;
+  const rightSet = new Set(right.filter((value) => value.length > 0));
+  return left.some((value) => value.length > 0 && rightSet.has(value));
 }
 
 function intersection(left: string[], right: string[]): string[] {
