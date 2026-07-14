@@ -500,6 +500,35 @@ steps:
     });
   });
 
+  test("anchors pipeline writer diagnostics to body and steps lists", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: pipeline-writer-diagnostic-paths
+version: 1
+style: pipeline
+maturity: draft
+sessions:
+  first: { provider: local, authority: { can_modify_files: true } }
+  second: { provider: local, authority: { can_modify_files: true } }
+steps:
+  - id: body_work
+    type: parallel
+    body:
+      - { id: body_first, type: session_request, session: first, prompt: Write, file_scope: { include: [app/**] } }
+      - { id: body_second, type: session_request, session: second, prompt: Write, file_scope: { include: [docs/**] } }
+  - id: steps_work
+    type: parallel
+    steps:
+      - { id: steps_first, type: session_request, session: first, prompt: Write, file_scope: { include: [app/**] } }
+      - { id: steps_second, type: session_request, session: second, prompt: Write, file_scope: { include: [docs/**] } }
+`);
+
+    expect(validateAgentflowWorkflow(workflow).errors.filter((issue) =>
+      issue.code === "workflow.pipeline.parallel_writers"
+    ).map((issue) => issue.path)).toEqual([
+      "steps[0].body",
+      "steps[1].steps"
+    ]);
+  });
+
   test("requires writer scopes for every supported parallel child list", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`name: nested-parallel-writers
 version: 1
@@ -522,6 +551,36 @@ steps:
     expect(validateAgentflowWorkflow(workflow).errors).toMatchObject([
       { code: "workflow.parallel.file_scope.required", path: "steps[0].body[0].file_scope.include" },
       { code: "workflow.parallel.file_scope.required", path: "steps[1].steps[0].file_scope.include" }
+    ]);
+  });
+
+  test("anchors writer overlap diagnostics to body and steps lists", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: parallel-writer-diagnostic-paths
+version: 1
+style: collaborative
+maturity: draft
+collaboration: { enabled: true }
+sessions:
+  first: { provider: local, role: writer, authority: { can_modify_files: true } }
+  second: { provider: local, role: writer, authority: { can_modify_files: true } }
+steps:
+  - id: body_work
+    type: parallel
+    body:
+      - { id: body_first, type: session_request, session: first, prompt: Write, file_scope: { include: [shared/**] } }
+      - { id: body_second, type: session_request, session: second, prompt: Write, file_scope: { include: [shared/**] } }
+  - id: steps_work
+    type: parallel
+    steps:
+      - { id: steps_first, type: session_request, session: first, prompt: Write, file_scope: { include: [shared/**] } }
+      - { id: steps_second, type: session_request, session: second, prompt: Write, file_scope: { include: [shared/**] } }
+`);
+
+    expect(validateAgentflowWorkflow(workflow).errors.filter((issue) =>
+      issue.code === "workflow.parallel.file_scope.overlap"
+    ).map((issue) => issue.path)).toEqual([
+      "steps[0].body",
+      "steps[1].steps"
     ]);
   });
 
@@ -1939,6 +1998,33 @@ steps:
     expect(validateAgentflowWorkflow(workflow).errors.map((issue) => issue.code)).toContain(
       "workflow.parallel.output.overlap"
     );
+  });
+
+  test("anchors output overlap diagnostics to body and steps lists", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: parallel-output-diagnostic-paths
+version: 1
+style: collaborative
+maturity: draft
+collaboration: { enabled: true }
+steps:
+  - id: body_work
+    type: parallel
+    body:
+      - { id: body_first, type: command, command: echo first, outputs: [shared.md] }
+      - { id: body_second, type: command, command: echo second, outputs: [shared.md] }
+  - id: steps_work
+    type: parallel
+    steps:
+      - { id: steps_first, type: command, command: echo first, outputs: [shared.json] }
+      - { id: steps_second, type: command, command: echo second, outputs: [shared.json] }
+`);
+
+    expect(validateAgentflowWorkflow(workflow).errors.filter((issue) =>
+      issue.code === "workflow.parallel.output.overlap"
+    ).map((issue) => issue.path)).toEqual([
+      "steps[0].body",
+      "steps[1].steps"
+    ]);
   });
 
   test("normalizes equivalent outputs across parallel branches", () => {

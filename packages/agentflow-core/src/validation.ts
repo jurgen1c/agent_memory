@@ -791,10 +791,11 @@ function validateParallelWriters(
     }
 
     const outputs = new Set<string>();
-    const scopedBranches: Array<{ id: string; includes: string[] }> = [];
+    const scopedBranches: Array<{ id: string; includes: string[]; field: string }> = [];
+    const writerFields: string[] = [];
     let writerBranchCount = 0;
 
-    for (const { child, path } of children) {
+    for (const { child, path, field } of children) {
       for (const output of new Set(nestedStepOutputs(child as AgentflowWorkflowStep))) {
         const outputKey = normalizeArtifactPath(output);
 
@@ -803,7 +804,7 @@ function validateParallelWriters(
             errors,
             context,
             "workflow.parallel.output.overlap",
-            "body",
+            field,
             `Parallel branches both write artifact "${output}" without allow_overlap: true and a conflict policy.`
           );
         }
@@ -816,6 +817,7 @@ function validateParallelWriters(
 
       if (writerScopes.length > 0) {
         writerBranchCount += 1;
+        writerFields.push(field);
       }
 
       for (const writer of writerScopes) {
@@ -831,7 +833,7 @@ function validateParallelWriters(
 
       const includes = [...new Set(writerScopes.flatMap((writer) => writer.includes))];
       if (includes.length > 0) {
-        scopedBranches.push({ id: nonEmptyString(child.id) ?? "unnamed", includes });
+        scopedBranches.push({ id: nonEmptyString(child.id) ?? "unnamed", includes, field });
       }
     }
 
@@ -840,7 +842,7 @@ function validateParallelWriters(
         errors,
         context,
         "workflow.pipeline.parallel_writers",
-        "branches",
+        writerFields.at(-1) ?? "branches",
         "Pipeline workflows cannot run multiple file-writing sessions in parallel."
       );
     }
@@ -856,7 +858,7 @@ function validateParallelWriters(
             errors,
             context,
             "workflow.parallel.file_scope.overlap",
-            "branches",
+            right.field,
             `Parallel branches "${left.id}" and "${right.id}" have overlapping file scopes (${overlap[0]} and ${overlap[1]}).`
           );
         }
@@ -951,8 +953,8 @@ function collectWriterScopes(
   return writers;
 }
 
-function parallelChildren(context: StepContext): Array<{ child: AgentflowYamlMapping; path: string }> {
-  const children: Array<{ child: AgentflowYamlMapping; path: string }> = [];
+function parallelChildren(context: StepContext): Array<{ child: AgentflowYamlMapping; path: string; field: string }> {
+  const children: Array<{ child: AgentflowYamlMapping; path: string; field: string }> = [];
 
   for (const field of ["branches", "body", "steps"]) {
     const entries = context.step[field];
@@ -963,7 +965,7 @@ function parallelChildren(context: StepContext): Array<{ child: AgentflowYamlMap
 
     entries.forEach((entry, index) => {
       if (isRecord(entry)) {
-        children.push({ child: entry, path: `${context.path}.${field}[${index}]` });
+        children.push({ child: entry, path: `${context.path}.${field}[${index}]`, field });
       }
     });
   }
