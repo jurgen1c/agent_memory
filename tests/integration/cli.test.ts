@@ -41,6 +41,7 @@ describe("CLI", () => {
     expect(upgrade.stdout).toContain("agent-memory upgrade --write --force");
     expect(migrateDocs.stdout).toContain("lowercase memory namespace");
     expect(audit.stdout).toContain("agent-memory audit --git-diff --base origin/main");
+    expect(audit.stdout).toContain("agent-memory audit --git-diff --strict");
   });
 
   test("renders inline help for every command", async () => {

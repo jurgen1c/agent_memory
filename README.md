@@ -194,7 +194,7 @@ Command usage cheat sheet:
 | `profiles match` | Task, changed files, recipe, system, alias, or explicit trait. | `--task <task>`, `--changed-files <files...>`, `--recipe <id>`, `--system <system>`, `--profile <alias>`, `--profile-trait <id>`, `--json` |
 | `context` | One of `--task`, `--changed-files`, `--git-diff`, `--recipe`, or `--plan`. | `--stage <id>`, `--profile <alias>`, `--profile-trait <id>`, `--budget small`, `--budget medium`, `--budget full`, `--depth <n>`, `--include-inferred`, `--no-include-inferred`, `--json` |
 | `coverage` | `--changed-files` or `--git-diff`. | `--base <ref>` with `--git-diff`, `--json` |
-| `audit` | `--changed-files` or `--git-diff`. | `--base <ref>` with `--git-diff`, `--json` |
+| `audit` | `--changed-files` or `--git-diff`. | `--base <ref>` with `--git-diff`, `--strict`, `--json` |
 | `doctor` | None. | `--json` |
 | `sync` | None. | `--json` |
 | `upgrade` | None. Dry-run by default. | `--write`, `--force`, `--json` |
@@ -425,7 +425,9 @@ bin/memory audit --git-diff --base origin/main
 ```
 
 `coverage` exits with code `6` when a changed watched file has no related memory update or valid waiver.
-`audit` also exits with code `6` when changed memory has deterministic stale-claim risks, such as overlapping active claims without `replaces` or `conflicts_with`, invalid `deprecated_by`, or unresolved active conflicts.
+`audit` exits with code `6` for error findings. Shared routes, shared symbols, and same-system claims with at least two shared `source_files` are strong overlap signals and require review. Shared source or related files are warnings, while tag-only overlap is informational. Any semantically accurate explicit graph relationship records that an overlap pair was reviewed; invalid `deprecated_by` references and unresolved active conflicts remain blocking.
+
+With `--git-diff`, audit compares overlap findings with the resolved base revision and reports new or more severe pairs. Use `--strict` to retain the legacy behavior that blocks every overlap, accepts only `replaces` or `conflicts_with` as graph review decisions, blocks `source.related_claims_not_reviewed`, and does not suppress base findings.
 
 ## Migrating Existing Docs
 

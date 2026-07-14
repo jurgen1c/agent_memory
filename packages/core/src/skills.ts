@@ -608,7 +608,7 @@ Use \`coverage --git-diff\` for non-trivial code changes. If watched files chang
 
 ## Stale Review
 
-Run \`audit --git-diff\` when canonical memory files changed. Resolve audit failures by marking superseded claims stale or deprecated, adding explicit \`replaces\` or \`conflicts_with\` graph edges, or updating the older claim directly.
+Run \`audit --git-diff\` when canonical memory files changed. Strong duplicate signals block; shared tags and weak file overlap are advisory. Resolve failures by reviewing the exact shared values and then updating or deprecating a claim, or adding any semantically accurate explicit graph relationship. Never invent \`replaces\` or \`conflicts_with\` solely to clear an audit finding. Repositories that intentionally depend on the legacy all-overlap gate can run \`audit --git-diff --strict\`.
 
 Generated files under \`.agent-memory/\` are cache data and must not be committed.
 `;
