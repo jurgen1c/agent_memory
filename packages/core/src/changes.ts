@@ -7,9 +7,15 @@ export interface GitDiffOptions {
   includeCommittedFallback?: boolean;
 }
 
-export function readGitDiffFiles(repoRoot: string, options: GitDiffOptions = {}): string[] {
+export interface GitDiffSelection {
+  files: string[];
+  usedCommittedFallback: boolean;
+}
+
+export function readGitDiffSelection(repoRoot: string, options: GitDiffOptions = {}): GitDiffSelection {
   const files = new Set<string>();
   const trackedFiles = new Set<string>();
+  let usedCommittedFallback = false;
 
   if (options.baseRef) {
     addGitFiles(files, repoRoot, ["diff", "--name-only", `${options.baseRef}...HEAD`], trackedFiles);
@@ -21,9 +27,17 @@ export function readGitDiffFiles(repoRoot: string, options: GitDiffOptions = {})
 
   if (trackedFiles.size === 0 && options.includeCommittedFallback && !options.baseRef) {
     addGitFiles(files, repoRoot, ["diff", "--name-only", "HEAD~1", "HEAD"]);
+    usedCommittedFallback = true;
   }
 
-  return Array.from(files).sort();
+  return {
+    files: Array.from(files).sort(),
+    usedCommittedFallback
+  };
+}
+
+export function readGitDiffFiles(repoRoot: string, options: GitDiffOptions = {}): string[] {
+  return readGitDiffSelection(repoRoot, options).files;
 }
 
 export function normalizeChangedFiles(files: string[], repoRoot: string): string[] {

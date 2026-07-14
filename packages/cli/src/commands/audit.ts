@@ -16,6 +16,7 @@ interface AuditCommandOptions {
   gitDiff: boolean;
   baseRef?: string;
   json: boolean;
+  strict: boolean;
 }
 
 export function runAuditCommand(args: string[], context: AuditCommandContext = {}): AuditCommandResult {
@@ -24,7 +25,8 @@ export function runAuditCommand(args: string[], context: AuditCommandContext = {
     cwd: context.cwd,
     changedFiles: options.changedFiles,
     gitDiff: options.gitDiff,
-    baseRef: options.baseRef
+    baseRef: options.baseRef,
+    strict: options.strict
   });
 
   return {
@@ -37,7 +39,8 @@ function parseAuditArgs(args: string[]): AuditCommandOptions {
   const options: AuditCommandOptions = {
     changedFiles: [],
     gitDiff: false,
-    json: false
+    json: false,
+    strict: false
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -50,6 +53,11 @@ function parseAuditArgs(args: string[]): AuditCommandOptions {
 
     if (arg === "--git-diff") {
       options.gitDiff = true;
+      continue;
+    }
+
+    if (arg === "--strict") {
+      options.strict = true;
       continue;
     }
 
@@ -97,11 +105,16 @@ function parseAuditArgs(args: string[]): AuditCommandOptions {
 }
 
 function renderAuditResult(result: AuditResult): string {
+  const counts = {
+    error: result.findings.filter((finding) => finding.severity === "error").length,
+    warning: result.findings.filter((finding) => finding.severity === "warning").length,
+    info: result.findings.filter((finding) => finding.severity === "info").length
+  };
   const lines = [
     result.ok ? "Agent Memory audit passed." : "Agent Memory audit failed.",
     "",
     `Changed files: ${result.changedFiles.length}`,
-    `Findings: ${result.findings.length}`
+    `Findings: ${result.findings.length} (${counts.error} errors, ${counts.warning} warnings, ${counts.info} info)`
   ];
 
   if (result.findings.length > 0) {
@@ -120,12 +133,20 @@ function renderAuditResult(result: AuditResult): string {
 }
 
 function renderFinding(finding: AuditFinding): string[] {
-  return [
-    `- ${finding.code}: ${finding.message}`,
+  const lines = [
+    `- [${finding.severity}] ${finding.code}: ${finding.message}`,
     `  Claims: ${finding.claimIds.length > 0 ? finding.claimIds.join(", ") : "none"}`,
-    `  Paths: ${finding.paths.length > 0 ? finding.paths.join(", ") : "none"}`,
-    `  Remediation: ${finding.remediation}`
+    `  Paths: ${finding.paths.length > 0 ? finding.paths.join(", ") : "none"}`
   ];
+
+  const sharedValues = Object.entries(finding.shared_values);
+
+  if (sharedValues.length > 0) {
+    lines.push(`  Shared values: ${sharedValues.map(([field, values]) => `${field}=${values.join(",")}`).join("; ")}`);
+  }
+
+  lines.push(`  Remediation: ${finding.remediation}`);
+  return lines;
 }
 
 function readValue(args: string[], index: number, option: string): string {

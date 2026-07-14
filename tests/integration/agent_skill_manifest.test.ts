@@ -58,9 +58,13 @@ user-invocable: false
     expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/profiles.md"), "utf8")).toContain(
       "profiles match"
     );
-    expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/coverage-and-validation.md"), "utf8")).toContain(
-      "## Stale Review"
+    const coverageReference = fs.readFileSync(
+      path.join(repoRoot, ".codex/skills/repo-memory/references/coverage-and-validation.md"),
+      "utf8"
     );
+    expect(coverageReference).toContain("## Stale Review");
+    expect(coverageReference).toContain("Never invent `replaces` or `conflicts_with`");
+    expect(coverageReference).toContain("audit --git-diff --strict");
     expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/delegation.md"), "utf8")).toContain(
       "lower-effort subagent"
     );

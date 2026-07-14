@@ -1,8 +1,20 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
+import { normalizeChangedFiles, readGitDiffSelection } from "./changes";
 import { loadConfig } from "./config";
+import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, configuredPathRelativeToRepo, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
-import { loadMemory, type MemoryClaim, type MemoryGraph, type MemoryPlanTemplate, type MemoryProfileTrait, type MemoryRecipe } from "./memory";
+import {
+  loadMemory,
+  type LoadedMemory,
+  type MemoryClaim,
+  type MemoryGraph,
+  type MemoryPlanTemplate,
+  type MemoryProfileTrait,
+  type MemoryRecipe
+} from "./memory";
 import type { AgentMemoryConfig } from "./types";
 
 export interface AuditOptions {
@@ -10,13 +22,26 @@ export interface AuditOptions {
   changedFiles?: string[];
   gitDiff?: boolean;
   baseRef?: string;
+  strict?: boolean;
+}
+
+export type AuditSeverity = "error" | "warning" | "info";
+
+export interface AuditSharedValues {
+  source_files?: string[];
+  related_files?: string[];
+  symbols?: string[];
+  routes?: string[];
+  tags?: string[];
 }
 
 export interface AuditFinding {
   code: string;
+  severity: AuditSeverity;
   message: string;
   claimIds: string[];
   paths: string[];
+  shared_values: AuditSharedValues;
   remediation: string;
 }
 
@@ -50,10 +75,21 @@ interface ExplicitRelation {
   sourcePath: string;
 }
 
+interface AuditBaseline {
+  memory?: LoadedMemory;
+  warnings: string[];
+}
+
+interface GitTreeFile {
+  oid: string;
+  repoFile: string;
+}
+
 const ACTIVE_STATUSES = new Set(["current", "proposed", "experimental", "needs_review", "needs_verification"]);
 const REVIEW_STATUSES = new Set(["needs_review", "needs_verification"]);
 const ACTIVE_DEPRECATED_BY_STATUSES = new Set(["current", "proposed", "experimental"]);
-const REVIEW_DECISION_RELATIONS = new Set(["replaces", "conflicts_with"]);
+const LEGACY_REVIEW_DECISION_RELATIONS = new Set(["replaces", "conflicts_with"]);
+const AUDIT_SEVERITY_RANK: Record<AuditSeverity, number> = { info: 0, warning: 1, error: 2 };
 
 export function auditMemory(options: AuditOptions = {}): AuditResult {
   const loaded = loadConfig({ cwd: options.cwd });
@@ -61,34 +97,277 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
   const memory = loadMemory(repoRoot);
   const memoryRootRelative = configuredPathRelativeToRepo(repoRoot, loaded.config.memory_root);
   const memoryFiles = canonicalMemoryFiles(repoRoot, memoryRootRelative, loaded.config);
+  const gitDiffSelection = options.gitDiff
+    ? readGitDiffSelection(repoRoot, { baseRef: options.baseRef, includeCommittedFallback: true })
+    : undefined;
   const changedFiles = normalizeAuditFiles(
-    [
-      ...(options.changedFiles ?? []),
-      ...(options.gitDiff ? readGitDiffFiles(repoRoot, { baseRef: options.baseRef, includeCommittedFallback: true }) : [])
-    ],
+    [...(options.changedFiles ?? []), ...(gitDiffSelection?.files ?? [])],
     repoRoot
   );
   const changedFileSet = new Set(changedFiles);
   const claims = memory.claims.map(normalizeClaimForAudit);
   const claimsById = new Map(claims.map((claim) => [claim.id, claim]));
   const explicitRelations = explicitRelationsFromGraphs(memory.graphs);
-  const findings = [
-    ...findOverlappingChangedClaims(claims, changedFileSet, memoryRootRelative, explicitRelations),
-    ...findUnreviewedRelatedSourceClaims(claims, changedFileSet, memoryRootRelative, memoryFiles),
+  const strict = options.strict ?? false;
+
+  if (options.gitDiff && strict && options.baseRef) {
+    resolveBaselineRevision(repoRoot, options.baseRef, changedFiles, gitDiffSelection?.usedCommittedFallback ?? false, []);
+  }
+
+  const scanAllOverlaps = Boolean(options.gitDiff && !strict && changedFiles.some((file) => isConfiguredGraphFile(file, memoryRootRelative, loaded.config)));
+  const overlapFindings = findOverlappingChangedClaims(
+    claims,
+    changedFileSet,
+    memoryRootRelative,
+    explicitRelations,
+    strict,
+    scanAllOverlaps
+  );
+  const baseline = options.gitDiff && !strict
+    ? loadAuditBaseline(repoRoot, options.baseRef, changedFiles, gitDiffSelection?.usedCommittedFallback ?? false)
+    : undefined;
+  const filteredOverlapFindings = baseline?.memory
+    ? suppressBaselineOverlapFindings(overlapFindings, baseline.memory)
+    : overlapFindings;
+  const findings = uniqueFindings([
+    ...filteredOverlapFindings,
+    ...findUnreviewedRelatedSourceClaims(claims, changedFileSet, memoryRootRelative, memoryFiles, strict),
     ...findInvalidDeprecatedBy(claims, claimsById, changedFileSet, memoryRootRelative, memoryFiles),
     ...findUnreviewedActiveConflicts(claimsById, explicitRelations, changedFileSet, memoryRootRelative, memoryFiles),
     ...findCurrentRecipesWithInactiveClaims(memory.recipes, claimsById, changedFileSet, memoryRootRelative),
     ...findCurrentPlansWithInactiveRecipes(memory.plans, memory.recipes, changedFileSet, memoryRootRelative),
     ...findUnsafeCriticalProfiles(memory.profiles, changedFileSet, memoryRootRelative),
     ...findUnmarkedProfileConflicts(memory.profiles, changedFileSet, memoryRootRelative)
-  ];
+  ]);
 
   return {
-    ok: findings.length === 0,
+    ok: findings.every((finding) => finding.severity !== "error"),
     changedFiles,
-    findings: uniqueFindings(findings),
-    warnings: loaded.repo.warnings
+    findings,
+    warnings: [...loaded.repo.warnings, ...(baseline?.warnings ?? [])]
   };
+}
+
+function loadAuditBaseline(
+  repoRoot: string,
+  baseRef: string | undefined,
+  changedFiles: string[],
+  usedCommittedFallback: boolean
+): AuditBaseline {
+  const warnings: string[] = [];
+  const revision = resolveBaselineRevision(repoRoot, baseRef, changedFiles, usedCommittedFallback, warnings);
+
+  if (!revision) {
+    return { warnings };
+  }
+
+  let snapshot: ReturnType<typeof loadMemoryAtRevision>;
+
+  try {
+    snapshot = loadMemoryAtRevision(repoRoot, revision);
+  } catch (error) {
+    const reason = error instanceof Error ? `: ${error.message}` : "";
+    warnings.push(`Could not load Git baseline memory; current-tree overlap findings were retained${reason}.`);
+    return { warnings };
+  }
+
+  if (snapshot.warning) {
+    warnings.push(snapshot.warning);
+  }
+
+  return {
+    memory: snapshot.memory,
+    warnings
+  };
+}
+
+function resolveBaselineRevision(
+  repoRoot: string,
+  baseRef: string | undefined,
+  changedFiles: string[],
+  usedCommittedFallback: boolean,
+  warnings: string[]
+): string | undefined {
+  if (baseRef) {
+    try {
+      return gitOutput(repoRoot, ["merge-base", baseRef, "HEAD"]);
+    } catch {
+      throw new AgentMemoryError(`Could not resolve audit base ref: ${baseRef}.`, {
+        details: ["Fetch the base ref or pass a commit that shares history with HEAD."]
+      });
+    }
+  }
+
+  try {
+    if (usedCommittedFallback) {
+      return gitOutput(repoRoot, ["rev-parse", "HEAD~1"]);
+    }
+
+    if (changedFiles.length > 0) {
+      return gitOutput(repoRoot, ["rev-parse", "HEAD"]);
+    }
+  } catch {
+    warnings.push("Could not resolve an implicit Git baseline; overlap findings were evaluated against the current tree only.");
+  }
+
+  return undefined;
+}
+
+function loadMemoryAtRevision(
+  repoRoot: string,
+  revision: string
+): { memory?: LoadedMemory; warning?: string } {
+  let configSource: string;
+
+  try {
+    configSource = gitOutput(repoRoot, ["show", `${revision}:agent-memory.config.yaml`], false);
+  } catch {
+    return {};
+  }
+
+  const snapshotRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-audit-base-"));
+
+  try {
+    fs.writeFileSync(path.join(snapshotRoot, "agent-memory.config.yaml"), configSource);
+    const loaded = loadConfig({ repoRoot: snapshotRoot });
+
+    if (path.isAbsolute(loaded.config.memory_root)) {
+      return {
+        warning: "Could not compare audit overlaps with the Git baseline because memory_root is an absolute path."
+      };
+    }
+
+    const memoryRootRelative = configuredPathRelativeToRepo(snapshotRoot, loaded.config.memory_root);
+    const patterns = [
+      ...loaded.config.claims,
+      ...loaded.config.graphs,
+      ...loaded.config.indexes,
+      ...loaded.config.recipes,
+      ...loaded.config.plans,
+      ...loaded.config.profiles,
+      ...loaded.config.waivers
+    ];
+    const treeFiles = gitTreeFiles(repoRoot, revision).filter(({ repoFile }) => {
+      const relativeMemoryFile = relativeToConfiguredRoot(repoFile, memoryRootRelative);
+      return Boolean(relativeMemoryFile && patterns.some((pattern) => pathMatchesPattern(pattern, relativeMemoryFile)));
+    });
+    const blobs = readGitBlobs(repoRoot, treeFiles.map((file) => file.oid));
+
+    for (const { oid, repoFile } of treeFiles) {
+      const source = blobs.get(oid);
+
+      if (source === undefined) {
+        continue;
+      }
+
+      const target = path.join(snapshotRoot, repoFile);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, source);
+    }
+
+    return {
+      memory: loadMemory(snapshotRoot)
+    };
+  } finally {
+    fs.rmSync(snapshotRoot, { recursive: true, force: true });
+  }
+}
+
+function relativeToConfiguredRoot(repoFile: string, memoryRootRelative: string): string | undefined {
+  if (memoryRootRelative.length === 0) {
+    return repoFile;
+  }
+
+  const prefix = `${memoryRootRelative}/`;
+  return repoFile.startsWith(prefix) ? repoFile.slice(prefix.length) : undefined;
+}
+
+function suppressBaselineOverlapFindings(
+  currentFindings: AuditFinding[],
+  baseMemory: LoadedMemory
+): AuditFinding[] {
+  const baseClaims = baseMemory.claims.map(normalizeClaimForAudit);
+  const baseClaimsById = new Map(baseClaims.map((claim) => [claim.id, claim]));
+  const baseRelations = explicitRelationsFromGraphs(baseMemory.graphs);
+
+  return currentFindings.filter((finding) => {
+    const [leftId, rightId] = finding.claimIds;
+    const left = baseClaimsById.get(leftId);
+    const right = baseClaimsById.get(rightId);
+
+    if (!left || !right || !isActiveClaim(left) || !isActiveClaim(right)) {
+      return true;
+    }
+
+    const sharedValues = sharedAuditValues(left, right);
+
+    if (Object.keys(sharedValues).length === 0 || hasReviewDecision(left, right, baseRelations, false)) {
+      return true;
+    }
+
+    return AUDIT_SEVERITY_RANK[overlapSeverity(left, right, sharedValues)] < AUDIT_SEVERITY_RANK[finding.severity];
+  });
+}
+
+function gitOutput(repoRoot: string, args: string[], trim = true): string {
+  const output = execFileSync("git", args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  return trim ? output.trim() : output;
+}
+
+function gitTreeFiles(repoRoot: string, revision: string): GitTreeFile[] {
+  return gitOutput(repoRoot, ["ls-tree", "-r", "-z", "--format=%(objectname)%x09%(path)", revision], false)
+    .split("\0")
+    .filter((entry) => entry.length > 0)
+    .map((entry) => {
+      const separator = entry.indexOf("\t");
+      return {
+        oid: entry.slice(0, separator),
+        repoFile: toPosix(entry.slice(separator + 1))
+      };
+    });
+}
+
+function readGitBlobs(repoRoot: string, oids: string[]): Map<string, string> {
+  const uniqueOids = Array.from(new Set(oids));
+
+  if (uniqueOids.length === 0) {
+    return new Map();
+  }
+
+  const output = execFileSync("git", ["cat-file", "--batch"], {
+    cwd: repoRoot,
+    input: `${uniqueOids.join("\n")}\n`,
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: ["pipe", "pipe", "ignore"]
+  });
+  const blobs = new Map<string, string>();
+  let offset = 0;
+
+  for (const oid of uniqueOids) {
+    const headerEnd = output.indexOf(10, offset);
+
+    if (headerEnd === -1) {
+      throw new AgentMemoryError(`Could not read audit baseline blob ${oid}.`);
+    }
+
+    const header = output.subarray(offset, headerEnd).toString("utf8");
+    const size = Number(header.split(" ")[2]);
+    const contentStart = headerEnd + 1;
+    const contentEnd = contentStart + size;
+
+    if (!Number.isSafeInteger(size) || size < 0 || contentEnd > output.length) {
+      throw new AgentMemoryError(`Could not parse audit baseline blob ${oid}.`);
+    }
+
+    blobs.set(oid, output.subarray(contentStart, contentEnd).toString("utf8"));
+    offset = contentEnd + 1;
+  }
+
+  return blobs;
 }
 
 function findCurrentRecipesWithInactiveClaims(
@@ -122,9 +401,11 @@ function findCurrentRecipesWithInactiveClaims(
 
     findings.push({
       code: "recipe.required_claim.inactive",
+      severity: "error",
       message: `Current recipe ${recipe.id} requires inactive claims: ${inactiveClaims.map((claim) => `${claim.id} (${claim.status})`).join(", ")}.`,
       claimIds: inactiveClaims.map((claim) => claim.id).sort(),
       paths: [recipePath, ...inactiveClaims.map((claim) => memoryPath(memoryRootRelative, claim.sourcePath))].sort(),
+      shared_values: {},
       remediation: "Update the recipe to require current claims, reactivate the intended claim, or mark the recipe non-current."
     });
   }
@@ -172,9 +453,11 @@ function findCurrentPlansWithInactiveRecipes(
 
     findings.push({
       code: "plan.recipe_ref.inactive",
+      severity: "error",
       message: `Current plan template ${plan.id} references inactive recipes: ${inactiveRecipes.map((recipe) => `${recipe.id} (${recipe.status})`).join(", ")}.`,
       claimIds: [],
       paths: [planPath, ...inactiveRecipes.map((recipe) => memoryPath(memoryRootRelative, recipe.sourcePath))].sort(),
+      shared_values: {},
       remediation: "Update the plan stage to use a current recipe, reactivate the intended recipe, or mark the plan non-current."
     });
   }
@@ -192,9 +475,11 @@ function findUnsafeCriticalProfiles(
     .filter((profile) => changedFiles.has(memoryPath(memoryRootRelative, profile.sourcePath)))
     .map((profile) => ({
       code: "profile.critical_broad",
+      severity: "error" as const,
       message: `Current critical profile trait ${profile.id} has broad applies_when.`,
       claimIds: [],
       paths: [memoryPath(memoryRootRelative, profile.sourcePath)],
+      shared_values: {},
       remediation: "Narrow applies_when with systems, changed_files, recipes, plan_stages, or lower the priority."
     }));
 }
@@ -234,9 +519,11 @@ function findUnmarkedProfileConflicts(
 
       findings.push({
         code: "profile.conflict_missing",
+        severity: "error",
         message: `Current profile traits ${profile.id} and ${other.id} appear to overlap but do not declare conflicts_with.`,
         claimIds: [],
         paths: [memoryPath(memoryRootRelative, profile.sourcePath), memoryPath(memoryRootRelative, other.sourcePath)].sort(),
+        shared_values: {},
         remediation: "Add conflicts_with to one trait, narrow applies_when, or clarify that both traits can safely compose."
       });
     }
@@ -249,10 +536,14 @@ function findOverlappingChangedClaims(
   claims: ClaimRecord[],
   changedFiles: Set<string>,
   memoryRootRelative: string,
-  explicitRelations: ExplicitRelation[]
+  explicitRelations: ExplicitRelation[],
+  strict: boolean,
+  scanAll = false
 ): AuditFinding[] {
   const activeClaims = claims.filter(isActiveClaim);
-  const changedActiveClaims = activeClaims.filter((claim) => changedFiles.has(memoryPath(memoryRootRelative, claim.sourcePath)));
+  const changedActiveClaims = scanAll
+    ? activeClaims
+    : activeClaims.filter((claim) => changedFiles.has(memoryPath(memoryRootRelative, claim.sourcePath)));
   const claimsByAttribute = indexClaimsByAuditAttribute(activeClaims);
   const findings: AuditFinding[] = [];
   const seenPairs = new Set<string>();
@@ -271,18 +562,27 @@ function findOverlappingChangedClaims(
 
       seenPairs.add(key);
 
-      const shared = sharedAuditAttributes(claim, other);
+      const sharedValues = sharedAuditValues(claim, other);
+      const shared = Object.keys(sharedValues);
 
-      if (shared.length === 0 || hasReviewDecision(claim, other, explicitRelations)) {
+      if (shared.length === 0 || hasReviewDecision(claim, other, explicitRelations, strict)) {
         continue;
       }
 
+      const severity = strict ? "error" : overlapSeverity(claim, other, sharedValues);
+
       findings.push({
         code: "claim.overlap_without_review",
-        message: `Changed active claim ${claim.id} overlaps active claim ${other.id} by ${shared.join(", ")} without a replaces or conflicts_with decision.`,
+        severity,
+        message: strict
+          ? `Changed active claim ${claim.id} overlaps active claim ${other.id} by ${shared.join(", ")} without a replaces or conflicts_with decision.`
+          : `Changed active claim ${claim.id} overlaps active claim ${other.id} by ${shared.join(", ")} without an explicit review relationship.`,
         claimIds: [claim.id, other.id].sort(),
         paths: [memoryPath(memoryRootRelative, claim.sourcePath), memoryPath(memoryRootRelative, other.sourcePath)].sort(),
-        remediation: "Update the older claim directly, mark one claim stale/deprecated, or add an explicit replaces or conflicts_with graph edge."
+        shared_values: sharedValues,
+        remediation: strict
+          ? "Update the older claim directly, mark one claim stale/deprecated, or add an explicit replaces or conflicts_with graph edge."
+          : "Review the claims and, when semantically accurate, connect them with an explicit graph relationship, update the older claim, or mark it stale/deprecated."
       });
     }
   }
@@ -294,7 +594,8 @@ function findUnreviewedRelatedSourceClaims(
   claims: ClaimRecord[],
   changedFiles: Set<string>,
   memoryRootRelative: string,
-  memoryFiles: Set<string>
+  memoryFiles: Set<string>,
+  strict: boolean
 ): AuditFinding[] {
   const activeClaims = claims.filter(isActiveClaim);
   const changedSourceFiles = Array.from(changedFiles).filter((file) => !isMemoryFile(file, memoryFiles));
@@ -316,9 +617,11 @@ function findUnreviewedRelatedSourceClaims(
 
     findings.push({
       code: "source.related_claims_not_reviewed",
+      severity: strict ? "error" : "warning",
       message: `Changed source file ${sourceFile} has related active claims that were not reviewed in the same memory change set.`,
       claimIds: unreviewedClaims.map((claim) => claim.id).sort(),
       paths: [sourceFile, ...unreviewedClaims.map((claim) => memoryPath(memoryRootRelative, claim.sourcePath)).sort()],
+      shared_values: {},
       remediation: "Review every active claim tied to this source file, update the older claim directly, or mark superseded claims stale/deprecated."
     });
   }
@@ -354,17 +657,21 @@ function findInvalidDeprecatedBy(
     if (!replacement) {
       findings.push({
         code: "claim.deprecated_by_missing",
+        severity: "error",
         message: `Claim ${claim.id} has deprecated_by ${replacementId}, but the replacement claim does not exist.`,
         claimIds: [claim.id, replacementId].sort(),
         paths: [memoryPath(memoryRootRelative, claim.sourcePath)],
+        shared_values: {},
         remediation: "Create the replacement claim, correct deprecated_by, or remove the deprecated_by value."
       });
     } else if (!isActiveClaim(replacement)) {
       findings.push({
         code: "claim.deprecated_by_inactive",
+        severity: "error",
         message: `Claim ${claim.id} has deprecated_by ${replacementId}, but the replacement claim is ${replacement.status}.`,
         claimIds: [claim.id, replacementId].sort(),
         paths: [memoryPath(memoryRootRelative, claim.sourcePath), memoryPath(memoryRootRelative, replacement.sourcePath)].sort(),
+        shared_values: {},
         remediation: "Point deprecated_by at an active replacement claim or reactivate the intended replacement."
       });
     }
@@ -372,9 +679,11 @@ function findInvalidDeprecatedBy(
     if (ACTIVE_DEPRECATED_BY_STATUSES.has(claim.status)) {
       findings.push({
         code: "claim.deprecated_by_active_status",
+        severity: "error",
         message: `Claim ${claim.id} has deprecated_by but is still ${claim.status}.`,
         claimIds: [claim.id],
         paths: [memoryPath(memoryRootRelative, claim.sourcePath)],
+        shared_values: {},
         remediation: "Change the superseded claim status to stale, deprecated, rejected, needs_review, or needs_verification."
       });
     }
@@ -427,9 +736,11 @@ function findUnreviewedActiveConflicts(
 
     findings.push({
       code: "graph.active_conflict_unreviewed",
+      severity: "error",
       message: `Active conflicting claims ${source.id} and ${target.id} need an explicit review status on at least one side.`,
       claimIds: [source.id, target.id].sort(),
       paths: [memoryPath(memoryRootRelative, source.sourcePath), memoryPath(memoryRootRelative, target.sourcePath)].sort(),
+      shared_values: {},
       remediation: "Set one conflicting claim to needs_review or needs_verification, or resolve the conflict by updating/deprecating a claim."
     });
   }
@@ -491,6 +802,11 @@ function canonicalMemoryFiles(
   return new Set(canonicalMemoryFileInventory(memoryRoot, config).map((file) => memoryPath(memoryRootRelative, file)));
 }
 
+function isConfiguredGraphFile(file: string, memoryRootRelative: string, config: AgentMemoryConfig): boolean {
+  const relativeMemoryFile = relativeToConfiguredRoot(file, memoryRootRelative);
+  return Boolean(relativeMemoryFile && config.graphs.some((pattern) => pathMatchesPattern(pattern, relativeMemoryFile)));
+}
+
 function toAuditFileReference(value: string): string {
   return toPosix(value).replaceAll("\\", "/");
 }
@@ -533,30 +849,41 @@ function auditAttributeKey(kind: string, value: string): string {
   return value.length > 0 ? `${kind}\0${value}` : "";
 }
 
-function sharedAuditAttributes(left: ClaimRecord, right: ClaimRecord): string[] {
-  const shared: string[] = [];
+function sharedAuditValues(left: ClaimRecord, right: ClaimRecord): AuditSharedValues {
+  const shared: AuditSharedValues = {};
+  const fields: Array<[keyof AuditSharedValues, string[], string[]]> = [
+    ["source_files", left.sourceFiles, right.sourceFiles],
+    ["related_files", left.relatedFiles, right.relatedFiles],
+    ["symbols", left.symbols, right.symbols],
+    ["routes", left.routes, right.routes],
+    ["tags", left.tags, right.tags]
+  ];
 
-  if (intersects(left.sourceFiles, right.sourceFiles)) {
-    shared.push("source_files");
-  }
+  for (const [field, leftValues, rightValues] of fields) {
+    const values = intersection(leftValues, rightValues);
 
-  if (intersects(left.relatedFiles, right.relatedFiles)) {
-    shared.push("related_files");
-  }
-
-  if (intersects(left.symbols, right.symbols)) {
-    shared.push("symbols");
-  }
-
-  if (intersects(left.routes, right.routes)) {
-    shared.push("routes");
-  }
-
-  if (intersects(left.tags, right.tags)) {
-    shared.push("tags");
+    if (values.length > 0) {
+      shared[field] = values;
+    }
   }
 
   return shared;
+}
+
+function overlapSeverity(left: ClaimRecord, right: ClaimRecord, shared: AuditSharedValues): AuditSeverity {
+  if (
+    (shared.routes?.length ?? 0) > 0 ||
+    (shared.symbols?.length ?? 0) > 0 ||
+    (left.system.length > 0 && left.system === right.system && (shared.source_files?.length ?? 0) >= 2)
+  ) {
+    return "error";
+  }
+
+  if ((shared.source_files?.length ?? 0) > 0 || (shared.related_files?.length ?? 0) > 0) {
+    return "warning";
+  }
+
+  return "info";
 }
 
 function claimMentionsFile(claim: ClaimRecord, sourceFile: string): boolean {
@@ -578,14 +905,14 @@ function claimTouchedByChangedFiles(
     .some((file) => claimMentionsFile(claim, file));
 }
 
-function hasReviewDecision(left: ClaimRecord, right: ClaimRecord, explicitRelations: ExplicitRelation[]): boolean {
-  return hasExplicitReviewDecision(left.id, right.id, explicitRelations) || hasDeprecatedByReviewDecision(left, right);
+function hasReviewDecision(left: ClaimRecord, right: ClaimRecord, explicitRelations: ExplicitRelation[], strict: boolean): boolean {
+  return hasExplicitReviewDecision(left.id, right.id, explicitRelations, strict) || hasDeprecatedByReviewDecision(left, right);
 }
 
-function hasExplicitReviewDecision(leftId: string, rightId: string, explicitRelations: ExplicitRelation[]): boolean {
+function hasExplicitReviewDecision(leftId: string, rightId: string, explicitRelations: ExplicitRelation[], strict: boolean): boolean {
   return explicitRelations.some(
     (relation) =>
-      REVIEW_DECISION_RELATIONS.has(relation.relation) &&
+      (!strict || LEGACY_REVIEW_DECISION_RELATIONS.has(relation.relation)) &&
       ((relation.source === leftId && relation.target === rightId) || (relation.source === rightId && relation.target === leftId))
   );
 }
@@ -601,6 +928,11 @@ function isActiveClaim(claim: ClaimRecord): boolean {
 function intersects(left: string[], right: string[]): boolean {
   const rightSet = new Set(right.filter((value) => value.length > 0));
   return left.some((value) => value.length > 0 && rightSet.has(value));
+}
+
+function intersection(left: string[], right: string[]): string[] {
+  const rightSet = new Set(right.filter((value) => value.length > 0));
+  return Array.from(new Set(left.filter((value) => value.length > 0 && rightSet.has(value)))).sort();
 }
 
 function normalizeAuditFiles(files: string[], repoRoot: string): string[] {
@@ -665,7 +997,7 @@ function uniqueFindings(findings: AuditFinding[]): AuditFinding[] {
   const unique: AuditFinding[] = [];
 
   for (const finding of findings) {
-    const key = `${finding.code}\0${finding.claimIds.join("\0")}\0${finding.paths.join("\0")}`;
+    const key = `${finding.code}\0${finding.severity}\0${finding.claimIds.join("\0")}\0${finding.paths.join("\0")}\0${JSON.stringify(finding.shared_values)}`;
 
     if (seen.has(key)) {
       continue;

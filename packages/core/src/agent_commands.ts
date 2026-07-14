@@ -33,7 +33,11 @@ export function buildAgentCommands(commandPrefix: string): AgentCommandDescripti
       name: "audit",
       purpose: "Audit changed memory for deterministic stale-claim risks.",
       whenToUse: "Run before finishing when canonical memory files changed.",
-      examples: [`${commandPrefix} audit --git-diff`, `${commandPrefix} audit --git-diff --base origin/main`]
+      examples: [
+        `${commandPrefix} audit --git-diff`,
+        `${commandPrefix} audit --git-diff --base origin/main`,
+        `${commandPrefix} audit --git-diff --strict`
+      ]
     },
     {
       name: "query",
