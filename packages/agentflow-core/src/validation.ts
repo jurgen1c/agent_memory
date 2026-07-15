@@ -54,6 +54,23 @@ const TARGET_FIELDS = new Set(["else", "goto", "on_approve", "on_cancel", "on_re
 const SECRET_PATH = /(^|[/._-])(\.env|credentials|id_rsa|id_ed25519|private[_-]?key|secrets?)([/._-]|$)/i;
 const SHELL_EXECUTABLES = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
 const SHELL_ANALYSIS_BUDGET = 65_536;
+const STEP_REQUIREMENTS: Readonly<Record<string, ReadonlyArray<readonly [string, "string" | "array"]>>> = {
+  approval: [["reviewer", "string"], ["artifacts", "array"]],
+  artifact_transform: [["input", "string"], ["output", "string"], ["transform", "string"]],
+  challenge: [["from", "string"], ["to", "string"], ["question", "string"]],
+  command: [["command", "string"]],
+  consult: [["from", "string"], ["to", "string"], ["question", "string"]],
+  decision_record: [["owner", "string"], ["topic", "string"], ["artifacts", "array"]],
+  handoff: [["from", "string"], ["to", "string"]],
+  input_request: [["question", "string"], ["save_as", "string"]],
+  loop: [["body", "array"]],
+  manual_gate: [["message", "string"], ["options", "array"]],
+  mcp_call: [["server", "string"], ["tool", "string"]],
+  result: [["status", "string"]],
+  review: [["reviewer", "string"], ["subject", "string"], ["artifacts", "array"]],
+  session_request: [["session", "string"], ["prompt", "string"]],
+  workflow: [["workflow", "string"]]
+};
 
 export function validateAgentflowWorkflow(workflow: AgentflowWorkflow): AgentflowWorkflowValidationResult {
   const errors: AgentflowWorkflowIssue[] = [];
@@ -245,25 +262,7 @@ function validateStepShapes(contexts: StepContext[], errors: AgentflowWorkflowIs
 }
 
 function validateRequiredStepFields(context: StepContext, errors: AgentflowWorkflowIssue[]): void {
-  const requirements: Record<string, Array<[string, "string" | "array"]>> = {
-    approval: [["reviewer", "string"], ["artifacts", "array"]],
-    artifact_transform: [["input", "string"], ["output", "string"], ["transform", "string"]],
-    challenge: [["from", "string"], ["to", "string"], ["question", "string"]],
-    command: [["command", "string"]],
-    consult: [["from", "string"], ["to", "string"], ["question", "string"]],
-    decision_record: [["owner", "string"], ["topic", "string"], ["artifacts", "array"]],
-    handoff: [["from", "string"], ["to", "string"]],
-    input_request: [["question", "string"], ["save_as", "string"]],
-    loop: [["body", "array"]],
-    manual_gate: [["message", "string"], ["options", "array"]],
-    mcp_call: [["server", "string"], ["tool", "string"]],
-    result: [["status", "string"]],
-    review: [["reviewer", "string"], ["subject", "string"], ["artifacts", "array"]],
-    session_request: [["session", "string"], ["prompt", "string"]],
-    workflow: [["workflow", "string"]]
-  };
-
-  for (const [field, kind] of requirements[context.type ?? ""] ?? []) {
+  for (const [field, kind] of STEP_REQUIREMENTS[context.type ?? ""] ?? []) {
     const value = context.step[field];
     const valid = kind === "string" ? nonEmptyString(value) !== undefined : Array.isArray(value) && value.length > 0;
 
