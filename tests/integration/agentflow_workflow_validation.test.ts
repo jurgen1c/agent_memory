@@ -832,6 +832,23 @@ steps:
     ]);
   });
 
+  test("treats backslashes as literals inside single-quoted shell text", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: single-quoted-backslash
+version: 1
+style: pipeline
+maturity: draft
+steps:
+  - id: reset
+    type: command
+    command: |
+      printf '\\'; git reset --hard
+`);
+
+    expect(validateAgentflowWorkflow(workflow).errors.map((issue) => issue.code)).toEqual([
+      "workflow.command.unsafe"
+    ]);
+  });
+
   test("rejects destructive commands behind shell control syntax", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`name: shell-control-syntax
 version: 1

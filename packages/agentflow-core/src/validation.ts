@@ -2053,7 +2053,7 @@ function splitUnquoted(value: string, separators: Set<string>): string[] {
     if (escaped) {
       current += character;
       escaped = false;
-    } else if (character === "\\") {
+    } else if (character === "\\" && quote !== "'") {
       current += character;
       escaped = true;
     } else if (character === "'" || character === '"') {
