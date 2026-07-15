@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import {
+  AgentflowWorkflowGraphError,
   explainAgentflowWorkflow,
   formatAgentflowWorkflowIssues,
   formatWorkflowParseIssues,
@@ -163,7 +164,17 @@ function checkWorkflow(command: "validate" | "lint" | "explain" | "graph", args:
   }
 
   if (command === "graph") {
-    return { exitCode: 0, stdout: renderAgentflowWorkflowGraph(parsed.workflow) };
+    try {
+      return { exitCode: 0, stdout: renderAgentflowWorkflowGraph(parsed.workflow) };
+    } catch (error) {
+      if (error instanceof AgentflowWorkflowGraphError) {
+        return {
+          exitCode: 2,
+          stderr: `Agentflow graph failed: ${workflowPath}\n${error.code}: ${error.message}`
+        };
+      }
+      throw error;
+    }
   }
 
   if (command === "validate") {

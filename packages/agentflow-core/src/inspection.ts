@@ -31,6 +31,19 @@ export interface AgentflowWorkflowGraph {
   edges: AgentflowWorkflowGraphEdge[];
 }
 
+export class AgentflowWorkflowGraphError extends Error {
+  readonly code = "workflow.graph.node_id_collision";
+  readonly nodeId: string;
+
+  constructor(nodeId: string, existing: AgentflowWorkflowGraphNode, duplicate: AgentflowWorkflowGraphNode) {
+    super(
+      `Graph node id "${nodeId}" collides between ${existing.type} at ${existing.path} and ${duplicate.type} at ${duplicate.path}.`
+    );
+    this.name = "AgentflowWorkflowGraphError";
+    this.nodeId = nodeId;
+  }
+}
+
 interface LocatedStep {
   step: AgentflowWorkflowStep;
   path: string;
@@ -424,8 +437,19 @@ function appendSessions(lines: string[], sessions: Record<string, AgentflowYamlV
 
 function stableUniqueNodes(nodes: AgentflowWorkflowGraphNode[]): AgentflowWorkflowGraphNode[] {
   const byId = new Map<string, AgentflowWorkflowGraphNode>();
-  nodes.forEach((node) => { if (!byId.has(node.id)) byId.set(node.id, node); });
+  nodes.forEach((node) => {
+    const existing = byId.get(node.id);
+    if (existing === undefined) {
+      byId.set(node.id, node);
+    } else if (!sameGraphNode(existing, node)) {
+      throw new AgentflowWorkflowGraphError(node.id, existing, node);
+    }
+  });
   return [...byId.values()].sort((left, right) => left.path.localeCompare(right.path) || left.id.localeCompare(right.id));
+}
+
+function sameGraphNode(left: AgentflowWorkflowGraphNode, right: AgentflowWorkflowGraphNode): boolean {
+  return left.type === right.type && left.path === right.path && left.label === right.label;
 }
 
 function stableUniqueEdges(edges: AgentflowWorkflowGraphEdge[]): AgentflowWorkflowGraphEdge[] {
@@ -477,7 +501,7 @@ function isRecord(value: unknown): value is AgentflowYamlMapping {
 }
 
 function nonEmptyString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function isString(value: unknown): value is string {

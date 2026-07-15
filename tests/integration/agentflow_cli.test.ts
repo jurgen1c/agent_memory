@@ -99,6 +99,15 @@ describe("Agentflow CLI", () => {
     expect(fs.readFileSync(fixturePath, "utf8")).toBe(before);
   });
 
+  test("reports generated graph node collisions without crashing", () => {
+    const fixturePath = path.join(repoRoot, "tests/fixtures/agentflow/workflows/graph-node-collision.yml");
+    const result = dispatch(["graph", fixturePath]);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("workflow.graph.node_id_collision");
+    expect(result.stderr).toContain('Graph node id "terminal:pause" collides');
+  });
+
   test("surfaces validation warnings while preserving a successful exit", () => {
     const fixturePath = path.join(repoRoot, "tests/fixtures/agentflow/invalid/missing-artifact.yml");
     const result = dispatch(["validate", fixturePath]);

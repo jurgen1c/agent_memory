@@ -13,6 +13,7 @@ export {
   validateAgentflowWorkflow
 } from "./validation";
 export {
+  AgentflowWorkflowGraphError,
   buildAgentflowWorkflowGraph,
   explainAgentflowWorkflow,
   renderAgentflowWorkflowGraph

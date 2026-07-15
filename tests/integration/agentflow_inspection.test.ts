@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  AgentflowWorkflowGraphError,
   buildAgentflowWorkflowGraph,
   explainAgentflowWorkflow,
   parseAgentflowWorkflowOrThrow,
@@ -154,5 +155,47 @@ steps:
       to: "${finish",
       kind: "then"
     });
+  });
+
+  test("normalizes padded ids and targets like workflow validation", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: padded-targets
+version: 1
+style: pipeline
+maturity: draft
+steps:
+  - id: " start "
+    type: command
+    command: echo start
+    then: " finish "
+  - id: " finish "
+    type: result
+    status: completed
+`);
+
+    const graph = buildAgentflowWorkflowGraph(workflow);
+    expect(graph.nodes.map((node) => node.id)).toEqual(["start", "finish"]);
+    expect(graph.edges).toContainEqual({ from: "start", to: "finish", kind: "then" });
+  });
+
+  test("rejects collisions between authored and generated graph node ids", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: colliding-nodes
+version: 1
+style: pipeline
+maturity: draft
+steps:
+  - id: run
+    type: command
+    command: echo run
+    on_failure:
+      then: pause
+  - id: terminal:pause
+    type: result
+    status: completed
+`);
+
+    expect(() => buildAgentflowWorkflowGraph(workflow)).toThrow(AgentflowWorkflowGraphError);
+    expect(() => buildAgentflowWorkflowGraph(workflow)).toThrow('Graph node id "terminal:pause" collides');
   });
 });
