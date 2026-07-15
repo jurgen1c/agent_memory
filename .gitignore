@@ -2,6 +2,8 @@ node_modules/
 dist/
 .agent-memory/
 .agentflow/runs/
+.agentflow/*.sqlite
+.agentflow/*.sqlite-*
 coverage/
 tmp/
 *.log
