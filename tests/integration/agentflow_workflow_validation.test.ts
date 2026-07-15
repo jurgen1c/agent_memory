@@ -1015,9 +1015,15 @@ maturity: draft
 steps:
   - { id: spaced, type: command, command: cat disk.img > /dev/sda }
   - { id: attached, type: command, command: echo x >/dev/sda }
+  - { id: stdout_and_stderr, type: command, command: "echo x &> /dev/sda" }
+  - { id: appended_stdout_and_stderr, type: command, command: "echo x &>>/dev/sda" }
+  - { id: duplicated_output, type: command, command: "echo x >& /dev/sda" }
 `);
 
     expect(validateAgentflowWorkflow(workflow).errors.map((issue) => issue.code)).toEqual([
+      "workflow.command.unsafe",
+      "workflow.command.unsafe",
+      "workflow.command.unsafe",
       "workflow.command.unsafe",
       "workflow.command.unsafe"
     ]);

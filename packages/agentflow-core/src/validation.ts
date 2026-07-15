@@ -2048,7 +2048,9 @@ function splitUnquoted(value: string, separators: Set<string>): string[] {
   let quote: "'" | '"' | undefined;
   let escaped = false;
 
-  for (const character of value) {
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+
     if (escaped) {
       current += character;
       escaped = false;
@@ -2058,7 +2060,8 @@ function splitUnquoted(value: string, separators: Set<string>): string[] {
     } else if (character === "'" || character === '"') {
       current += character;
       quote = quote === undefined ? character : quote === character ? undefined : quote;
-    } else if (quote === undefined && separators.has(character)) {
+    } else if (quote === undefined && separators.has(character) &&
+      !(character === "&" && (value[index - 1] === ">" || value[index + 1] === ">"))) {
       segments.push(current);
       current = "";
     } else {
@@ -2257,7 +2260,7 @@ function outputRedirectionTargets(args: string[]): string[] {
   const targets: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
-    const match = /^\d*(?:>>?|<>)(.*)$/.exec(args[index]);
+    const match = /^(?:\d*|&)(?:>&|>>?|<>)(.*)$/.exec(args[index]);
     if (match === null) {
       continue;
     }
