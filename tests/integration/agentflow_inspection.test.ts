@@ -132,4 +132,27 @@ steps:
       { from: "gate", to: "terminal:cancel", kind: "on_reject" }
     ]));
   });
+
+  test("does not confuse shell-style target text with Agentflow interpolation", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: target-syntax
+version: 1
+style: pipeline
+maturity: draft
+steps:
+  - id: start
+    type: command
+    command: echo start
+    then: \${finish
+  - id: \${finish
+    type: result
+    status: completed
+`);
+
+    expect(buildAgentflowWorkflowGraph(workflow).edges).toContainEqual({
+      from: "start",
+      to: "${finish",
+      kind: "then"
+    });
+  });
 });
