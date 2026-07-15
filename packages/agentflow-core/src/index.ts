@@ -18,6 +18,11 @@ export {
   explainAgentflowWorkflow,
   renderAgentflowWorkflowGraph
 } from "./inspection";
+export {
+  parseAgentflowSimulationFixture,
+  renderAgentflowSimulationSummary,
+  simulateAgentflowWorkflow
+} from "./simulation";
 export type {
   AgentflowWorkflow,
   AgentflowWorkflowParseFailure,
@@ -40,6 +45,18 @@ export type {
   AgentflowWorkflowGraphEdge,
   AgentflowWorkflowGraphNode
 } from "./inspection";
+export type {
+  AgentflowSimulationFixture,
+  AgentflowSimulationFixtureParseResult,
+  AgentflowSimulationMissingArtifact,
+  AgentflowSimulationResult,
+  AgentflowSimulationStatus,
+  AgentflowSimulationStepFixture,
+  AgentflowSimulationStepOutcome,
+  AgentflowSimulationTerminalState,
+  AgentflowSimulationUnresolvedBranch,
+  AgentflowSimulationVisitedStep
+} from "./simulation";
 
 export type AgentflowRunStatus = "pending" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled";
 
