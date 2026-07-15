@@ -2554,12 +2554,18 @@ function visitValue(
 }
 
 function stringList(value: AgentflowYamlValue | undefined): string[] {
-  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+  return Array.isArray(value)
+    ? value.flatMap((entry) => {
+        const normalized = nonEmptyString(entry);
+        return normalized === undefined ? [] : [normalized];
+      })
+    : [];
 }
 
 function nestedStrings(value: AgentflowYamlValue | undefined): string[] {
   if (typeof value === "string") {
-    return [value];
+    const normalized = nonEmptyString(value);
+    return normalized === undefined ? [] : [normalized];
   }
   if (Array.isArray(value)) {
     return value.flatMap(nestedStrings);
@@ -2571,7 +2577,12 @@ function nestedStrings(value: AgentflowYamlValue | undefined): string[] {
 }
 
 function nonEmptyString(value: AgentflowYamlValue | undefined): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 function isDynamicReference(value: string): boolean {

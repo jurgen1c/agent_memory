@@ -1400,6 +1400,55 @@ steps:
     ]);
   });
 
+  test("normalizes padded session, target, option, and artifact values for comparisons", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: padded-comparison-values
+version: 1
+style: collaborative
+maturity: draft
+collaboration: { enabled: true }
+sessions:
+  worker: { provider: local, role: worker }
+steps:
+  - id: " produce "
+    type: " command "
+    command: " echo result "
+    outputs: [" result.md "]
+    then: " inspect "
+  - id: " inspect "
+    type: " session_request "
+    session: " worker "
+    prompt: " Review result "
+    inputs: [" result.md "]
+    then: " gate "
+  - id: " gate "
+    type: " manual_gate "
+    message: Continue?
+    options: [" approve ", " reject "]
+    on_reject: " cancel "
+`);
+
+    expect(validateAgentflowWorkflow(workflow)).toEqual({ valid: true, errors: [] });
+    expect(lintAgentflowWorkflow(workflow)).toEqual({ warnings: [] });
+  });
+
+  test("normalizes padded artifact paths before collision checks", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: padded-artifact-collision
+version: 1
+style: pipeline
+maturity: draft
+steps:
+  - { id: first, type: command, command: echo first, outputs: [" result.md "] }
+  - { id: second, type: command, command: echo second, outputs: [result.md] }
+`);
+
+    expect(validateAgentflowWorkflow(workflow).errors.map((issue) => issue.code)).toContain(
+      "workflow.artifact.output.collision"
+    );
+    expect(lintAgentflowWorkflow(workflow).warnings.map((issue) => issue.code)).toContain(
+      "workflow.lint.artifact.overwrite"
+    );
+  });
+
   test("limits target checks to control flow and accepts ignore outcomes", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`name: payload-then
 version: 1
