@@ -198,4 +198,22 @@ steps:
     expect(() => buildAgentflowWorkflowGraph(workflow)).toThrow(AgentflowWorkflowGraphError);
     expect(() => buildAgentflowWorkflowGraph(workflow)).toThrow('Graph node id "terminal:pause" collides');
   });
+
+  test("orders numeric workflow path indices naturally", () => {
+    const steps = Array.from({ length: 12 }, (_, index) => `
+  - id: step-${index}
+    type: command
+    command: echo ${index}`).join("");
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: many-steps
+version: 1
+style: pipeline
+maturity: draft
+steps:${steps}
+`);
+
+    expect(buildAgentflowWorkflowGraph(workflow).nodes.map((node) => node.id)).toEqual(
+      Array.from({ length: 12 }, (_, index) => `step-${index}`)
+    );
+  });
 });

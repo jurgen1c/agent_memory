@@ -445,11 +445,40 @@ function stableUniqueNodes(nodes: AgentflowWorkflowGraphNode[]): AgentflowWorkfl
       throw new AgentflowWorkflowGraphError(node.id, existing, node);
     }
   });
-  return [...byId.values()].sort((left, right) => left.path.localeCompare(right.path) || left.id.localeCompare(right.id));
+  return [...byId.values()].sort((left, right) => compareGraphPaths(left.path, right.path) || left.id.localeCompare(right.id));
 }
 
 function sameGraphNode(left: AgentflowWorkflowGraphNode, right: AgentflowWorkflowGraphNode): boolean {
   return left.type === right.type && left.path === right.path && left.label === right.label;
+}
+
+function compareGraphPaths(left: string, right: string): number {
+  const leftParts = left.split(/(\d+)/);
+  const rightParts = right.split(/(\d+)/);
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = leftParts[index];
+    const rightPart = rightParts[index];
+    if (leftPart === rightPart) {
+      continue;
+    }
+    if (leftPart === undefined) {
+      return -1;
+    }
+    if (rightPart === undefined) {
+      return 1;
+    }
+    if (/^\d+$/.test(leftPart) && /^\d+$/.test(rightPart)) {
+      const difference = Number(leftPart) - Number(rightPart);
+      if (difference !== 0) {
+        return difference;
+      }
+    }
+    return leftPart.localeCompare(rightPart);
+  }
+
+  return 0;
 }
 
 function stableUniqueEdges(edges: AgentflowWorkflowGraphEdge[]): AgentflowWorkflowGraphEdge[] {
