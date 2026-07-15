@@ -95,7 +95,9 @@ type SequenceControl =
   | { kind: "break_loop" }
   | { kind: "terminal"; status: AgentflowSimulationStatus };
 
-const TERMINAL_TARGETS = new Set(["cancel", "cancelled", "complete", "completed", "fail", "failed", "pause"]);
+const TERMINAL_TARGETS = new Set([
+  "cancel", "cancelled", "complete", "completed", "fail", "failed", "pause", "paused", "unresolved"
+]);
 const MAX_SIMULATION_TRANSITIONS = 10_000;
 
 export function parseAgentflowSimulationFixture(source: string): AgentflowSimulationFixtureParseResult {

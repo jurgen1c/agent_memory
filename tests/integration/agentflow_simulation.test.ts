@@ -835,4 +835,25 @@ steps:
     ]);
     expect(result.terminalStates).toEqual([{ stepId: "failing", status: "failed" }]);
   });
+
+  test("recognizes paused and unresolved terminal target aliases", () => {
+    for (const [target, status] of [["paused", "paused"], ["unresolved", "unresolved"]] as const) {
+      const workflow = parseAgentflowWorkflowOrThrow(`name: terminal-${target}
+version: 1
+style: recovery_pipeline
+maturity: draft
+steps:
+  - id: fail
+    type: command
+    command: echo fail
+    on_failure: { then: ${target} }
+`);
+      const result = simulateAgentflowWorkflow(workflow, {
+        steps: { fail: { outcome: "failed" } }
+      });
+
+      expect(result.status).toBe(status);
+      expect(result.terminalStates).toEqual([{ stepId: "fail", status }]);
+    }
+  });
 });
