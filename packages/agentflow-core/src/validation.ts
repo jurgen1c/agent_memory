@@ -1559,7 +1559,7 @@ function validateRepoRelativeScopePatterns(
 }
 
 function scopePatternEscapesRepo(pattern: string): boolean {
-  const normalized = pattern.replaceAll("\\", "/");
+  const normalized = pattern.trim().replaceAll("\\", "/");
 
   if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) {
     return true;

@@ -327,7 +327,7 @@ sessions:
     role: writer
     authority: { can_modify_files: true }
     file_scope:
-      include: [/etc/**, ../outside/**, app/../../outside/**, 'C:\\temp\\**']
+      include: [/etc/**, ../outside/**, app/../../outside/**, 'C:\\temp\\**', " /var/**"]
 steps:
   - id: parallel_work
     type: parallel
@@ -341,7 +341,8 @@ steps:
       "sessions.writer.file_scope.include[0]",
       "sessions.writer.file_scope.include[1]",
       "sessions.writer.file_scope.include[2]",
-      "sessions.writer.file_scope.include[3]"
+      "sessions.writer.file_scope.include[3]",
+      "sessions.writer.file_scope.include[4]"
     ]);
   });
 
@@ -404,7 +405,7 @@ steps:
     branches:
       - id: writer
         session: writer
-        file_scope: { include: [../outside/**, '\\\\server\\share\\**'] }
+        file_scope: { include: [../outside/**, '\\\\server\\share\\**', " ../other/**"] }
 `);
 
     expect(validateAgentflowWorkflow(workflow).errors.filter((issue) =>
@@ -420,6 +421,12 @@ steps:
         code: "workflow.parallel.file_scope.invalid",
         message: 'File scope pattern "\\\\server\\share\\**" must be repo-relative and stay within the repository.',
         path: "steps[0].branches[0].file_scope.include[1]",
+        stepId: "parallel_work"
+      },
+      {
+        code: "workflow.parallel.file_scope.invalid",
+        message: 'File scope pattern " ../other/**" must be repo-relative and stay within the repository.',
+        path: "steps[0].branches[0].file_scope.include[2]",
         stepId: "parallel_work"
       }
     ]);
