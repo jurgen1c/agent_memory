@@ -7,6 +7,7 @@ import type {
 
 export type AgentflowSimulationStatus = "completed" | "failed" | "paused" | "cancelled" | "unresolved";
 export type AgentflowSimulationStepOutcome = "succeeded" | "failed";
+export type AgentflowSimulationVisitedOutcome = AgentflowSimulationStepOutcome | "selected";
 
 export interface AgentflowSimulationStepFixture {
   outcome?: AgentflowSimulationStepOutcome | AgentflowSimulationStepOutcome[];
@@ -27,7 +28,7 @@ export interface AgentflowSimulationFixture {
 export interface AgentflowSimulationVisitedStep {
   id: string;
   type: string;
-  outcome: string;
+  outcome: AgentflowSimulationVisitedOutcome;
 }
 
 export interface AgentflowSimulationMissingArtifact {
@@ -119,6 +120,9 @@ export function parseAgentflowSimulationFixture(source: string): AgentflowSimula
   for (const field of ["inputs", "artifacts", "steps"] as const) {
     if (value[field] !== undefined && !isRecord(value[field])) {
       return { ok: false, error: `Simulation fixture field ${field} must be an object.` };
+    }
+    if (isRecord(value[field]) && Object.keys(value[field]).some((key) => key.trim().length === 0)) {
+      return { ok: false, error: `Simulation fixture field ${field} keys must be non-empty strings.` };
     }
   }
 
@@ -687,7 +691,8 @@ function validOutcome(value: AgentflowYamlValue | undefined): boolean {
 
 function validOutputs(value: AgentflowYamlValue | undefined): boolean {
   if (value === undefined) return true;
-  return isRecord(value) || (Array.isArray(value) && value.every((entry) => nonEmptyString(entry) !== undefined));
+  return (isRecord(value) && Object.keys(value).every((key) => key.trim().length > 0))
+    || (Array.isArray(value) && value.every((entry) => nonEmptyString(entry) !== undefined));
 }
 
 function validCondition(value: AgentflowYamlValue | undefined): boolean {

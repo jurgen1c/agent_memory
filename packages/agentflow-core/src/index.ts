@@ -55,6 +55,7 @@ export type {
   AgentflowSimulationStepOutcome,
   AgentflowSimulationTerminalState,
   AgentflowSimulationUnresolvedBranch,
+  AgentflowSimulationVisitedOutcome,
   AgentflowSimulationVisitedStep
 } from "./simulation";
 

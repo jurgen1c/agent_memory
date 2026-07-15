@@ -210,7 +210,11 @@ steps:
       { steps: { run: { condition: [] } } },
       { steps: { run: { choice: ["approve", 2] } } },
       { steps: { run: { iterations: -1 } } },
-      { steps: { run: { recovery: "unknown" } } }
+      { steps: { run: { recovery: "unknown" } } },
+      { inputs: { "": "value" } },
+      { artifacts: { " ": "value" } },
+      { steps: { "": { outcome: "succeeded" } } },
+      { steps: { run: { outputs: { "": "value" } } } }
     ]) {
       expect(parseAgentflowSimulationFixture(JSON.stringify(source)).ok).toBe(false);
     }
