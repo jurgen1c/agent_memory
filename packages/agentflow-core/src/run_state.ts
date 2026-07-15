@@ -180,6 +180,8 @@ const TERMINAL_RUN_STATUSES = new Set<AgentflowRunStatus>(["completed", "failed"
 const RUN_STATUSES = ["pending", "running", "waiting", "paused", "completed", "failed", "cancelled"] as const;
 const STEP_STATUSES = [...RUN_STATUSES, "skipped"] as const;
 const APPROVAL_STATUSES = ["requested", "approved", "rejected", "cancelled"] as const;
+const WORKFLOW_STYLES = ["pipeline", "recovery_pipeline", "collaborative"] as const;
+const WORKFLOW_MATURITIES = ["draft", "experimental", "stable", "trusted"] as const;
 
 export class AgentflowRunStateError extends Error {
   readonly code: string;
@@ -211,6 +213,8 @@ export class AgentflowRunStateStore {
     const workflowName = requiredString(input.workflow.name, "Workflow name");
     const status = input.status ?? "pending";
     assertOneOf(status, RUN_STATUSES, "run status");
+    assertOneOf(input.workflow.style, WORKFLOW_STYLES, "workflow style");
+    assertOneOf(input.workflow.maturity, WORKFLOW_MATURITIES, "workflow maturity");
     if (!Number.isSafeInteger(input.workflow.version) || input.workflow.version < 1) {
       throw new AgentflowRunStateError("Workflow version must be a positive integer.", "AGENTFLOW_RUN_INVALID");
     }
@@ -344,15 +348,15 @@ export class AgentflowRunStateStore {
       created_at, updated_at, started_at, finished_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(run_id, step_id, attempt) DO UPDATE SET
-      parent_step_id = excluded.parent_step_id,
-      session_id = excluded.session_id,
-      status = excluded.status,
-      input_json = excluded.input_json,
-      output_json = excluded.output_json,
-      error_json = excluded.error_json,
-      updated_at = excluded.updated_at,
+      parent_step_id = CASE WHEN run_steps.finished_at IS NULL THEN excluded.parent_step_id ELSE run_steps.parent_step_id END,
+      session_id = CASE WHEN run_steps.finished_at IS NULL THEN excluded.session_id ELSE run_steps.session_id END,
+      status = CASE WHEN run_steps.finished_at IS NULL THEN excluded.status ELSE run_steps.status END,
+      input_json = CASE WHEN run_steps.finished_at IS NULL THEN excluded.input_json ELSE run_steps.input_json END,
+      output_json = CASE WHEN run_steps.finished_at IS NULL THEN excluded.output_json ELSE run_steps.output_json END,
+      error_json = CASE WHEN run_steps.finished_at IS NULL THEN excluded.error_json ELSE run_steps.error_json END,
+      updated_at = CASE WHEN run_steps.finished_at IS NULL THEN excluded.updated_at ELSE run_steps.updated_at END,
       started_at = COALESCE(run_steps.started_at, excluded.started_at),
-      finished_at = excluded.finished_at`, [
+      finished_at = COALESCE(run_steps.finished_at, excluded.finished_at)`, [
       requiredString(input.runId, "Run ID"),
       requiredString(input.stepId, "Step ID"),
       attempt,
@@ -433,14 +437,14 @@ export class AgentflowRunStateStore {
       created_at, updated_at, started_at, finished_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(run_id, id) DO UPDATE SET
-      step_id = excluded.step_id,
-      provider = excluded.provider,
-      external_session_id = excluded.external_session_id,
-      status = excluded.status,
-      state_json = excluded.state_json,
-      updated_at = excluded.updated_at,
+      step_id = CASE WHEN sessions.finished_at IS NULL THEN excluded.step_id ELSE sessions.step_id END,
+      provider = CASE WHEN sessions.finished_at IS NULL THEN excluded.provider ELSE sessions.provider END,
+      external_session_id = CASE WHEN sessions.finished_at IS NULL THEN excluded.external_session_id ELSE sessions.external_session_id END,
+      status = CASE WHEN sessions.finished_at IS NULL THEN excluded.status ELSE sessions.status END,
+      state_json = CASE WHEN sessions.finished_at IS NULL THEN excluded.state_json ELSE sessions.state_json END,
+      updated_at = CASE WHEN sessions.finished_at IS NULL THEN excluded.updated_at ELSE sessions.updated_at END,
       started_at = COALESCE(sessions.started_at, excluded.started_at),
-      finished_at = excluded.finished_at`, [
+      finished_at = COALESCE(sessions.finished_at, excluded.finished_at)`, [
       requiredString(input.runId, "Run ID"),
       requiredString(input.id, "Session ID"),
       optionalString(input.stepId, "Step ID"),

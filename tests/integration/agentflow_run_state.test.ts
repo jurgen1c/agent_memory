@@ -42,7 +42,8 @@ describe("Agentflow run-state SQLite store", () => {
 
   test("stores pipeline, recovery, and collaboration state families", async () => {
     const repoRoot = temporaryRepo();
-    const store = await openAgentflowRunState({ cwd: repoRoot, now: () => FIXED_TIME });
+    let now = FIXED_TIME;
+    const store = await openAgentflowRunState({ cwd: repoRoot, now: () => now });
 
     store.createRun({
       id: "run-parent",
@@ -109,6 +110,10 @@ describe("Agentflow run-state SQLite store", () => {
     });
 
     store.upsertStep({ runId: "run-recovery", stepId: "diagnose", attempt: 1, status: "completed", sessionId: "reviewer" });
+    store.upsertSession({ id: "reviewer", runId: "run-recovery", provider: "codex", status: "completed", state: { role: "reviewer" } });
+    now = "2026-07-15T12:05:00.000Z";
+    store.upsertStep({ runId: "run-recovery", stepId: "diagnose", attempt: 1, status: "running", sessionId: "writer" });
+    store.upsertSession({ id: "reviewer", runId: "run-recovery", provider: "other", status: "running", state: { role: "writer" } });
     store.upsertBudget({
       id: "budget-1",
       runId: "run-recovery",
@@ -123,7 +128,17 @@ describe("Agentflow run-state SQLite store", () => {
     for (const table of ["runs", "run_steps", "artifacts", "events", "sessions", "failures", "approvals", "budgets"]) {
       expect(database.query(`SELECT COUNT(*) AS count FROM ${table}`).get()).toEqual({ count: table === "runs" ? 2 : 1 });
     }
-    expect(database.query("SELECT status FROM run_steps WHERE run_id = ? AND step_id = ?").get("run-recovery", "diagnose")).toEqual({ status: "completed" });
+    expect(database.query("SELECT status, session_id, finished_at FROM run_steps WHERE run_id = ? AND step_id = ?").get("run-recovery", "diagnose")).toEqual({
+      status: "completed",
+      session_id: "reviewer",
+      finished_at: FIXED_TIME
+    });
+    expect(database.query("SELECT status, provider, state_json, finished_at FROM sessions WHERE run_id = ? AND id = ?").get("run-recovery", "reviewer")).toEqual({
+      status: "completed",
+      provider: "codex",
+      state_json: '{"role":"reviewer"}',
+      finished_at: FIXED_TIME
+    });
     expect(database.query("SELECT used FROM budgets WHERE run_id = ? AND id = ?").get("run-recovery", "budget-1")).toEqual({ used: 3000 });
     database.close();
     store.close();
@@ -152,6 +167,14 @@ describe("Agentflow run-state SQLite store", () => {
     store.createRun(run);
 
     expect(() => store.createRun(run)).toThrow(/already exists/);
+    expect(() => store.createRun({
+      id: "invalid-style",
+      workflow: { name: "safe", version: 1, style: "invalid" as never, maturity: "stable" }
+    })).toThrow(/Invalid workflow style/);
+    expect(() => store.createRun({
+      id: "invalid-maturity",
+      workflow: { name: "safe", version: 1, style: "pipeline", maturity: "invalid" as never }
+    })).toThrow(/Invalid workflow maturity/);
     expect(() => store.upsertArtifact({
       id: "bad",
       runId: "run-1",
