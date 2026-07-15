@@ -138,10 +138,11 @@ describe("Agentflow run-state SQLite store", () => {
       runId: "run-recovery",
       status: "approved",
       decidedBy: "maintainer",
-      decision: "ship",
-      decidedAt: FIXED_TIME
+      decision: "ship"
     });
     now = "2026-07-15T12:05:00.000Z";
+    store.resolveFailure("run-recovery", "failure-1");
+    store.resolveFailure("run-recovery", "failure-1", "2026-07-15T12:10:00.000Z");
     store.upsertStep({ runId: "run-recovery", stepId: "diagnose", attempt: 1, status: "running", sessionId: "writer" });
     store.upsertSession({ id: "reviewer", runId: "run-recovery", provider: "other", status: "running", state: { role: "writer" } });
     store.upsertApproval({ id: "approval-1", runId: "run-recovery", status: "requested", requestedBy: "other" });
@@ -182,6 +183,8 @@ describe("Agentflow run-state SQLite store", () => {
       context_json: '{"reason":"publish"}',
       decided_at: FIXED_TIME
     });
+    expect(database.query("SELECT resolved_at FROM failures WHERE run_id = ? AND id = ?").get("run-recovery", "failure-1"))
+      .toEqual({ resolved_at: now });
     expect(database.query("SELECT used FROM budgets WHERE run_id = ? AND id = ?").get("run-recovery", "budget-1")).toEqual({ used: 3000 });
     database.close();
     store.close();
@@ -240,6 +243,12 @@ describe("Agentflow run-state SQLite store", () => {
       workflow: { name: "safe", version: 1, style: "pipeline", maturity: "stable" },
       inputs: { createdAt: new Date() as never }
     })).toThrow(/plain objects/);
+    expect(() => store.upsertApproval({
+      id: "invalid-approval",
+      runId: "run-1",
+      status: "requested",
+      decidedAt: FIXED_TIME
+    })).toThrow(/cannot include decision metadata/);
     expect(() => store.upsertArtifact({
       id: "bad",
       runId: "run-1",
