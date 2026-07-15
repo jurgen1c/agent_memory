@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(".");
 const mockApp = path.join(repoRoot, "examples/mock-app");
@@ -48,6 +49,28 @@ describe("built Node CLI", () => {
 
     expect(nestedAgentflowVersion.exitCode).toBe(0);
     expect(nestedAgentflowVersion.stdout).toContain(`agentflow ${rootPackage.version}`);
+
+    const runStateBundle = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "agentflow-run-state-node-")), "run-state.mjs");
+    const runStateBuild = run([
+      "bun",
+      "build",
+      path.join(repoRoot, "packages/agentflow-core/src/run_state.ts"),
+      "--target=node",
+      `--outfile=${runStateBundle}`
+    ], repoRoot, env);
+    expect(runStateBuild.exitCode).toBe(0);
+
+    const runStateRepo = fs.mkdtempSync(path.join(os.tmpdir(), "agentflow-run-state-repo-"));
+    fs.mkdirSync(path.join(runStateRepo, ".git"));
+    const runStateSmoke = run([
+      "node",
+      "--input-type=module",
+      "-e",
+      nodeRunStateSmoke(pathToFileURL(runStateBundle).href, runStateRepo)
+    ], repoRoot, env);
+    expect(runStateSmoke.exitCode).toBe(0);
+    expect(runStateSmoke.stdout).toBe("pending\n");
+    expect(runStateSmoke.stderr).not.toContain("ExperimentalWarning");
   }, 120000);
 });
 
@@ -86,4 +109,20 @@ function localNodeVersion(): string {
     .map((line) => line.trim())
     .find((line) => line.startsWith("nodejs "));
   return nodeLine?.split(/\s+/)[1] ?? "25.9.0";
+}
+
+function nodeRunStateSmoke(bundleUrl: string, repoRoot: string): string {
+  return `
+    import { openAgentflowRunState } from ${JSON.stringify(bundleUrl)};
+    const store = await openAgentflowRunState({
+      cwd: ${JSON.stringify(repoRoot)},
+      now: () => "2026-07-15T12:00:00.000Z"
+    });
+    store.createRun({
+      id: "node-run",
+      workflow: { name: "node-smoke", version: 1, style: "pipeline", maturity: "stable" }
+    });
+    console.log(store.getRun("node-run")?.status);
+    store.close();
+  `;
 }
