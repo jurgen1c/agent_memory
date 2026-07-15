@@ -12,6 +12,11 @@ export {
   lintAgentflowWorkflow,
   validateAgentflowWorkflow
 } from "./validation";
+export {
+  buildAgentflowWorkflowGraph,
+  explainAgentflowWorkflow,
+  renderAgentflowWorkflowGraph
+} from "./inspection";
 export type {
   AgentflowWorkflow,
   AgentflowWorkflowParseFailure,
@@ -29,6 +34,11 @@ export type {
   AgentflowWorkflowLintResult,
   AgentflowWorkflowValidationResult
 } from "./validation";
+export type {
+  AgentflowWorkflowGraph,
+  AgentflowWorkflowGraphEdge,
+  AgentflowWorkflowGraphNode
+} from "./inspection";
 
 export type AgentflowRunStatus = "pending" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled";
 
@@ -36,6 +46,7 @@ export const plannedAgentflowRuntimeCommands = [
   "init",
   "validate",
   "lint",
+  "explain",
   "graph",
   "simulate",
   "run",
