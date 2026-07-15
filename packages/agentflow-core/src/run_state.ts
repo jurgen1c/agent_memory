@@ -248,6 +248,7 @@ export class AgentflowRunStateStore {
         ]
       );
     } catch (error) {
+      if (error instanceof AgentflowRunStateError) throw error;
       if (isConstraintError(error)) {
         throw new AgentflowRunStateError(`Agentflow run ${id} already exists or references missing state.`, "AGENTFLOW_RUN_COLLISION", { cause: error });
       }
@@ -277,6 +278,10 @@ export class AgentflowRunStateStore {
           `Terminal Agentflow run ${runId} cannot transition from ${current.status} to ${status}.`,
           "AGENTFLOW_RUN_TERMINAL"
         );
+      }
+      if (TERMINAL_RUN_STATUSES.has(current.status)) {
+        this.database.exec("COMMIT");
+        return current;
       }
 
       const timestamp = currentTimestamp(this.now);
@@ -348,12 +353,12 @@ export class AgentflowRunStateStore {
       created_at, updated_at, started_at, finished_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(run_id, step_id, attempt) DO UPDATE SET
-      parent_step_id = CASE WHEN run_steps.finished_at IS NULL THEN excluded.parent_step_id ELSE run_steps.parent_step_id END,
-      session_id = CASE WHEN run_steps.finished_at IS NULL THEN excluded.session_id ELSE run_steps.session_id END,
+      parent_step_id = CASE WHEN run_steps.finished_at IS NOT NULL OR ? = 1 THEN run_steps.parent_step_id ELSE excluded.parent_step_id END,
+      session_id = CASE WHEN run_steps.finished_at IS NOT NULL OR ? = 1 THEN run_steps.session_id ELSE excluded.session_id END,
       status = CASE WHEN run_steps.finished_at IS NULL THEN excluded.status ELSE run_steps.status END,
-      input_json = CASE WHEN run_steps.finished_at IS NULL THEN excluded.input_json ELSE run_steps.input_json END,
-      output_json = CASE WHEN run_steps.finished_at IS NULL THEN excluded.output_json ELSE run_steps.output_json END,
-      error_json = CASE WHEN run_steps.finished_at IS NULL THEN excluded.error_json ELSE run_steps.error_json END,
+      input_json = CASE WHEN run_steps.finished_at IS NOT NULL OR ? = 1 THEN run_steps.input_json ELSE excluded.input_json END,
+      output_json = CASE WHEN run_steps.finished_at IS NOT NULL OR ? = 1 THEN run_steps.output_json ELSE excluded.output_json END,
+      error_json = CASE WHEN run_steps.finished_at IS NOT NULL OR ? = 1 THEN run_steps.error_json ELSE excluded.error_json END,
       updated_at = CASE WHEN run_steps.finished_at IS NULL THEN excluded.updated_at ELSE run_steps.updated_at END,
       started_at = COALESCE(run_steps.started_at, excluded.started_at),
       finished_at = COALESCE(run_steps.finished_at, excluded.finished_at)`, [
@@ -369,7 +374,12 @@ export class AgentflowRunStateStore {
       timestamp,
       timestamp,
       startedAt,
-      finishedAt
+      finishedAt,
+      input.parentStepId === undefined ? 1 : 0,
+      input.sessionId === undefined ? 1 : 0,
+      input.input === undefined ? 1 : 0,
+      input.output === undefined ? 1 : 0,
+      input.error === undefined ? 1 : 0
     ]);
   }
 
@@ -437,11 +447,11 @@ export class AgentflowRunStateStore {
       created_at, updated_at, started_at, finished_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(run_id, id) DO UPDATE SET
-      step_id = CASE WHEN sessions.finished_at IS NULL THEN excluded.step_id ELSE sessions.step_id END,
+      step_id = CASE WHEN sessions.finished_at IS NOT NULL OR ? = 1 THEN sessions.step_id ELSE excluded.step_id END,
       provider = CASE WHEN sessions.finished_at IS NULL THEN excluded.provider ELSE sessions.provider END,
-      external_session_id = CASE WHEN sessions.finished_at IS NULL THEN excluded.external_session_id ELSE sessions.external_session_id END,
+      external_session_id = CASE WHEN sessions.finished_at IS NOT NULL OR ? = 1 THEN sessions.external_session_id ELSE excluded.external_session_id END,
       status = CASE WHEN sessions.finished_at IS NULL THEN excluded.status ELSE sessions.status END,
-      state_json = CASE WHEN sessions.finished_at IS NULL THEN excluded.state_json ELSE sessions.state_json END,
+      state_json = CASE WHEN sessions.finished_at IS NOT NULL OR ? = 1 THEN sessions.state_json ELSE excluded.state_json END,
       updated_at = CASE WHEN sessions.finished_at IS NULL THEN excluded.updated_at ELSE sessions.updated_at END,
       started_at = COALESCE(sessions.started_at, excluded.started_at),
       finished_at = COALESCE(sessions.finished_at, excluded.finished_at)`, [
@@ -455,7 +465,10 @@ export class AgentflowRunStateStore {
       timestamp,
       timestamp,
       startedAt,
-      finishedAt
+      finishedAt,
+      input.stepId === undefined ? 1 : 0,
+      input.externalSessionId === undefined ? 1 : 0,
+      input.state === undefined ? 1 : 0
     ]);
   }
 
@@ -486,14 +499,14 @@ export class AgentflowRunStateStore {
       run_id, id, step_id, status, requested_by, decided_by, decision, context_json, created_at, updated_at, decided_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(run_id, id) DO UPDATE SET
-      step_id = excluded.step_id,
-      status = excluded.status,
-      requested_by = excluded.requested_by,
-      decided_by = excluded.decided_by,
-      decision = excluded.decision,
-      context_json = excluded.context_json,
-      updated_at = excluded.updated_at,
-      decided_at = excluded.decided_at`, [
+      step_id = CASE WHEN approvals.status IN ('approved', 'rejected', 'cancelled') OR ? = 1 THEN approvals.step_id ELSE excluded.step_id END,
+      status = CASE WHEN approvals.status IN ('approved', 'rejected', 'cancelled') THEN approvals.status ELSE excluded.status END,
+      requested_by = CASE WHEN approvals.status IN ('approved', 'rejected', 'cancelled') OR ? = 1 THEN approvals.requested_by ELSE excluded.requested_by END,
+      decided_by = CASE WHEN approvals.status IN ('approved', 'rejected', 'cancelled') OR ? = 1 THEN approvals.decided_by ELSE excluded.decided_by END,
+      decision = CASE WHEN approvals.status IN ('approved', 'rejected', 'cancelled') OR ? = 1 THEN approvals.decision ELSE excluded.decision END,
+      context_json = CASE WHEN approvals.status IN ('approved', 'rejected', 'cancelled') OR ? = 1 THEN approvals.context_json ELSE excluded.context_json END,
+      updated_at = CASE WHEN approvals.status IN ('approved', 'rejected', 'cancelled') THEN approvals.updated_at ELSE excluded.updated_at END,
+      decided_at = CASE WHEN approvals.status IN ('approved', 'rejected', 'cancelled') OR ? = 1 THEN approvals.decided_at ELSE excluded.decided_at END`, [
       requiredString(input.runId, "Run ID"),
       requiredString(input.id, "Approval ID"),
       optionalString(input.stepId, "Step ID"),
@@ -504,7 +517,13 @@ export class AgentflowRunStateStore {
       stableJson(input.context ?? {}),
       timestamp,
       timestamp,
-      input.decidedAt === undefined ? null : validTimestamp(input.decidedAt)
+      input.decidedAt === undefined ? null : validTimestamp(input.decidedAt),
+      input.stepId === undefined ? 1 : 0,
+      input.requestedBy === undefined ? 1 : 0,
+      input.decidedBy === undefined ? 1 : 0,
+      input.decision === undefined ? 1 : 0,
+      input.context === undefined ? 1 : 0,
+      input.decidedAt === undefined ? 1 : 0
     ]);
   }
 
@@ -572,11 +591,13 @@ export class AgentflowRunStateStore {
 export async function openAgentflowRunState(options: OpenAgentflowRunStateOptions = {}): Promise<AgentflowRunStateStore> {
   const repoRoot = findRepositoryRoot(options.cwd ?? process.cwd());
   const databasePath = resolveLocalDatabasePath(repoRoot, options.databasePath ?? DEFAULT_AGENTFLOW_DATABASE_PATH);
+  const busyTimeoutMs = validBusyTimeout(options.busyTimeoutMs ?? 5_000);
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
 
-  const database = await openSqliteDatabase(databasePath, options.busyTimeoutMs ?? 5_000);
+  const database = await openSqliteDatabase(databasePath, busyTimeoutMs);
   try {
     database.exec("PRAGMA foreign_keys = ON");
+    verifyExistingSchema(database);
     createSchema(database);
     verifySchemaVersion(database);
   } catch (error) {
@@ -588,8 +609,30 @@ export async function openAgentflowRunState(options: OpenAgentflowRunStateOption
   return new AgentflowRunStateStore({ repoRoot, databasePath, database, now: options.now ?? (() => new Date().toISOString()) });
 }
 
+function verifyExistingSchema(database: SqliteDatabase): void {
+  const metadataTable = database.get<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'run_state_metadata'"
+  );
+  if (metadataTable !== null) {
+    verifySchemaVersion(database);
+    return;
+  }
+
+  const existingObject = database.get<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 1"
+  );
+  if (existingObject !== null) {
+    throw new AgentflowRunStateError(
+      `Unsupported Agentflow run-state schema version missing; expected ${AGENTFLOW_RUN_STATE_SCHEMA_VERSION}.`,
+      "AGENTFLOW_SCHEMA_VERSION"
+    );
+  }
+}
+
 function createSchema(database: SqliteDatabase): void {
-  database.exec(`
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database.exec(`
 CREATE TABLE IF NOT EXISTS run_state_metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -726,7 +769,12 @@ CREATE TABLE IF NOT EXISTS budgets (
   PRIMARY KEY (run_id, id)
 );
   `);
-  database.run("INSERT OR IGNORE INTO run_state_metadata (key, value) VALUES ('schema_version', ?)", [String(AGENTFLOW_RUN_STATE_SCHEMA_VERSION)]);
+    database.run("INSERT OR IGNORE INTO run_state_metadata (key, value) VALUES ('schema_version', ?)", [String(AGENTFLOW_RUN_STATE_SCHEMA_VERSION)]);
+    database.exec("COMMIT");
+  } catch (error) {
+    rollback(database);
+    throw error;
+  }
 }
 
 function verifySchemaVersion(database: SqliteDatabase): void {
@@ -763,11 +811,12 @@ async function openSqliteDatabase(databasePath: string, busyTimeoutMs: number): 
 }
 
 function findRepositoryRoot(start: string): string {
-  let current = path.resolve(start);
-  if (!fs.existsSync(current)) {
-    throw new AgentflowRunStateError(`Repository path does not exist: ${current}`, "AGENTFLOW_REPOSITORY_NOT_FOUND");
+  const resolvedStart = path.resolve(start);
+  if (!fs.existsSync(resolvedStart)) {
+    throw new AgentflowRunStateError(`Repository path does not exist: ${resolvedStart}`, "AGENTFLOW_REPOSITORY_NOT_FOUND");
   }
-  if (!fs.statSync(current).isDirectory()) current = path.dirname(current);
+  const realStart = fs.realpathSync(resolvedStart);
+  let current = fs.statSync(realStart).isDirectory() ? realStart : path.dirname(realStart);
 
   while (true) {
     if (fs.existsSync(path.join(current, ".git"))) return fs.realpathSync(current);
@@ -784,8 +833,23 @@ function resolveLocalDatabasePath(repoRoot: string, configuredPath: string): str
   const existingParent = nearestExistingPath(path.dirname(databasePath));
   const realParent = fs.realpathSync(existingParent);
   assertInsideRepository(repoRoot, realParent);
+  if (isSymbolicLink(databasePath)) {
+    throw new AgentflowRunStateError(
+      `Agentflow database path cannot be a symbolic link: ${databasePath}`,
+      "AGENTFLOW_DATABASE_PATH"
+    );
+  }
   if (fs.existsSync(databasePath)) assertInsideRepository(repoRoot, fs.realpathSync(databasePath));
   return databasePath;
+}
+
+function isSymbolicLink(candidate: string): boolean {
+  try {
+    return fs.lstatSync(candidate).isSymbolicLink();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 function assertInsideRepository(repoRoot: string, candidate: string): void {
@@ -830,24 +894,47 @@ function hydrateRun(row: RunRow): AgentflowRunRecord {
   };
 }
 
-function stableJson(value: AgentflowRunStateValue | Record<string, AgentflowRunStateValue>): string {
-  return JSON.stringify(sortJsonValue(value, new Set()));
+function stableJson(value: unknown): string {
+  try {
+    return JSON.stringify(sortJsonValue(value, new Set()));
+  } catch (error) {
+    if (error instanceof AgentflowRunStateError) throw error;
+    throw new AgentflowRunStateError(
+      `Run-state JSON must contain only valid JSON values: ${errorMessage(error)}`,
+      "AGENTFLOW_JSON_INVALID",
+      { cause: error }
+    );
+  }
 }
 
 function nullableJson(value: AgentflowRunStateValue | undefined | null): string | null {
   return value === undefined || value === null ? null : stableJson(value);
 }
 
-function sortJsonValue(value: AgentflowRunStateValue, ancestors: Set<object>): AgentflowRunStateValue {
+function sortJsonValue(value: unknown, ancestors: Set<object>): AgentflowRunStateValue {
   if (typeof value === "number" && !Number.isFinite(value)) {
     throw new AgentflowRunStateError("Run-state JSON numbers must be finite.", "AGENTFLOW_JSON_INVALID");
   }
   if (value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number") return value;
+  if (typeof value !== "object") {
+    throw new AgentflowRunStateError("Run-state JSON must contain only valid JSON values.", "AGENTFLOW_JSON_INVALID");
+  }
   if (ancestors.has(value)) throw new AgentflowRunStateError("Run-state JSON cannot contain cycles.", "AGENTFLOW_JSON_INVALID");
   ancestors.add(value);
-  const sorted = Array.isArray(value)
-    ? value.map((item) => sortJsonValue(item, ancestors))
-    : Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortJsonValue(value[key], ancestors)]));
+  let sorted: AgentflowRunStateValue;
+  if (Array.isArray(value)) {
+    if (Object.keys(value).some((key) => !/^(0|[1-9]\d*)$/.test(key)) || Object.keys(value).length !== value.length) {
+      throw new AgentflowRunStateError("Run-state JSON arrays cannot be sparse or have named properties.", "AGENTFLOW_JSON_INVALID");
+    }
+    sorted = value.map((item) => sortJsonValue(item, ancestors));
+  } else {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new AgentflowRunStateError("Run-state JSON objects must be plain objects.", "AGENTFLOW_JSON_INVALID");
+    }
+    const record = value as Record<string, unknown>;
+    sorted = Object.fromEntries(Object.keys(record).sort().map((key) => [key, sortJsonValue(record[key], ancestors)]));
+  }
   ancestors.delete(value);
   return sorted;
 }
@@ -864,13 +951,16 @@ function repoRelativeArtifactPath(value: string): string {
   return normalized;
 }
 
-function requiredString(value: string, label: string): string {
+function requiredString(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new AgentflowRunStateError(`${label} must be a non-empty string.`, "AGENTFLOW_RUN_STATE_INVALID");
+  }
   const normalized = value.trim();
   if (normalized.length === 0) throw new AgentflowRunStateError(`${label} must be a non-empty string.`, "AGENTFLOW_RUN_STATE_INVALID");
   return normalized;
 }
 
-function optionalString(value: string | undefined, label: string): string | null {
+function optionalString(value: unknown, label: string): string | null {
   return value === undefined ? null : requiredString(value, label);
 }
 
@@ -889,7 +979,7 @@ function validTimestamp(value: string): string {
   if (!Number.isFinite(Date.parse(timestamp))) {
     throw new AgentflowRunStateError(`Invalid timestamp: ${timestamp}.`, "AGENTFLOW_TIMESTAMP_INVALID");
   }
-  return timestamp;
+  return new Date(timestamp).toISOString();
 }
 
 function validBusyTimeout(value: number): number {
