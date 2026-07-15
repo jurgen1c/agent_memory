@@ -128,7 +128,8 @@ export function buildAgentflowWorkflowGraph(workflow: AgentflowWorkflow): Agentf
       continue;
     }
 
-    for (const target of explicitTargets(step)) {
+    const targets = explicitTargets(step);
+    for (const target of targets) {
       if (stepIds.has(target.to)) {
         edges.push({ from: source, to: target.to, kind: target.kind, ...(target.label === undefined ? {} : { label: target.label }) });
       } else if (isTerminalTarget(target.to)) {
@@ -140,7 +141,7 @@ export function buildAgentflowWorkflowGraph(workflow: AgentflowWorkflow): Agentf
 
     if (step.type === "manual_gate") {
       for (const option of stringValues(step.options)) {
-        if (!isTerminalTarget(option) || explicitTargets(step).some((target) => target.to === option)) {
+        if (!isTerminalTarget(option) || targets.some((target) => target.to === option)) {
           continue;
         }
         const terminalId = `terminal:${option}`;

@@ -173,7 +173,10 @@ function checkWorkflow(command: "validate" | "lint" | "explain" | "graph", args:
           stderr: `Agentflow graph failed: ${workflowPath}\n${error.code}: ${error.message}`
         };
       }
-      throw error;
+      return {
+        exitCode: 2,
+        stderr: `Agentflow graph failed: ${workflowPath}\nworkflow.graph.internal: ${error instanceof Error ? error.message : String(error)}`
+      };
     }
   }
 
