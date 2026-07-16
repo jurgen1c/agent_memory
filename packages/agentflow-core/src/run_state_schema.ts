@@ -6,6 +6,22 @@ interface SchemaDatabase {
   get<T>(sql: string, params?: SqliteValue[]): T | null;
 }
 
+const REQUIRED_SCHEMA_OBJECTS = [
+  "run_state_metadata",
+  "runs",
+  "runs_resume_lookup",
+  "runs_parent_lookup",
+  "runs_recovery_lookup",
+  "run_steps",
+  "run_steps_status_lookup",
+  "artifacts",
+  "events",
+  "sessions",
+  "failures",
+  "approvals",
+  "budgets"
+] as const;
+
 export class AgentflowRunStateSchemaVersionError extends Error {}
 
 export function initializeAgentflowRunStateSchema(database: SchemaDatabase, schemaVersion: number): void {
@@ -17,6 +33,7 @@ export function initializeAgentflowRunStateSchema(database: SchemaDatabase, sche
     migrateVersionOneToTwo(database);
   }
   verifySchemaVersion(database, schemaVersion);
+  if (existingVersion !== null && schemaNeedsRepair(database)) createSchema(database, schemaVersion);
 }
 
 function existingSchemaVersion(database: SchemaDatabase): string | null {
@@ -32,6 +49,15 @@ function verifyEmptyDatabase(database: SchemaDatabase, schemaVersion: number): v
     "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 1"
   );
   if (existingObject !== null) throw schemaVersionError("missing", schemaVersion);
+}
+
+function schemaNeedsRepair(database: SchemaDatabase): boolean {
+  const placeholders = REQUIRED_SCHEMA_OBJECTS.map(() => "?").join(", ");
+  const row = database.get<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM sqlite_master WHERE name IN (${placeholders})`,
+    [...REQUIRED_SCHEMA_OBJECTS]
+  );
+  return row?.count !== REQUIRED_SCHEMA_OBJECTS.length;
 }
 
 function createSchema(database: SchemaDatabase, schemaVersion: number): void {

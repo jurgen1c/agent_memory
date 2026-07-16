@@ -254,7 +254,7 @@ describe("Agentflow run-state SQLite store", () => {
   test("reconciles missing and stale artifacts and protects explicit overwrites", async () => {
     const repoRoot = temporaryRepo();
     let now = FIXED_TIME;
-    const store = await openAgentflowRunState({ cwd: repoRoot, now: () => now });
+    const store = await openAgentflowRunState({ cwd: repoRoot, now: () => now, busyTimeoutMs: 10 });
     store.createRun({
       id: "run-artifacts",
       workflow: { name: "artifacts", version: 1, style: "pipeline", maturity: "stable" }
@@ -268,6 +268,11 @@ describe("Agentflow run-state SQLite store", () => {
       contentType: "application/json"
     });
     expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("missing");
+    const unverifiedTarget = path.join(repoRoot, artifactStoragePath("run-artifacts", "reports/result.json"));
+    fs.mkdirSync(path.dirname(unverifiedTarget), { recursive: true });
+    fs.writeFileSync(unverifiedTarget, "published without metadata\n");
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("stale");
+    fs.unlinkSync(unverifiedTarget);
 
     const first = store.writeArtifact({
       id: "report",
@@ -359,7 +364,11 @@ describe("Agentflow run-state SQLite store", () => {
     expect(replacedMissing).toMatchObject({ status: "overwritten", previousChecksum: overwritten.checksum });
     fs.unlinkSync(target);
     fs.symlinkSync(path.join(os.tmpdir(), "agentflow-replaced-artifact"), target);
+    const locker = new Database(store.databasePath);
+    locker.exec("BEGIN IMMEDIATE");
     expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("stale");
+    locker.exec("ROLLBACK");
+    locker.close();
     store.close();
   });
 
@@ -736,6 +745,22 @@ describe("Agentflow run-state SQLite store", () => {
     expect(migrated.query("SELECT value FROM run_state_metadata WHERE key = 'schema_version'").get()).toEqual({ value: "2" });
     migrated.close();
     store.close();
+
+    const damaged = new Database(path.join(repoRoot, ".agentflow/agentflow.sqlite"));
+    damaged.exec("DROP TABLE events");
+    damaged.close();
+    store = await openAgentflowRunState({ cwd: repoRoot, now: () => FIXED_TIME });
+    store.appendEvent({ id: "repaired", runId: "run-version-one", sequence: 1, type: "schema.repaired" });
+    expect(store.listEvents("run-version-one").map((event) => event.id)).toEqual(["repaired"]);
+    store.close();
+
+    const writer = new Database(path.join(repoRoot, ".agentflow/agentflow.sqlite"));
+    writer.exec("BEGIN IMMEDIATE");
+    store = await openAgentflowRunState({ cwd: repoRoot, busyTimeoutMs: 10 });
+    expect(store.getRun("run-version-one")?.id).toBe("run-version-one");
+    store.close();
+    writer.exec("ROLLBACK");
+    writer.close();
   });
 
   test("rejects invalid SQLite options before creating generated state", async () => {

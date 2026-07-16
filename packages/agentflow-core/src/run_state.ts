@@ -850,28 +850,35 @@ export class AgentflowRunStateStore {
   private inspectArtifact(row: ArtifactRow): AgentflowArtifactRecord {
     const target = artifactStoragePath(this.repoRoot, row.run_id, row.path, false, true);
     let status: AgentflowArtifactStatus;
-    let actualChecksum: string | null = null;
     if (isSymbolicLink(target)) {
       status = "stale";
     } else if (!fs.existsSync(target)) {
       status = "missing";
     } else if (!fs.statSync(target).isFile()) {
       status = "stale";
+    } else if (row.checksum === null) {
+      status = "stale";
     } else {
-      actualChecksum = `sha256:${createHash("sha256").update(fs.readFileSync(target)).digest("hex")}`;
-      status = row.checksum !== null && actualChecksum !== row.checksum
+      const actualChecksum = `sha256:${createHash("sha256").update(fs.readFileSync(target)).digest("hex")}`;
+      status = actualChecksum !== row.checksum
         ? "stale"
         : row.status === "overwritten" ? "overwritten" : "available";
     }
     if (status !== row.status) {
       const timestamp = currentTimestamp(this.now);
       const original = row;
-      this.database.run(
-        `UPDATE artifacts SET status = ?, checked_at = ?, updated_at = ?
-        WHERE run_id = ? AND id = ? AND checksum IS ? AND status = ? AND updated_at = ?`,
-        [status, timestamp, timestamp, row.run_id, row.id, row.checksum, row.status, row.updated_at]
-      );
-      row = this.database.get<ArtifactRow>("SELECT * FROM artifacts WHERE run_id = ? AND id = ?", [row.run_id, row.id]) ?? original;
+      const inspected = { ...row, status, checked_at: timestamp, updated_at: timestamp };
+      try {
+        this.database.run(
+          `UPDATE artifacts SET status = ?, checked_at = ?, updated_at = ?
+          WHERE run_id = ? AND id = ? AND checksum IS ? AND status = ? AND updated_at = ?`,
+          [status, timestamp, timestamp, row.run_id, row.id, row.checksum, row.status, row.updated_at]
+        );
+        row = this.database.get<ArtifactRow>("SELECT * FROM artifacts WHERE run_id = ? AND id = ?", [row.run_id, row.id]) ?? original;
+      } catch (error) {
+        if (!isSqliteContentionError(error)) throw error;
+        row = inspected;
+      }
     }
     return hydrateArtifact(this.repoRoot, row);
   }
@@ -1272,6 +1279,10 @@ function rollback(database: SqliteDatabase): void {
 
 function isConstraintError(error: unknown): boolean {
   return /constraint|unique|foreign key/i.test(errorMessage(error));
+}
+
+function isSqliteContentionError(error: unknown): boolean {
+  return /database is (?:locked|busy)|SQLITE_(?:BUSY|LOCKED)/i.test(errorMessage(error));
 }
 
 function runStateWriteError(operation: string, error: unknown): AgentflowRunStateError {
