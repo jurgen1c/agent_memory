@@ -95,6 +95,27 @@ describe("Agentflow run lifecycle", () => {
     store.close();
   });
 
+  test("wraps low-level event writes and rolls back transactional run creation", async () => {
+    const repoRoot = temporaryRepo();
+    const store = await openAgentflowRunState({ cwd: repoRoot });
+    const database = (store as unknown as {
+      database: { run: (sql: string, params?: unknown[]) => void };
+    }).database;
+    const originalRun = database.run;
+    database.run = (sql, params) => {
+      if (sql.includes("INSERT INTO events")) throw new Error("simulated SQLite write failure");
+      originalRun(sql, params);
+    };
+
+    expect(() => store.createRunWithEvent({
+      id: "run-create-atomic",
+      workflow: { name: "atomic", version: 1, style: "pipeline", maturity: "experimental" }
+    }, { type: "run.created" })).toThrow("Could not create run with event: simulated SQLite write failure");
+    expect(store.getRun("run-create-atomic")).toBeNull();
+    database.run = originalRun;
+    store.close();
+  });
+
   test("allocates lifecycle event IDs around caller-supplied collisions", async () => {
     const repoRoot = temporaryRepo();
     const workflow = parseAgentflowWorkflowOrThrow(WORKFLOW_SOURCE);

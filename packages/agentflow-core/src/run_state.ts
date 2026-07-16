@@ -351,7 +351,8 @@ export class AgentflowRunStateStore {
       return run;
     } catch (error) {
       rollback(this.database);
-      throw error;
+      if (error instanceof AgentflowRunStateError) throw error;
+      throw runStateWriteError("create run with event", error);
     }
   }
 
@@ -420,6 +421,12 @@ export class AgentflowRunStateStore {
 
     try {
       const current = this.requireRun(runId);
+      if (TERMINAL_RUN_STATUSES.has(current.status) && input.status !== current.status) {
+        throw new AgentflowRunStateError(
+          `Terminal Agentflow run ${runId} cannot transition from ${current.status} to ${input.status}.`,
+          "AGENTFLOW_RUN_TERMINAL"
+        );
+      }
       if (current.status === input.status) {
         this.database.exec("COMMIT");
         return { changed: false, run: current };
