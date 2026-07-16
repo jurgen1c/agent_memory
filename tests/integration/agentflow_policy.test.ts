@@ -11,6 +11,8 @@ import {
   validateAgentflowWorkflow
 } from "../../packages/agentflow-core/src";
 import {
+  normalizeRepoPath,
+  normalizeRepoPattern,
   policyGlobsCoverSubtree,
   policyGlobsIntersect
 } from "../../packages/agentflow-core/src/policy_utils";
@@ -62,6 +64,13 @@ steps:
 `;
 
 describe("Agentflow policy primitives", () => {
+  test("rejects control characters in repo paths and policy patterns", () => {
+    for (const control of ["\0", "\t", "\n", "\r", "\u007f", "\u0085"]) {
+      expect(normalizeRepoPath(`src/token${control}.txt`)).toBeUndefined();
+      expect(normalizeRepoPattern(`src/token${control}.txt`)).toBeUndefined();
+    }
+  });
+
   test("fails closed for malformed globs passed directly to exported helpers", () => {
     expect(policyGlobsIntersect("src/[", "src/**")).toBe(false);
     expect(policyGlobsIntersect("src/[z-a]", "src/**")).toBe(false);
@@ -239,6 +248,17 @@ steps:
       kind: "file_write",
       rootPath,
       session: "writer",
+      path: undefined as unknown as string
+    })).toEqual({
+      status: "fail",
+      code: "policy.input.invalid",
+      message: "File-write checks require a string path."
+    });
+
+    expect(evaluateAgentflowPolicy(workflow, {
+      kind: "file_write",
+      rootPath,
+      session: "writer",
       path: "src/index.ts"
     })).toMatchObject({ status: "allow" });
     expect(evaluateAgentflowPolicy(workflow, {
@@ -257,7 +277,21 @@ steps:
       rootPath,
       session: "writer",
       path: "src/secrets/token\n.txt"
-    })).toMatchObject({ status: "fail", code: "policy.file_scope.denied" });
+    })).toEqual({
+      status: "fail",
+      code: "policy.file_scope.denied",
+      message: 'File path "src/secrets/token\\n.txt" must be repo-relative and stay inside the repository.'
+    });
+    expect(evaluateAgentflowPolicy(newlinePath, {
+      kind: "file_write",
+      rootPath,
+      session: "writer",
+      path: "src/secrets/token\u0085.txt"
+    })).toEqual({
+      status: "fail",
+      code: "policy.file_scope.denied",
+      message: 'File path "src/secrets/token\\u0085.txt" must be repo-relative and stay inside the repository.'
+    });
 
     const negatedClass = parseAgentflowWorkflowOrThrow(POLICY_WORKFLOW.replace(
       "include: [src/**]",
@@ -720,6 +754,16 @@ steps:
       kind: "unsafe_operation",
       operation: "force push"
     })).toMatchObject({ status: "fail", code: "policy.configuration.invalid" });
+
+    const controlCharacterPattern = parseAgentflowWorkflowOrThrow(POLICY_WORKFLOW.replace(
+      "include: [src/**]",
+      'include: ["src/line\\nbreak/**"]'
+    ));
+    expect(validateAgentflowWorkflow(controlCharacterPattern).errors).toContainEqual({
+      code: "workflow.policy.file_scope.invalid",
+      message: 'File scope pattern "src/line\\nbreak/**" must be a supported repo-relative glob and stay inside the repository.',
+      path: "sessions.writer.file_scope.include[0]"
+    });
 
     const invalidRange = parseAgentflowWorkflowOrThrow(POLICY_WORKFLOW.replace(
       "include: [src/**]",

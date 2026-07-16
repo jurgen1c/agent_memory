@@ -7,9 +7,11 @@ import {
   matchesPolicyGlob,
   nonEmptyString,
   nonNegativeFinite,
+  normalizeRepoPattern,
   policyGlobCanMatchDescendant,
   policyGlobsCoverSubtree,
   positiveFinite,
+  quotePolicyValue,
   resolveScopedRepoPath,
   stringList
 } from "./policy_utils";
@@ -194,6 +196,9 @@ function checkFileWrite(
   workflow: AgentflowWorkflow,
   request: Extract<AgentflowPolicyRequest, { kind: "file_write" }>
 ): AgentflowPolicyDecision {
+  if (typeof request.path !== "string") {
+    return fail("policy.input.invalid", "File-write checks require a string path.");
+  }
   const sessionName = request.session === undefined
     ? undefined
     : typeof request.session === "string"
@@ -212,7 +217,10 @@ function checkFileWrite(
 
   const normalizedPath = resolveScopedRepoPath(request.rootPath, request.path);
   if (normalizedPath === undefined) {
-    return fail("policy.file_scope.denied", `File path "${request.path}" must be repo-relative and stay inside the repository.`);
+    return fail(
+      "policy.file_scope.denied",
+      `File path ${quotePolicyValue(request.path)} must be repo-relative and stay inside the repository.`
+    );
   }
 
   const globalScope = mapping(mapping(workflow.policies)?.file_scope);
@@ -298,7 +306,10 @@ function checkCleanup(
   for (const candidate of request.paths) {
     const normalized = resolveScopedRepoPath(request.rootPath, candidate);
     if (normalized === undefined) {
-      return fail("policy.cleanup.path.invalid", `Cleanup path "${candidate}" must be repo-relative and stay inside the run directory.`);
+      return fail(
+        "policy.cleanup.path.invalid",
+        `Cleanup path ${quotePolicyValue(candidate)} must be repo-relative and stay inside the run directory.`
+      );
     }
     if (keep.some((pattern) => matchesPolicyGlob(normalized, pattern) ||
         (request.recursive && policyGlobCanMatchDescendant(normalized, pattern)))) {
@@ -364,7 +375,9 @@ function validOperationScope(value: { include?: string[]; exclude?: string[] }):
 
 function validPatternList(value: unknown): value is string[] {
   return Array.isArray(value) && value.length > 0 &&
-    value.every((entry) => nonEmptyString(entry) && isSupportedPolicyGlob(entry));
+    value.every((entry) =>
+      nonEmptyString(entry) && normalizeRepoPattern(entry) !== undefined && isSupportedPolicyGlob(entry)
+    );
 }
 
 function policyNumberRecord(value: unknown, valid: (entry: unknown) => boolean): value is Record<string, number> {

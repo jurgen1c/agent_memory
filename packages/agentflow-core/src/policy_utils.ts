@@ -525,7 +525,7 @@ function splitBraceAlternatives(value: string): string[] | undefined {
 
 export function normalizeRepoPath(value: string): string | undefined {
   if (!nonEmptyString(value)) return undefined;
-  if (value !== value.trim() || value.includes("\\")) return undefined;
+  if (value !== value.trim() || value.includes("\\") || hasControlCharacter(value)) return undefined;
   const normalized = value;
   if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) return undefined;
   const resolved = path.posix.normalize(normalized);
@@ -571,7 +571,7 @@ export function resolveScopedRepoPath(rootPath: string, value: string): string |
 }
 
 export function normalizeRepoPattern(value: string): string | undefined {
-  if (!nonEmptyString(value)) return undefined;
+  if (!nonEmptyString(value) || hasControlCharacter(value)) return undefined;
   const normalized = value.trim().replaceAll("\\", "/");
   if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) return undefined;
   const segments: string[] = [];
@@ -585,6 +585,16 @@ export function normalizeRepoPattern(value: string): string | undefined {
     }
   }
   return segments.length === 0 ? undefined : segments.join("/");
+}
+
+export function quotePolicyValue(value: string): string {
+  return JSON.stringify(value).replace(/[\u007f-\u009f\u2028\u2029]/g, (character) =>
+    `\\u${character.codePointAt(0)?.toString(16).padStart(4, "0")}`
+  );
+}
+
+function hasControlCharacter(value: string): boolean {
+  return /[\u0000-\u001f\u007f-\u009f]/.test(value);
 }
 
 export function mapping(value: AgentflowYamlValue | undefined): AgentflowYamlMapping | undefined {

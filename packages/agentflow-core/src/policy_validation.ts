@@ -7,6 +7,7 @@ import {
   normalizeRepoPattern,
   policyGlobLayersHaveWritablePath,
   positiveFinite,
+  quotePolicyValue,
   stringList
 } from "./policy_utils";
 
@@ -300,7 +301,7 @@ function validateFileScope(
         errors.push(issue(
           "workflow.policy.file_scope.invalid",
           `${basePath}.${field}[${index}]`,
-          `File scope pattern "${pattern}" must be a supported repo-relative glob and stay inside the repository.`
+          `File scope pattern ${quotePolicyValue(pattern)} must be a supported repo-relative glob and stay inside the repository.`
         ));
       }
     });
@@ -335,7 +336,7 @@ function validateRetentionPolicy(value: AgentflowYamlValue | undefined, errors: 
             errors.push(issue(
               "workflow.policy.retention.invalid",
               `retention.${name}.${field}[${index}]`,
-              `Retention path pattern "${pattern}" must be a supported relative glob and stay inside the run directory.`
+              `Retention path pattern ${quotePolicyValue(pattern)} must be a supported relative glob and stay inside the run directory.`
             ));
           }
         });
