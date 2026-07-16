@@ -611,7 +611,7 @@ export class AgentflowRunStateStore {
           ? "overwritten"
           : existing?.status === "overwritten" ? "overwritten" : "available",
         (targetExistedBeforeWrite && !retryingPublishedContent) || replacingPublishedContent
-          ? existing?.checksum ?? null
+          ? existing?.checksum ?? targetChecksum
           : existing?.previous_checksum ?? null,
         metadataJson,
         timestamp,
@@ -999,13 +999,15 @@ function isSymbolicLink(candidate: string): boolean {
   }
 }
 
-function assertInsideRepository(repoRoot: string, candidate: string): void {
+function assertInsideRepository(
+  repoRoot: string,
+  candidate: string,
+  message = `Agentflow database path must stay inside the repository: ${candidate}`,
+  code = "AGENTFLOW_DATABASE_PATH"
+): void {
   const relative = path.relative(repoRoot, candidate);
   if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new AgentflowRunStateError(
-      `Agentflow database path must stay inside the repository: ${candidate}`,
-      "AGENTFLOW_DATABASE_PATH"
-    );
+    throw new AgentflowRunStateError(message, code);
   }
 }
 
@@ -1150,7 +1152,12 @@ function artifactStoragePath(
   const normalizedPath = repoRelativeArtifactPath(declaredPath);
   const artifactRoot = path.join(repoRoot, ".agentflow", "runs", artifactRunDirectory(normalizedRunId), "artifacts");
   const target = path.join(artifactRoot, artifactFileName(normalizedPath));
-  assertInsideRepository(repoRoot, target);
+  assertInsideRepository(
+    repoRoot,
+    target,
+    `Artifact path must stay inside the repository: ${target}`,
+    "AGENTFLOW_ARTIFACT_PATH"
+  );
   verifyArtifactPath(repoRoot, path.dirname(target), createParent);
   if (!allowTargetSymlink && isSymbolicLink(target)) {
     throw new AgentflowRunStateError(`Artifact path cannot be a symbolic link: ${target}`, "AGENTFLOW_ARTIFACT_PATH");
@@ -1205,7 +1212,7 @@ function restoreArtifactWrite(target: string, temporaryPath: string, backupPath:
   try {
     if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
     if (targetExisted && fs.existsSync(backupPath)) {
-      if (fs.existsSync(target)) fs.unlinkSync(target);
+      fs.rmSync(target, { force: true, recursive: true });
       fs.renameSync(backupPath, target);
     } else if (!targetExisted && fs.existsSync(target)) {
       fs.unlinkSync(target);
@@ -1232,7 +1239,7 @@ function recoverArtifactStaging(target: string, temporaryPath: string, backupPat
     if (targetMatchesRegistry) {
       removeArtifactStagingEntry(backupPath);
     } else if (registeredChecksum === null || artifactChecksum(backupPath) === registeredChecksum) {
-      if (fs.existsSync(target)) fs.unlinkSync(target);
+      fs.rmSync(target, { force: true, recursive: true });
       fs.renameSync(backupPath, target);
     } else {
       removeArtifactStagingEntry(backupPath);

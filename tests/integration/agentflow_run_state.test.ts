@@ -272,6 +272,21 @@ describe("Agentflow run-state SQLite store", () => {
     fs.mkdirSync(path.dirname(unverifiedTarget), { recursive: true });
     fs.writeFileSync(unverifiedTarget, "published without metadata\n");
     expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("stale");
+    const replacedUnverified = store.writeArtifact({
+      id: "report",
+      runId: "run-artifacts",
+      stepId: "report",
+      path: "reports/result.json",
+      kind: "result",
+      contentType: "application/json",
+      content: "{\"result\":1}\n",
+      overwrite: true
+    });
+    expect(replacedUnverified).toMatchObject({
+      status: "overwritten",
+      previousChecksum: `sha256:${createHash("sha256").update("published without metadata\n").digest("hex")}`
+    });
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("overwritten");
     fs.unlinkSync(unverifiedTarget);
 
     const first = store.writeArtifact({
@@ -284,7 +299,7 @@ describe("Agentflow run-state SQLite store", () => {
       content: "{\"result\":1}\n"
     });
     const target = path.join(repoRoot, first.storagePath);
-    expect(first.status).toBe("available");
+    expect(first.status).toBe("overwritten");
     now = "2026-07-15T12:01:00.000Z";
     const identicalRetry = store.writeArtifact({
       id: "report",
@@ -314,7 +329,7 @@ describe("Agentflow run-state SQLite store", () => {
     } finally {
       Object.defineProperty(fs, "readFileSync", readFileSyncDescriptor);
     }
-    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("available");
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("overwritten");
     const artifactDirectory = path.dirname(target);
     fs.rmSync(artifactDirectory, { recursive: true });
     fs.writeFileSync(artifactDirectory, "corrupted artifact directory");
@@ -322,7 +337,7 @@ describe("Agentflow run-state SQLite store", () => {
     fs.unlinkSync(artifactDirectory);
     fs.mkdirSync(artifactDirectory);
     fs.writeFileSync(target, "{\"result\":1}\n");
-    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("available");
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("overwritten");
     fs.writeFileSync(target, "short");
     Object.defineProperty(fs, "readFileSync", {
       ...readFileSyncDescriptor,
@@ -337,7 +352,7 @@ describe("Agentflow run-state SQLite store", () => {
       Object.defineProperty(fs, "readFileSync", readFileSyncDescriptor);
     }
     fs.writeFileSync(target, "{\"result\":1}\n");
-    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("available");
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("overwritten");
     store.upsertArtifact({
       id: "report",
       runId: "run-artifacts",
@@ -352,7 +367,7 @@ describe("Agentflow run-state SQLite store", () => {
       producerStepId: "report",
       checksum: first.checksum,
       sizeBytes: first.sizeBytes,
-      status: "available",
+      status: "overwritten",
       metadata: { reviewed: true }
     });
     expect(() => store.upsertArtifact({
@@ -630,6 +645,20 @@ describe("Agentflow run-state SQLite store", () => {
       contentType: "text/plain",
       content: "replacement"
     });
+
+    fs.renameSync(target, backup);
+    fs.mkdirSync(target);
+    fs.writeFileSync(path.join(target, "corrupted-entry"), "invalid");
+    const recoveredFromTargetDirectory = store.writeArtifact({
+      id: "report",
+      runId: "run-recovery",
+      path: "report.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "replacement"
+    });
+    expect(recoveredFromTargetDirectory.status).toBe("overwritten");
+    expect(fs.readFileSync(target, "utf8")).toBe("replacement");
 
     fs.mkdirSync(backup);
     fs.writeFileSync(path.join(backup, "corrupted-entry"), "invalid");

@@ -120,7 +120,7 @@ and budget records model pipeline and collaboration state.
 Artifact content and other potentially large generated files live under
 `.agentflow/runs/<run-id>/`; the SQLite artifact rows record their repo-relative
 paths and metadata. The artifact registry maps declared paths to fixed-length,
-case-independent digests beneath each run's digested `artifacts/` subtree,
+lowercase hexadecimal digests beneath each run's digested `artifacts/` subtree,
 rejects traversal and symlink escapes, records a
 SHA-256 checksum, producer step, kind, content type, size, status, and
 timestamps, and requires explicit overwrite intent. Registry inspection
