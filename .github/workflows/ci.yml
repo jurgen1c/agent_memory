@@ -21,7 +21,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run ci
       - name: Upload coverage report
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: bun-coverage
