@@ -70,7 +70,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<UiSe
   return startNodeUiServer(options);
 }
 
-async function startNodeUiServer(options: UiServerOptions = {}): Promise<UiServerHandle> {
+export async function startNodeUiServer(options: UiServerOptions = {}): Promise<UiServerHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const requestedPort = options.port ?? DEFAULT_PORT;
   const token = options.token ?? crypto.randomBytes(18).toString("base64url");
