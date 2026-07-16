@@ -8,6 +8,35 @@ const repoRoot = path.resolve(".");
 const mockApp = path.join(repoRoot, "examples/mock-app");
 
 describe("retrieval commands", () => {
+  test("supports retrieval option aliases and rejects malformed requests", async () => {
+    const cwd = await compiledMockApp();
+
+    const filtered = await dispatch(
+      ["query", "oauth", "--limit=2", "--system=auth", "--status=current", "--include-stale", "--json"],
+      { cwd }
+    );
+    expect(JSON.parse(filtered.stdout).matches[0].id).toBe("auth.student_oauth.uid_is_tenant_scoped");
+
+    const empty = await dispatch(["query", "definitely absent claim"], { cwd });
+    expect(empty.stdout).toContain("No matching claims found.");
+
+    const related = await dispatch(["show", "auth.student_oauth.uid_is_tenant_scoped", "--depth", "2"], { cwd });
+    expect(related.stdout).toContain("## Related Claims");
+    const direct = await dispatch(["show", "auth.student_oauth.uid_is_tenant_scoped", "--depth=0"], { cwd });
+    expect(direct.stdout).toContain("# Student OAuth UID is tenant scoped");
+
+    expect(dispatch(["query"], { cwd })).rejects.toThrow("query requires search text");
+    expect(dispatch(["query", "oauth", "--wat"], { cwd })).rejects.toThrow("Unknown query option: --wat");
+    expect(dispatch(["query", "oauth", "--limit=0"], { cwd })).rejects.toThrow("Expected a positive integer, got: 0");
+    expect(dispatch(["query", "oauth", "--system"], { cwd })).rejects.toThrow("--system requires a value");
+    expect(dispatch(["show"], { cwd })).rejects.toThrow("show requires a claim ID");
+    expect(dispatch(["show", "auth.student_oauth.uid_is_tenant_scoped", "--wat"], { cwd })).rejects.toThrow("Unknown show option: --wat");
+    expect(dispatch(["show", "auth.student_oauth.uid_is_tenant_scoped", "--depth"], { cwd })).rejects.toThrow("--depth requires a value");
+    expect(dispatch(["show", "auth.student_oauth.uid_is_tenant_scoped", "--depth=11"], { cwd })).rejects.toThrow(
+      "Depth must be an integer between 0 and 10, got: 11"
+    );
+  });
+
   test("query searches FTS and supports filters", async () => {
     const cwd = await compiledMockApp();
     const result = await dispatch(["query", "student oauth tenant", "--limit", "5"], { cwd });
