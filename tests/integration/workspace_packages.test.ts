@@ -181,7 +181,7 @@ describe("workspace package layout", () => {
     expect(rootPackage.scripts?.typecheck).toBe("node scripts/run-root-verification.mjs typecheck");
     expect(rootPackage.scripts?.test).toBe("bun test");
     expect(rootPackage.scripts?.["test:coverage"]).toBe("bun test --coverage");
-    expect(rootPackage.scripts?.ci).toContain("bun run test:coverage");
+    expect(rootPackage.scripts?.ci).toContain("bun test --coverage");
     expect(rootPackage.scripts?.ci).not.toContain("&& bun test &&");
 
     const bunfig = fs.readFileSync(path.join(repoRoot, "bunfig.toml"), "utf8");
