@@ -66,7 +66,7 @@
     "ci": "bun run version:check && bun run audit && bun run lint && bun run typecheck && bun run test:coverage && bun run build",
     "lint": "eslint .",
     "test": "bun test",
-    "test:coverage": "bun test --coverage",
+    "test:coverage": "bun test --coverage --no-concurrent",
     "version": "node scripts/sync-workspace-versions.mjs --stage",
     "version:check": "node scripts/sync-workspace-versions.mjs --check",
     "dev": "bun packages/cli/src/index.ts",

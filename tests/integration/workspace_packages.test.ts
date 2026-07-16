@@ -180,7 +180,7 @@ describe("workspace package layout", () => {
     expect(rootPackage.scripts?.build).toBe("node scripts/run-root-verification.mjs build");
     expect(rootPackage.scripts?.typecheck).toBe("node scripts/run-root-verification.mjs typecheck");
     expect(rootPackage.scripts?.test).toBe("bun test");
-    expect(rootPackage.scripts?.["test:coverage"]).toBe("bun test --coverage");
+    expect(rootPackage.scripts?.["test:coverage"]).toBe("bun test --coverage --no-concurrent");
     expect(rootPackage.scripts?.ci).toContain("bun run test:coverage");
     expect(rootPackage.scripts?.ci).not.toContain("&& bun test &&");
 
