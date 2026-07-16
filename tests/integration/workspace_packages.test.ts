@@ -187,7 +187,7 @@ describe("workspace package layout", () => {
     const bunfig = fs.readFileSync(path.join(repoRoot, "bunfig.toml"), "utf8");
     expect(bunfig).toContain('coverageReporter = ["text", "lcov"]');
     expect(bunfig).toContain("coverageSkipTestFiles = true");
-    expect(bunfig).toContain("coverageThreshold = 0.9");
+    expect(bunfig).toContain("coverageThreshold = { lines = 0.9, functions = 0.9, statements = 0 }");
     expect(bunfig).not.toContain("concurrentTestGlob");
 
     const workspaceNames = workspacePackageNames();
