@@ -263,6 +263,17 @@ user-invocable: false
 });
 
 describe("agent-manifest command", () => {
+  test("supports human-readable output and rejects unknown options", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+
+    const result = await dispatch(["agent-manifest"], { cwd: repoRoot });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('"tool": "agent-memory"');
+    expect(dispatch(["agent-manifest", "--wat"], { cwd: repoRoot })).rejects.toThrow("Unknown agent-manifest option: --wat");
+  });
+
   test("returns machine-readable command descriptions and repo paths", async () => {
     const repoRoot = makeGitRepo();
     const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
