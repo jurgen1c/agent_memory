@@ -267,7 +267,7 @@ describe("Agentflow run-state SQLite store", () => {
       kind: "result",
       contentType: "application/json"
     });
-    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("missing");
+    expect(store.listArtifacts("run-artifacts")[0]).toMatchObject({ status: "missing", checkedAt: FIXED_TIME });
     const unverifiedTarget = path.join(repoRoot, artifactStoragePath("run-artifacts", "reports/result.json"));
     fs.mkdirSync(path.dirname(unverifiedTarget), { recursive: true });
     fs.writeFileSync(unverifiedTarget, "published without metadata\n");
@@ -393,6 +393,28 @@ describe("Agentflow run-state SQLite store", () => {
       code: "AGENTFLOW_ARTIFACT_COLLISION",
       message: expect.stringContaining("already registered as report")
     });
+    const collisionStagingDirectory = path.join(
+      repoRoot,
+      ".agentflow/runs",
+      artifactRunDirectory("run-artifacts"),
+      ".staging"
+    );
+    fs.mkdirSync(collisionStagingDirectory, { recursive: true });
+    const collisionBackup = path.join(
+      collisionStagingDirectory,
+      `${createHash("sha256").update("reports/result.json").digest("hex")}.old`
+    );
+    fs.writeFileSync(collisionBackup, "must remain untouched");
+    expect(() => store.writeArtifact({
+      id: "duplicate-report",
+      runId: "run-artifacts",
+      path: "reports/result.json",
+      kind: "result",
+      contentType: "application/json",
+      content: "collision"
+    })).toThrow(/already registered as report/);
+    expect(fs.readFileSync(collisionBackup, "utf8")).toBe("must remain untouched");
+    fs.unlinkSync(collisionBackup);
     expect(() => store.writeArtifact({
       id: "report",
       runId: "run-artifacts",

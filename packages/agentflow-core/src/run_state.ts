@@ -539,10 +539,8 @@ export class AgentflowRunStateStore {
 
     this.database.exec("BEGIN IMMEDIATE");
     try {
-      let pathOwner = this.database.get<ArtifactRow>("SELECT * FROM artifacts WHERE run_id = ? AND path = ?", [runId, declaredPath]);
-      recoverArtifactStaging(target, temporaryPath, backupPath, pathOwner?.checksum ?? null);
       const existing = this.database.get<ArtifactRow>("SELECT * FROM artifacts WHERE run_id = ? AND id = ?", [runId, id]);
-      pathOwner = this.database.get<ArtifactRow>("SELECT * FROM artifacts WHERE run_id = ? AND path = ?", [runId, declaredPath]);
+      const pathOwner = this.database.get<ArtifactRow>("SELECT * FROM artifacts WHERE run_id = ? AND path = ?", [runId, declaredPath]);
       if (pathOwner !== null && pathOwner.id !== id) {
         throw new AgentflowRunStateError(
           `Artifact path ${declaredPath} is already registered as ${pathOwner.id} for run ${runId}.`,
@@ -555,6 +553,7 @@ export class AgentflowRunStateStore {
           "AGENTFLOW_ARTIFACT_COLLISION"
         );
       }
+      recoverArtifactStaging(target, temporaryPath, backupPath, pathOwner?.checksum ?? null);
 
       targetExistedBeforeWrite = fs.existsSync(target);
       if (targetExistedBeforeWrite && !fs.statSync(target).isFile()) {
@@ -876,21 +875,20 @@ export class AgentflowRunStateStore {
       if (!["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
       status = "missing";
     }
-    if (status !== row.status) {
-      const timestamp = currentTimestamp(this.now);
-      const original = row;
-      const inspected = { ...row, status, checked_at: timestamp, updated_at: timestamp };
-      try {
-        this.database.run(
-          `UPDATE artifacts SET status = ?, checked_at = ?, updated_at = ?
-          WHERE run_id = ? AND id = ? AND checksum IS ? AND status = ? AND updated_at = ?`,
-          [status, timestamp, timestamp, row.run_id, row.id, row.checksum, row.status, row.updated_at]
-        );
-        row = this.database.get<ArtifactRow>("SELECT * FROM artifacts WHERE run_id = ? AND id = ?", [row.run_id, row.id]) ?? original;
-      } catch (error) {
-        if (!isSqliteContentionError(error)) throw error;
-        row = inspected;
-      }
+    const timestamp = currentTimestamp(this.now);
+    const original = row;
+    const updatedAt = status === row.status ? row.updated_at : timestamp;
+    const inspected = { ...row, status, checked_at: timestamp, updated_at: updatedAt };
+    try {
+      this.database.run(
+        `UPDATE artifacts SET status = ?, checked_at = ?, updated_at = ?
+        WHERE run_id = ? AND id = ? AND checksum IS ? AND status = ? AND updated_at = ?`,
+        [status, timestamp, updatedAt, row.run_id, row.id, row.checksum, row.status, row.updated_at]
+      );
+      row = this.database.get<ArtifactRow>("SELECT * FROM artifacts WHERE run_id = ? AND id = ?", [row.run_id, row.id]) ?? original;
+    } catch (error) {
+      if (!isSqliteContentionError(error)) throw error;
+      row = inspected;
     }
     return hydrateArtifact(this.repoRoot, row);
   }
