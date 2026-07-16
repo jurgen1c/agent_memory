@@ -222,7 +222,8 @@ function uniqueSorted(values: readonly string[]): string[] {
   return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
 }
 
-function requiredText(value: string, label: string): string {
+function requiredText(value: unknown, label: string): string {
+  if (typeof value !== "string") throw new Error(`${label} must be a string.`);
   const normalized = value.trim();
   if (!normalized) throw new Error(`${label} must not be blank.`);
   return normalized;

@@ -127,6 +127,14 @@ describe("Agentflow Agent Memory adapter", () => {
       runId: "   ",
       boundary: { kind: "run_start" }
     })).rejects.toThrow("Run ID must not be blank.");
+    await expect(adapter.captureContext({
+      runId: null as unknown as string,
+      boundary: { kind: "run_start" }
+    })).rejects.toThrow("Run ID must be a string.");
+    await expect(adapter.captureContext({
+      runId: "run-invalid",
+      boundary: { kind: "step_boundary", stepId: 42 as unknown as string }
+    })).rejects.toThrow("Step ID must be a string.");
     expect(fs.existsSync(path.join(cwd, ".agent-memory/memory.sqlite"))).toBe(false);
     store.close();
   });
