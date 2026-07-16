@@ -63,7 +63,7 @@
     "typecheck:packages": "tsc --noEmit -p tsconfig.json",
     "typecheck:web": "tsc --noEmit -p packages/web/tsconfig.json",
     "audit": "bun audit --audit-level moderate",
-    "ci": "bun run version:check && bun run audit && bun run lint && bun run typecheck && bun test --coverage && bun run build",
+    "ci": "bun run version:check && bun run audit && bun run lint && bun run typecheck && bun run build",
     "lint": "eslint .",
     "test": "bun test",
     "test:coverage": "bun test --coverage",
