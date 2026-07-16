@@ -97,7 +97,7 @@ export interface UpsertAgentflowArtifactInput {
   metadata?: Record<string, AgentflowRunStateValue>;
 }
 
-export interface WriteAgentflowArtifactInput extends UpsertAgentflowArtifactInput {
+export interface WriteAgentflowArtifactInput extends Omit<UpsertAgentflowArtifactInput, "checksum" | "sizeBytes"> {
   content: string | Uint8Array;
   overwrite?: boolean;
 }
@@ -1262,9 +1262,12 @@ function removeArtifactStagingEntry(candidate: string): void {
 }
 
 function artifactChecksum(candidate: string): string {
+  if (isSymbolicLink(candidate)) {
+    throw new AgentflowRunStateError(`Artifact checksum path cannot be a symbolic link: ${candidate}`, "AGENTFLOW_ARTIFACT_PATH");
+  }
   const hash = createHash("sha256");
   const buffer = Buffer.allocUnsafe(64 * 1024);
-  const descriptor = fs.openSync(candidate, "r");
+  const descriptor = fs.openSync(candidate, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
     let bytesRead: number;
     do {

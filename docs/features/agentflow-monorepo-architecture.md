@@ -118,7 +118,7 @@ platform orchestration and recovery, while step, session, artifact, approval,
 and budget records model pipeline and collaboration state.
 
 Artifact content and other potentially large generated files live under
-`.agentflow/runs/<run-id>/`; the SQLite artifact rows record their repo-relative
+`.agentflow/runs/r-<sha256(run-id)>/`; the SQLite artifact rows record their repo-relative
 paths and metadata. The artifact registry maps declared paths to fixed-length,
 lowercase hexadecimal digests beneath each run's digested `artifacts/` subtree,
 rejects traversal and symlink escapes, records a
