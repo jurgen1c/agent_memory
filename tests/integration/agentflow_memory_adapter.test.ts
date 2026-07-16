@@ -109,13 +109,39 @@ describe("Agentflow Agent Memory adapter", () => {
     })).rejects.toThrow("Step ID must not be blank.");
     store.close();
   });
+
+  test("validates capture identifiers before reading memory context", async () => {
+    const cwd = temporaryMockApp();
+    const store = await openAgentflowRunState({ cwd, now: () => FIXED_TIME });
+    store.createRun({
+      id: "run-invalid",
+      workflow: { name: "memory-aware", version: 1, style: "pipeline", maturity: "stable" }
+    });
+    const adapter = createAgentflowAgentMemoryAdapter({ cwd, runState: store, now: () => FIXED_TIME });
+
+    await expect(adapter.captureContext({
+      runId: "run-invalid",
+      boundary: { kind: "step_boundary", stepId: "   " }
+    })).rejects.toThrow("Step ID must not be blank.");
+    await expect(adapter.captureContext({
+      runId: "   ",
+      boundary: { kind: "run_start" }
+    })).rejects.toThrow("Run ID must not be blank.");
+    expect(fs.existsSync(path.join(cwd, ".agent-memory/memory.sqlite"))).toBe(false);
+    store.close();
+  });
 });
 
 async function compiledMockApp(): Promise<string> {
+  const cwd = temporaryMockApp();
+  await compileMemory({ cwd });
+  return cwd;
+}
+
+function temporaryMockApp(): string {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "agentflow-memory-adapter-"));
   fs.cpSync(mockApp, cwd, { recursive: true });
   fs.mkdirSync(path.join(cwd, ".git"));
-  await compileMemory({ cwd });
   return cwd;
 }
 

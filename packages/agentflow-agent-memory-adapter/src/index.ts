@@ -85,14 +85,15 @@ export function createAgentflowAgentMemoryAdapter(
   return {
     buildContext: (request = {}) => buildAdapterContext(options.cwd, request),
     async captureContext(input): Promise<CapturedAgentflowMemoryContext> {
+      const runId = requiredText(input.runId, "Run ID");
+      const boundary = normalizedBoundary(input.boundary);
       const request = normalizedRequest(input.request ?? {});
       const context = await buildAdapterContext(options.cwd, request);
       const compileMetadata = await readCompileMetadata(context.databasePath);
-      const boundary = normalizedBoundary(input.boundary);
       const snapshot: AgentflowMemoryContextSnapshot = {
         schemaVersion: 1,
         capturedAt: now(),
-        runId: requiredText(input.runId, "Run ID"),
+        runId,
         boundary,
         request,
         memoryDatabasePath: context.databasePath,
