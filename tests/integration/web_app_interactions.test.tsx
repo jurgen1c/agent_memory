@@ -331,6 +331,8 @@ describe("Agent Memory web interactions", () => {
     fireEvent.click(view.getByRole("button", { name: "Read" }));
     expect(view.getByRole("dialog", { name: `Claim ${claim.title}` })).toBeTruthy();
     fireEvent.click(view.getByRole("button", { name: "Close reader" }));
+    fireEvent.click(within(drawer!).getByRole("button", { name: "Close" }));
+    expect(view.queryByRole("button", { name: "Details" })).toBeNull();
 
     fireEvent.click(view.getByRole("button", { name: "Review" }));
     fireEvent.click(view.getAllByRole("button", { name: "Approve" })[0]);

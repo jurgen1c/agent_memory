@@ -25,6 +25,13 @@ describe("retrieval commands", () => {
     const direct = await dispatch(["show", "auth.student_oauth.uid_is_tenant_scoped", "--depth=0"], { cwd });
     expect(direct.stdout).toContain("# Student OAuth UID is tenant scoped");
 
+    const routedCwd = copyFixture(mockApp);
+    const claimPath = path.join(routedCwd, "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md");
+    fs.writeFileSync(claimPath, fs.readFileSync(claimPath, "utf8").replace("routes: []", "routes:\n  - /oauth/callback"));
+    await dispatch(["compile"], { cwd: routedCwd });
+    const routed = await dispatch(["show", "auth.student_oauth.uid_is_tenant_scoped"], { cwd: routedCwd });
+    expect(routed.stdout).toContain("## Routes\n\n/oauth/callback");
+
     expect(dispatch(["query"], { cwd })).rejects.toThrow("query requires search text");
     expect(dispatch(["query", "oauth", "--wat"], { cwd })).rejects.toThrow("Unknown query option: --wat");
     expect(dispatch(["query", "oauth", "--limit=0"], { cwd })).rejects.toThrow("Expected a positive integer, got: 0");
