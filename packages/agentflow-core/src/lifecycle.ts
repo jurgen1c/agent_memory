@@ -1,6 +1,7 @@
 import type { AgentflowWorkflow } from "./workflow";
 import {
   AgentflowRunStateError,
+  type AgentflowRunMutationResult,
   type AgentflowRunRecord,
   type AgentflowRunStateStore
 } from "./run_state";
@@ -12,15 +13,10 @@ export interface CreateAgentflowLifecycleRunInput {
   workflow: AgentflowWorkflow;
 }
 
-export interface AgentflowLifecycleResult {
-  changed: boolean;
-  run: AgentflowRunRecord;
-}
-
 export function createAgentflowLifecycleRun(
   store: AgentflowRunStateStore,
   input: CreateAgentflowLifecycleRunInput
-): AgentflowLifecycleResult {
+): AgentflowRunMutationResult {
   const existing = store.getRun(input.id);
 
   if (existing !== null) {
@@ -65,7 +61,7 @@ export function transitionAgentflowLifecycleRun(
   store: AgentflowRunStateStore,
   runId: string,
   action: AgentflowLifecycleAction
-): AgentflowLifecycleResult {
+): AgentflowRunMutationResult {
   const current = store.getRun(runId);
   if (current === null) {
     throw new AgentflowRunStateError(`Agentflow run ${runId} was not found.`, "AGENTFLOW_RUN_NOT_FOUND");

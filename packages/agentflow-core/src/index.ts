@@ -71,7 +71,6 @@ export type {
 } from "./simulation";
 export type {
   AgentflowLifecycleAction,
-  AgentflowLifecycleResult,
   CreateAgentflowLifecycleRunInput
 } from "./lifecycle";
 export type {
@@ -79,8 +78,8 @@ export type {
   AgentflowArtifactRecord,
   AgentflowArtifactStatus,
   AgentflowEventRecord,
-  AgentflowLifecycleTransitionResult,
   AgentflowRunEventInput,
+  AgentflowRunMutationResult,
   AgentflowRunRecord,
   AgentflowRunStateValue,
   AgentflowRunStatus,

@@ -411,7 +411,7 @@ export class AgentflowRunStateStore {
     return this.requireRun(runId);
   }
 
-  transitionRunWithEvent(id: string, input: TransitionAgentflowRunWithEventInput): AgentflowLifecycleTransitionResult {
+  transitionRunWithEvent(id: string, input: TransitionAgentflowRunWithEventInput): AgentflowRunMutationResult {
     this.assertOpen();
     const runId = requiredString(id, "Run ID");
     assertOneOf(input.status, RUN_STATUSES, "run status");
@@ -997,7 +997,7 @@ export class AgentflowRunStateStore {
   }
 }
 
-export interface AgentflowLifecycleTransitionResult {
+export interface AgentflowRunMutationResult {
   changed: boolean;
   run: AgentflowRunRecord;
 }
