@@ -38,11 +38,11 @@ describe("built Node CLI", () => {
     const agentflowRun = run([builtAgentflowCli, "run"], repoRoot, env);
 
     expect(agentflowHelp.exitCode).toBe(0);
-    expect(agentflowHelp.stdout).toContain("No workflow execution commands are active yet.");
+    expect(agentflowHelp.stdout).toContain("Lifecycle state management is active");
     expect(agentflowVersion.exitCode).toBe(0);
     expect(agentflowVersion.stdout).toContain("agentflow ");
-    expect(agentflowRun.exitCode).toBe(7);
-    expect(agentflowRun.stderr).toContain("reserved but not active yet");
+    expect(agentflowRun.exitCode).toBe(1);
+    expect(agentflowRun.stderr).toContain("Usage: agentflow run <workflow> --id <run-id>");
 
     const nestedPackageRoot = installNestedAgentflowPackage();
     const nestedAgentflowVersion = run([path.join(nestedPackageRoot, "dist/agentflow.js"), "--version"], path.dirname(nestedPackageRoot), env);
