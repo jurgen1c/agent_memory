@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import {
   AgentflowRunStateError,
   openAgentflowRunState
@@ -190,6 +191,393 @@ describe("Agentflow run-state SQLite store", () => {
     store.close();
   });
 
+  test("lists ordered events and run-scoped artifacts after process restart", async () => {
+    const repoRoot = temporaryRepo();
+    const workflow = { name: "durable", version: 1, style: "pipeline", maturity: "stable" } as const;
+    let store = await openAgentflowRunState({ cwd: repoRoot, now: () => FIXED_TIME });
+    store.createRun({ id: "run-durable", workflow });
+    store.appendEvent({ id: "event-2", runId: "run-durable", sequence: 2, type: "step.completed", payload: { step: "build" } });
+    store.appendEvent({ id: "event-1", runId: "run-durable", sequence: 1, stepId: "build", type: "step.started" });
+    const written = store.writeArtifact({
+      id: "build-log",
+      runId: "run-durable",
+      stepId: "build",
+      path: "logs/build.txt",
+      kind: "log",
+      contentType: "text/plain",
+      content: "build passed\n",
+      metadata: { retained: true }
+    });
+    expect(written).toMatchObject({
+      producerStepId: "build",
+      declaredPath: "logs/build.txt",
+      storagePath: artifactStoragePath("run-durable", "logs/build.txt"),
+      status: "available",
+      sizeBytes: 13,
+      metadata: { retained: true }
+    });
+    store.close();
+
+    store = await openAgentflowRunState({ cwd: repoRoot, now: () => FIXED_TIME });
+    expect(store.listEvents("run-durable")).toEqual([
+      {
+        id: "event-1",
+        runId: "run-durable",
+        sequence: 1,
+        stepId: "build",
+        sessionId: null,
+        type: "step.started",
+        payload: null,
+        createdAt: FIXED_TIME
+      },
+      {
+        id: "event-2",
+        runId: "run-durable",
+        sequence: 2,
+        stepId: null,
+        sessionId: null,
+        type: "step.completed",
+        payload: { step: "build" },
+        createdAt: FIXED_TIME
+      }
+    ]);
+    expect(store.listArtifacts("run-durable")[0]).toMatchObject({
+      id: "build-log",
+      status: "available",
+      checksum: written.checksum,
+      writtenAt: FIXED_TIME
+    });
+    expect(fs.readFileSync(path.join(repoRoot, written.storagePath), "utf8")).toBe("build passed\n");
+    store.close();
+  });
+
+  test("reconciles missing and stale artifacts and protects explicit overwrites", async () => {
+    const repoRoot = temporaryRepo();
+    let now = FIXED_TIME;
+    const store = await openAgentflowRunState({ cwd: repoRoot, now: () => now });
+    store.createRun({
+      id: "run-artifacts",
+      workflow: { name: "artifacts", version: 1, style: "pipeline", maturity: "stable" }
+    });
+    store.upsertArtifact({
+      id: "report",
+      runId: "run-artifacts",
+      stepId: "report",
+      path: "reports/result.json",
+      kind: "result",
+      contentType: "application/json"
+    });
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("missing");
+
+    const first = store.writeArtifact({
+      id: "report",
+      runId: "run-artifacts",
+      stepId: "report",
+      path: "reports/result.json",
+      kind: "result",
+      contentType: "application/json",
+      content: "{\"result\":1}\n"
+    });
+    const target = path.join(repoRoot, first.storagePath);
+    expect(first.status).toBe("available");
+    store.upsertArtifact({
+      id: "report",
+      runId: "run-artifacts",
+      path: "reports/result.json",
+      kind: "result",
+      contentType: "application/json",
+      checksum: "sha256:untrusted-metadata-replacement",
+      sizeBytes: 999,
+      metadata: { reviewed: true }
+    });
+    expect(store.listArtifacts("run-artifacts")[0]).toMatchObject({
+      checksum: first.checksum,
+      sizeBytes: first.sizeBytes,
+      status: "available",
+      metadata: { reviewed: true }
+    });
+    expect(() => store.upsertArtifact({
+      id: "report",
+      runId: "run-artifacts",
+      path: "reports/moved.json",
+      kind: "result",
+      contentType: "application/json"
+    })).toThrow(/cannot be reassigned/);
+    expect(() => store.writeArtifact({
+      id: "report",
+      runId: "run-artifacts",
+      path: "reports/result.json",
+      kind: "result",
+      contentType: "application/json",
+      content: "{\"result\":2}\n"
+    })).toThrow(/overwrite: true/);
+    expect(fs.readFileSync(target, "utf8")).toBe("{\"result\":1}\n");
+
+    now = "2026-07-15T12:05:00.000Z";
+    fs.writeFileSync(target, "externally changed\n");
+    expect(store.listArtifacts("run-artifacts")[0]).toMatchObject({ status: "stale", checkedAt: now });
+
+    now = "2026-07-15T12:10:00.000Z";
+    const overwritten = store.writeArtifact({
+      id: "report",
+      runId: "run-artifacts",
+      stepId: "report",
+      path: "reports/result.json",
+      kind: "result",
+      contentType: "application/json",
+      content: "{\"result\":2}\n",
+      overwrite: true
+    });
+    expect(overwritten).toMatchObject({
+      status: "overwritten",
+      previousChecksum: first.checksum,
+      writtenAt: now
+    });
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("overwritten");
+
+    now = "2026-07-15T12:15:00.000Z";
+    fs.unlinkSync(target);
+    expect(store.listArtifacts("run-artifacts")[0]).toMatchObject({ status: "missing", checkedAt: now });
+    expect(() => store.writeArtifact({
+      id: "report",
+      runId: "run-artifacts",
+      path: "reports/result.json",
+      kind: "result",
+      contentType: "application/json",
+      content: "{\"result\":3}\n"
+    })).toThrow(/overwrite: true/);
+    expect(fs.existsSync(target)).toBe(false);
+    const replacedMissing = store.writeArtifact({
+      id: "report",
+      runId: "run-artifacts",
+      path: "reports/result.json",
+      kind: "result",
+      contentType: "application/json",
+      content: "{\"result\":3}\n",
+      overwrite: true
+    });
+    expect(replacedMissing).toMatchObject({ status: "overwritten", previousChecksum: overwritten.checksum });
+    fs.unlinkSync(target);
+    fs.symlinkSync(path.join(os.tmpdir(), "agentflow-replaced-artifact"), target);
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("stale");
+    store.close();
+  });
+
+  test("keeps artifact writes inside the run directory and rejects symlink escapes", async () => {
+    const repoRoot = temporaryRepo();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "agentflow-artifacts-outside-"));
+    const store = await openAgentflowRunState({ cwd: repoRoot, now: () => FIXED_TIME });
+    store.createRun({
+      id: "run-safe",
+      workflow: { name: "safe", version: 1, style: "pipeline", maturity: "stable" }
+    });
+
+    expect(() => store.writeArtifact({
+      id: "escape",
+      runId: "run-safe",
+      path: "../escape.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "no"
+    })).toThrow(/cannot escape/);
+    const artifactRoot = path.join(repoRoot, ".agentflow/runs", artifactRunDirectory("run-safe"), "artifacts");
+    fs.mkdirSync(artifactRoot, { recursive: true });
+    fs.symlinkSync(path.join(outside, "escape.txt"), path.join(artifactRoot, artifactFileName("linked/escape.txt")));
+    expect(() => store.writeArtifact({
+      id: "linked",
+      runId: "run-safe",
+      path: "linked/escape.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "no"
+    })).toThrow(/symbolic link/);
+    expect(fs.existsSync(path.join(outside, "escape.txt"))).toBe(false);
+
+    store.createRun({
+      id: "team/run\\safe",
+      workflow: { name: "legacy-id", version: 1, style: "pipeline", maturity: "stable" }
+    });
+    const encoded = store.writeArtifact({
+      id: "legacy-id",
+      runId: "team/run\\safe",
+      path: "result.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "safe"
+    });
+    expect(encoded.storagePath).toBe(artifactStoragePath("team/run\\safe", "result.txt"));
+    expect(store.listArtifacts("team/run\\safe")[0]?.status).toBe("available");
+
+    for (const runId of ["Run", "run"]) {
+      store.createRun({
+        id: runId,
+        workflow: { name: "case-safe-id", version: 1, style: "pipeline", maturity: "stable" }
+      });
+    }
+    const upperCaseRun = store.writeArtifact({
+      id: "case",
+      runId: "Run",
+      path: "result.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "upper"
+    });
+    const lowerCaseRun = store.writeArtifact({
+      id: "case",
+      runId: "run",
+      path: "result.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "lower"
+    });
+    expect(upperCaseRun.storagePath.toLowerCase()).not.toBe(lowerCaseRun.storagePath.toLowerCase());
+    expect(fs.readFileSync(path.join(repoRoot, upperCaseRun.storagePath), "utf8")).toBe("upper");
+    expect(fs.readFileSync(path.join(repoRoot, lowerCaseRun.storagePath), "utf8")).toBe("lower");
+    expect(() => store.writeArtifact({
+      id: "trailing",
+      runId: "run-safe",
+      path: "foo/",
+      kind: "output",
+      contentType: "text/plain",
+      content: "no"
+    })).toThrow(/cannot end with a separator/);
+    const longRunId = "long".repeat(100);
+    store.createRun({
+      id: longRunId,
+      workflow: { name: "long-id", version: 1, style: "pipeline", maturity: "stable" }
+    });
+    expect(store.writeArtifact({
+      id: "long",
+      runId: longRunId,
+      path: "result.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "bounded"
+    }).status).toBe("available");
+
+    const suffix = store.writeArtifact({
+      id: "suffix",
+      runId: "run-safe",
+      path: "foo.agentflow-new",
+      kind: "output",
+      contentType: "text/plain",
+      content: "keep"
+    });
+    store.writeArtifact({
+      id: "plain",
+      runId: "run-safe",
+      path: "foo",
+      kind: "output",
+      contentType: "text/plain",
+      content: "plain"
+    });
+    expect(fs.readFileSync(path.join(repoRoot, suffix.storagePath), "utf8")).toBe("keep");
+    expect(store.listArtifacts("run-safe").find((artifact) => artifact.id === "suffix")?.status).toBe("available");
+    store.close();
+  });
+
+  test("recovers interrupted publications and finalizes matching orphan content", async () => {
+    const repoRoot = temporaryRepo();
+    const store = await openAgentflowRunState({ cwd: repoRoot, now: () => FIXED_TIME });
+    store.createRun({
+      id: "run-recovery",
+      workflow: { name: "recovery", version: 1, style: "pipeline", maturity: "stable" }
+    });
+    const original = store.writeArtifact({
+      id: "report",
+      runId: "run-recovery",
+      path: "report.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "original"
+    });
+    const target = path.join(repoRoot, original.storagePath);
+    const stagingDirectory = path.join(repoRoot, ".agentflow/runs", artifactRunDirectory("run-recovery"), ".staging");
+    fs.mkdirSync(stagingDirectory, { recursive: true });
+    const backup = path.join(stagingDirectory, `${createHash("sha256").update("report.txt").digest("hex")}.old`);
+    fs.renameSync(target, backup);
+    fs.writeFileSync(target, "interrupted overwrite");
+
+    const recovered = store.writeArtifact({
+      id: "report",
+      runId: "run-recovery",
+      path: "report.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "replacement",
+      overwrite: true
+    });
+    expect(recovered).toMatchObject({ status: "overwritten", previousChecksum: original.checksum });
+    expect(fs.readFileSync(target, "utf8")).toBe("replacement");
+    expect(fs.existsSync(backup)).toBe(false);
+
+    const orphanTarget = path.join(repoRoot, ".agentflow/runs", artifactRunDirectory("run-recovery"), "artifacts/orphan.txt");
+    fs.writeFileSync(orphanTarget, "published before commit");
+    const finalized = store.writeArtifact({
+      id: "orphan",
+      runId: "run-recovery",
+      path: "orphan.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "published before commit"
+    });
+    expect(finalized.status).toBe("available");
+    expect(store.listArtifacts("run-recovery").map((artifact) => artifact.id)).toEqual(["orphan", "report"]);
+    store.close();
+  });
+
+  test("serializes concurrent no-overwrite publication across processes", async () => {
+    const repoRoot = temporaryRepo();
+    const store = await openAgentflowRunState({ cwd: repoRoot, now: () => FIXED_TIME });
+    store.createRun({
+      id: "run-concurrent",
+      workflow: { name: "concurrent", version: 1, style: "pipeline", maturity: "stable" }
+    });
+    store.createRun({
+      id: "run-directories",
+      workflow: { name: "concurrent", version: 1, style: "pipeline", maturity: "stable" }
+    });
+    store.close();
+
+    const modulePath = path.resolve("packages/agentflow-core/src/run_state.ts");
+    const script = `
+      import { openAgentflowRunState } from ${JSON.stringify(modulePath)};
+      const store = await openAgentflowRunState({ cwd: process.env.AF_ROOT });
+      try {
+        store.writeArtifact({
+          id: process.env.AF_ID,
+          runId: process.env.AF_RUN,
+          path: process.env.AF_PATH,
+          kind: "output",
+          contentType: "text/plain",
+          content: process.env.AF_CONTENT
+        });
+      } catch {
+        process.exitCode = 2;
+      } finally {
+        store.close();
+      }
+    `;
+    const children = [
+      Bun.spawn({ cmd: [process.execPath, "-e", script], env: { ...process.env, AF_ROOT: repoRoot, AF_RUN: "run-concurrent", AF_PATH: "shared.txt", AF_ID: "alpha", AF_CONTENT: "alpha" } }),
+      Bun.spawn({ cmd: [process.execPath, "-e", script], env: { ...process.env, AF_ROOT: repoRoot, AF_RUN: "run-concurrent", AF_PATH: "shared.txt", AF_ID: "beta", AF_CONTENT: "beta" } })
+    ];
+    const exitCodes = await Promise.all(children.map((child) => child.exited));
+    expect(exitCodes.sort()).toEqual([0, 2]);
+
+    const reopened = await openAgentflowRunState({ cwd: repoRoot });
+    const artifacts = reopened.listArtifacts("run-concurrent");
+    expect(artifacts).toHaveLength(1);
+    expect(fs.readFileSync(path.join(repoRoot, artifacts[0]!.storagePath), "utf8")).toBe(artifacts[0]!.id);
+    reopened.close();
+
+    const directoryChildren = [
+      Bun.spawn({ cmd: [process.execPath, "-e", script], env: { ...process.env, AF_ROOT: repoRoot, AF_RUN: "run-directories", AF_PATH: "alpha.txt", AF_ID: "alpha", AF_CONTENT: "alpha" } }),
+      Bun.spawn({ cmd: [process.execPath, "-e", script], env: { ...process.env, AF_ROOT: repoRoot, AF_RUN: "run-directories", AF_PATH: "beta.txt", AF_ID: "beta", AF_CONTENT: "beta" } })
+    ];
+    expect(await Promise.all(directoryChildren.map((child) => child.exited))).toEqual([0, 0]);
+  });
+
   test("excludes terminal runs from resume lookup and prevents terminal reopening", async () => {
     const repoRoot = temporaryRepo();
     const store = await openAgentflowRunState({ cwd: repoRoot, now: () => FIXED_TIME });
@@ -288,6 +676,55 @@ describe("Agentflow run-state SQLite store", () => {
     inspected.close();
   });
 
+  test("migrates version-one artifact metadata without discarding run state", async () => {
+    const repoRoot = temporaryRepo();
+    let store = await openAgentflowRunState({ cwd: repoRoot, now: () => FIXED_TIME });
+    store.createRun({
+      id: "run-version-one",
+      workflow: { name: "migrate", version: 1, style: "pipeline", maturity: "stable" }
+    });
+    store.upsertArtifact({
+      id: "legacy",
+      runId: "run-version-one",
+      path: "legacy.txt",
+      kind: "output",
+      contentType: "text/plain"
+    });
+    store.close();
+
+    const legacy = new Database(path.join(repoRoot, ".agentflow/agentflow.sqlite"));
+    for (const column of ["checked_at", "written_at", "previous_checksum", "status"]) {
+      legacy.exec(`ALTER TABLE artifacts DROP COLUMN ${column}`);
+    }
+    legacy.query("UPDATE run_state_metadata SET value = '1' WHERE key = 'schema_version'").run();
+    legacy.close();
+
+    const modulePath = path.resolve("packages/agentflow-core/src/run_state.ts");
+    const script = `
+      import { openAgentflowRunState } from ${JSON.stringify(modulePath)};
+      const store = await openAgentflowRunState({ cwd: process.env.AF_ROOT, busyTimeoutMs: 5000 });
+      store.close();
+    `;
+    const children = [
+      Bun.spawn({ cmd: [process.execPath, "-e", script], env: { ...process.env, AF_ROOT: repoRoot } }),
+      Bun.spawn({ cmd: [process.execPath, "-e", script], env: { ...process.env, AF_ROOT: repoRoot } })
+    ];
+    expect(await Promise.all(children.map((child) => child.exited))).toEqual([0, 0]);
+
+    store = await openAgentflowRunState({ cwd: repoRoot, now: () => FIXED_TIME });
+    expect(store.getRun("run-version-one")?.workflowName).toBe("migrate");
+    expect(store.listArtifacts("run-version-one")[0]).toMatchObject({
+      id: "legacy",
+      status: "missing",
+      previousChecksum: null,
+      writtenAt: null
+    });
+    const migrated = new Database(store.databasePath, { readonly: true });
+    expect(migrated.query("SELECT value FROM run_state_metadata WHERE key = 'schema_version'").get()).toEqual({ value: "2" });
+    migrated.close();
+    store.close();
+  });
+
   test("rejects invalid SQLite options before creating generated state", async () => {
     const repoRoot = temporaryRepo();
 
@@ -314,4 +751,16 @@ function temporaryRepo(): string {
   fs.mkdirSync(path.join(repoRoot, ".git"));
   fs.mkdirSync(path.join(repoRoot, "nested"));
   return repoRoot;
+}
+
+function artifactRunDirectory(runId: string): string {
+  return `r-${createHash("sha256").update(runId).digest("hex")}`;
+}
+
+function artifactFileName(declaredPath: string): string {
+  return `a-${createHash("sha256").update(declaredPath).digest("hex")}`;
+}
+
+function artifactStoragePath(runId: string, declaredPath: string): string {
+  return `.agentflow/runs/${artifactRunDirectory(runId)}/artifacts/${artifactFileName(declaredPath)}`;
 }
