@@ -1175,7 +1175,12 @@ function artifactFileName(declaredPath: string): string {
 
 function artifactStagingPaths(repoRoot: string, runId: string, declaredPath: string): { temporaryPath: string; backupPath: string } {
   const stagingDirectory = path.join(repoRoot, ".agentflow", "runs", artifactRunDirectory(runId), ".staging");
-  assertInsideRepository(repoRoot, stagingDirectory);
+  assertInsideRepository(
+    repoRoot,
+    stagingDirectory,
+    `Artifact staging path must stay inside the repository: ${stagingDirectory}`,
+    "AGENTFLOW_ARTIFACT_PATH"
+  );
   verifyArtifactPath(repoRoot, stagingDirectory, true);
   const key = createHash("sha256").update(declaredPath).digest("hex");
   return {
