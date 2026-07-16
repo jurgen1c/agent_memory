@@ -23,7 +23,7 @@ for (const [name, value] of Object.entries(exposedGlobals)) {
   Object.defineProperty(globalThis, name, { configurable: true, value, writable: true });
 }
 
-const { cleanup, fireEvent, render, waitFor } = await import("@testing-library/react");
+const { cleanup, fireEvent, render, waitFor, within } = await import("@testing-library/react");
 const { default: App } = await import("../../packages/web/src/App");
 const originalFetch = globalThis.fetch;
 
@@ -109,6 +109,82 @@ const memory = {
   ]
 };
 
+const recipe = {
+  id: "recipe.auth.modify_oauth",
+  title: "Modify OAuth",
+  system: "auth",
+  status: "current",
+  sourcePath: "recipes/auth/modify_oauth.yaml",
+  requiredClaims: ["auth.oauth"],
+  intentTriggers: ["change oauth"],
+  steps: ["Inspect the current contract"],
+  verification: ["bun test"]
+};
+
+const plan = {
+  id: "plan.auth.oauth_review",
+  title: "OAuth review",
+  system: "auth",
+  status: "current",
+  sourcePath: "plans/auth/oauth_review.yaml",
+  intentTriggers: ["review oauth"],
+  stages: [
+    {
+      id: "inspect",
+      title: "Inspect current behavior",
+      goal: "Understand the tenant boundary.",
+      sequence: 1,
+      claimRefs: ["auth.oauth"],
+      recipeRefs: [recipe.id],
+      profileTraits: ["profile.implementer"],
+      sourceFiles: ["src/auth.ts"],
+      verification: ["bun test"],
+      doneWhen: ["The boundary is documented."],
+      memoryUpdates: []
+    }
+  ]
+};
+
+const profile = {
+  id: "profile.implementer",
+  title: "Keep scope tight",
+  status: "current",
+  category: "scope_control",
+  priority: "high",
+  sourcePath: "profiles/implementer.yaml",
+  appliesWhen: { systems: ["auth"] },
+  snippet: "Keep changes inside the selected system.",
+  conflictsWith: ["profile.explorer"]
+};
+
+const planRun = {
+  id: "run.oauth",
+  templateId: plan.id,
+  task: "Review OAuth behavior",
+  status: "active",
+  currentStage: "inspect",
+  createdAt: "2026-07-16T00:00:00.000Z",
+  updatedAt: "2026-07-16T01:00:00.000Z",
+  path: ".agent-memory/plans/oauth.yaml",
+  warnings: [],
+  stages: [
+    {
+      id: "inspect",
+      title: "Inspect current behavior",
+      goal: "Understand the tenant boundary.",
+      status: "active",
+      claimRefs: ["auth.oauth"],
+      recipeRefs: [recipe.id],
+      profileTraits: [profile.id],
+      sourceFiles: ["src/auth.ts"],
+      verification: ["bun test"],
+      doneWhen: ["The boundary is documented."],
+      memoryUpdates: [],
+      evidence: []
+    }
+  ]
+};
+
 describe("Agent Memory web interactions", () => {
   afterEach(() => {
     cleanup();
@@ -137,19 +213,27 @@ describe("Agent Memory web interactions", () => {
       }
 
       if (path === "/api/workflows/recipes") {
-        return Response.json({ recipes: [] });
+        return Response.json({ recipes: [recipe] });
       }
 
       if (path === "/api/workflows/plans") {
-        return Response.json({ plans: [] });
+        return Response.json({ plans: [plan] });
       }
 
       if (path === "/api/workflows/profiles") {
-        return Response.json({ profiles: [] });
+        return Response.json({ profiles: [profile] });
       }
 
       if (path === "/api/workflows/plan-runs") {
-        return Response.json({ runs: [], warnings: [] });
+        return Response.json({ runs: [planRun], warnings: [] });
+      }
+
+      if (path.startsWith("/api/workflows/recipes/") || path.startsWith("/api/workflows/plans/") || path.startsWith("/api/workflows/profiles/")) {
+        return Response.json({ artifact: {}, validation: { valid: true, errors: [] } });
+      }
+
+      if (path === "/api/workflows/plan-runs/run.oauth/stages/inspect") {
+        return Response.json(planRun);
       }
 
       if (path === "/api/claims/auth.oauth/review" || path === "/api/sync") {
@@ -185,10 +269,42 @@ describe("Agent Memory web interactions", () => {
 
     fireEvent.click(view.getByRole("button", { name: "Workflows" }));
     await waitFor(() => expect(view.getByText("Workflows loaded.")).toBeTruthy());
-    expect(view.getByText("No local plan runs.")).toBeTruthy();
-    expect(view.getByText("No recipes.")).toBeTruthy();
-    expect(view.getByText("No plan templates.")).toBeTruthy();
-    expect(view.getByText("No profile traits.")).toBeTruthy();
+    expect(view.getByRole("heading", { name: recipe.title })).toBeTruthy();
+    expect(view.getByRole("heading", { name: plan.title })).toBeTruthy();
+    expect(view.getByRole("heading", { name: profile.title })).toBeTruthy();
+
+    const runCard = view.getByRole("heading", { name: planRun.task }).closest("article");
+    expect(runCard).toBeTruthy();
+    fireEvent.change(within(runCard!).getByPlaceholderText("Evidence"), { target: { value: "Reviewed the current contract." } });
+    fireEvent.click(within(runCard!).getByRole("button", { name: "Complete" }));
+    await waitFor(() =>
+      expect(requests).toContainEqual({ method: "PATCH", path: "/api/workflows/plan-runs/run.oauth/stages/inspect" })
+    );
+
+    const recipeCard = view.getByRole("heading", { name: recipe.title }).closest("article");
+    expect(recipeCard).toBeTruthy();
+    fireEvent.click(within(recipeCard!).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(recipeCard!).getByLabelText("Title"), { target: { value: "Modify tenant OAuth" } });
+    fireEvent.change(within(recipeCard!).getByLabelText("Intent Triggers"), { target: { value: "change oauth\nrepair oauth" } });
+    fireEvent.click(within(recipeCard!).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requests).toContainEqual({ method: "PATCH", path: `/api/workflows/recipes/${recipe.id}` }));
+
+    const planCard = view.getByRole("heading", { name: plan.title }).closest("article");
+    expect(planCard).toBeTruthy();
+    fireEvent.click(within(planCard!).getByRole("button", { name: "Edit" }));
+    const planFields = within(planCard!).getAllByRole("textbox");
+    fireEvent.change(planFields[2], { target: { value: "Inspect tenant OAuth" } });
+    fireEvent.change(planFields[3], { target: { value: "Verify tenant isolation before editing." } });
+    fireEvent.click(within(planCard!).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requests).toContainEqual({ method: "PATCH", path: `/api/workflows/plans/${plan.id}` }));
+
+    const profileCard = view.getByRole("heading", { name: profile.title }).closest("article");
+    expect(profileCard).toBeTruthy();
+    fireEvent.click(within(profileCard!).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(profileCard!).getByLabelText("Snippet"), { target: { value: "Keep OAuth changes tenant scoped." } });
+    fireEvent.change(within(profileCard!).getByLabelText("Conflicts With"), { target: { value: "profile.explorer\nprofile.broad_scope" } });
+    fireEvent.click(within(profileCard!).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requests).toContainEqual({ method: "PATCH", path: `/api/workflows/profiles/${profile.id}` }));
 
     fireEvent.click(view.getByRole("button", { name: "Sync" }));
     await waitFor(() => expect(requests).toContainEqual({ method: "POST", path: "/api/sync" }));
