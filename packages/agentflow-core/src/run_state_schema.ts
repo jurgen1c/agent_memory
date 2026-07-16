@@ -27,8 +27,7 @@ export class AgentflowRunStateSchemaVersionError extends Error {}
 export function initializeAgentflowRunStateSchema(database: SchemaDatabase, schemaVersion: number): void {
   const existingVersion = existingSchemaVersion(database);
   if (existingVersion === null) {
-    verifyEmptyDatabase(database, schemaVersion);
-    createSchema(database, schemaVersion);
+    createSchema(database, schemaVersion, true);
   } else if (existingVersion === "1" && schemaVersion === 2) {
     migrateVersionOneToTwo(database);
   }
@@ -60,9 +59,14 @@ function schemaNeedsRepair(database: SchemaDatabase): boolean {
   return row?.count !== REQUIRED_SCHEMA_OBJECTS.length;
 }
 
-function createSchema(database: SchemaDatabase, schemaVersion: number): void {
+function createSchema(database: SchemaDatabase, schemaVersion: number, requireEmpty = false): void {
   database.exec("BEGIN IMMEDIATE");
   try {
+    if (requireEmpty) {
+      const lockedVersion = existingSchemaVersion(database);
+      if (lockedVersion === null) verifyEmptyDatabase(database, schemaVersion);
+      else if (lockedVersion !== String(schemaVersion)) throw schemaVersionError(lockedVersion, schemaVersion);
+    }
     database.exec(`
 CREATE TABLE IF NOT EXISTS run_state_metadata (
   key TEXT PRIMARY KEY,

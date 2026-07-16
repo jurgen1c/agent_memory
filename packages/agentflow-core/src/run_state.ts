@@ -485,7 +485,7 @@ export class AgentflowRunStateStore {
         run_id, id, step_id, path, kind, content_type, checksum, size_bytes, status, metadata_json, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'missing', ?, ?, ?)
       ON CONFLICT(run_id, id) DO UPDATE SET
-        step_id = excluded.step_id,
+        step_id = COALESCE(excluded.step_id, artifacts.step_id),
         kind = excluded.kind,
         content_type = excluded.content_type,
         checksum = CASE
@@ -561,7 +561,8 @@ export class AgentflowRunStateStore {
         throw new AgentflowRunStateError(`Artifact target is not a regular file: ${target}`, "AGENTFLOW_ARTIFACT_PATH");
       }
       const targetChecksum = targetExistedBeforeWrite ? artifactChecksum(target) : null;
-      const retryingPublishedContent = targetChecksum === checksum && (existing === null || existing.checksum === checksum);
+      const retryingPublishedContent = targetChecksum === checksum
+        && (existing === null || existing.checksum === checksum || existing.written_at === null);
       const replacingPublishedContent = existing !== null && existing.written_at !== null && existing.checksum !== checksum;
       if (replacingPublishedContent && input.overwrite !== true) {
         throw new AgentflowRunStateError(
@@ -587,7 +588,7 @@ export class AgentflowRunStateStore {
         metadata_json, created_at, updated_at, written_at, checked_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(run_id, id) DO UPDATE SET
-        step_id = excluded.step_id,
+        step_id = COALESCE(excluded.step_id, artifacts.step_id),
         kind = excluded.kind,
         content_type = excluded.content_type,
         checksum = excluded.checksum,
@@ -615,7 +616,7 @@ export class AgentflowRunStateStore {
         metadataJson,
         timestamp,
         timestamp,
-        timestamp,
+        retryingPublishedContent ? existing?.written_at ?? timestamp : timestamp,
         timestamp
       ]);
       this.database.exec("COMMIT");
@@ -623,7 +624,7 @@ export class AgentflowRunStateStore {
     } catch (error) {
       rollback(this.database);
       if (!committed && fileMutationStarted) restoreArtifactWrite(target, temporaryPath, backupPath, targetExistedBeforeWrite);
-      else removeArtifactStagingFile(temporaryPath);
+      else removeArtifactStagingEntry(temporaryPath);
       if (error instanceof AgentflowRunStateError) throw error;
       throw new AgentflowRunStateError(
         `Could not write artifact ${declaredPath} for run ${runId}: ${errorMessage(error)}`,
@@ -632,7 +633,7 @@ export class AgentflowRunStateStore {
       );
     }
 
-    removeArtifactStagingFile(backupPath);
+    removeArtifactStagingEntry(backupPath);
 
     return this.requireArtifact(runId, id);
   }
@@ -868,11 +869,11 @@ export class AgentflowRunStateStore {
           const actualChecksum = `sha256:${createHash("sha256").update(fs.readFileSync(target)).digest("hex")}`;
           status = actualChecksum !== row.checksum
             ? "stale"
-            : row.status === "overwritten" ? "overwritten" : "available";
+            : row.previous_checksum !== null ? "overwritten" : "available";
         }
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (!["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
       status = "missing";
     }
     if (status !== row.status) {
@@ -1219,25 +1220,30 @@ function recoverArtifactStaging(target: string, temporaryPath: string, backupPat
     throw new AgentflowRunStateError(`Artifact recovery backup cannot be a symbolic link: ${backupPath}`, "AGENTFLOW_ARTIFACT_PATH");
   }
   if (fs.existsSync(backupPath)) {
+    if (!fs.statSync(backupPath).isFile()) {
+      removeArtifactStagingEntry(backupPath);
+      removeArtifactStagingEntry(temporaryPath);
+      return;
+    }
     const targetMatchesRegistry = fs.existsSync(target)
       && fs.statSync(target).isFile()
       && registeredChecksum !== null
       && artifactChecksum(target) === registeredChecksum;
     if (targetMatchesRegistry) {
-      removeArtifactStagingFile(backupPath);
+      removeArtifactStagingEntry(backupPath);
     } else if (registeredChecksum === null || artifactChecksum(backupPath) === registeredChecksum) {
       if (fs.existsSync(target)) fs.unlinkSync(target);
       fs.renameSync(backupPath, target);
     } else {
-      removeArtifactStagingFile(backupPath);
+      removeArtifactStagingEntry(backupPath);
     }
   }
-  removeArtifactStagingFile(temporaryPath);
+  removeArtifactStagingEntry(temporaryPath);
 }
 
-function removeArtifactStagingFile(candidate: string): void {
+function removeArtifactStagingEntry(candidate: string): void {
   try {
-    if (fs.existsSync(candidate)) fs.unlinkSync(candidate);
+    fs.rmSync(candidate, { force: true, recursive: true });
   } catch {
     // Staging cleanup is best-effort; the next registry write retries recovery.
   }

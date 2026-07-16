@@ -285,6 +285,19 @@ describe("Agentflow run-state SQLite store", () => {
     });
     const target = path.join(repoRoot, first.storagePath);
     expect(first.status).toBe("available");
+    now = "2026-07-15T12:01:00.000Z";
+    const identicalRetry = store.writeArtifact({
+      id: "report",
+      runId: "run-artifacts",
+      path: "reports/result.json",
+      kind: "result",
+      contentType: "application/json",
+      content: "{\"result\":1}\n"
+    });
+    expect(identicalRetry).toMatchObject({
+      producerStepId: "report",
+      writtenAt: first.writtenAt
+    });
     const originalReadFileSync = fs.readFileSync;
     const readFileSyncDescriptor = Object.getOwnPropertyDescriptor(fs, "readFileSync")!;
     Object.defineProperty(fs, "readFileSync", {
@@ -301,6 +314,14 @@ describe("Agentflow run-state SQLite store", () => {
     } finally {
       Object.defineProperty(fs, "readFileSync", readFileSyncDescriptor);
     }
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("available");
+    const artifactDirectory = path.dirname(target);
+    fs.rmSync(artifactDirectory, { recursive: true });
+    fs.writeFileSync(artifactDirectory, "corrupted artifact directory");
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("missing");
+    fs.unlinkSync(artifactDirectory);
+    fs.mkdirSync(artifactDirectory);
+    fs.writeFileSync(target, "{\"result\":1}\n");
     expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("available");
     fs.writeFileSync(target, "short");
     Object.defineProperty(fs, "readFileSync", {
@@ -328,6 +349,7 @@ describe("Agentflow run-state SQLite store", () => {
       metadata: { reviewed: true }
     });
     expect(store.listArtifacts("run-artifacts")[0]).toMatchObject({
+      producerStepId: "report",
       checksum: first.checksum,
       sizeBytes: first.sizeBytes,
       status: "available",
@@ -391,6 +413,9 @@ describe("Agentflow run-state SQLite store", () => {
     now = "2026-07-15T12:15:00.000Z";
     fs.unlinkSync(target);
     expect(store.listArtifacts("run-artifacts")[0]).toMatchObject({ status: "missing", checkedAt: now });
+    fs.writeFileSync(target, "{\"result\":2}\n");
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("overwritten");
+    fs.unlinkSync(target);
     expect(() => store.writeArtifact({
       id: "report",
       runId: "run-artifacts",
@@ -606,6 +631,38 @@ describe("Agentflow run-state SQLite store", () => {
       content: "replacement"
     });
 
+    fs.mkdirSync(backup);
+    fs.writeFileSync(path.join(backup, "corrupted-entry"), "invalid");
+    const recoveredFromDirectory = store.writeArtifact({
+      id: "report",
+      runId: "run-recovery",
+      path: "report.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "replacement"
+    });
+    expect(recoveredFromDirectory.status).toBe("overwritten");
+    expect(fs.existsSync(backup)).toBe(false);
+
+    store.upsertArtifact({
+      id: "pre-registered",
+      runId: "run-recovery",
+      path: "pre-registered.txt",
+      kind: "output",
+      contentType: "text/plain"
+    });
+    const preRegisteredTarget = path.join(repoRoot, artifactStoragePath("run-recovery", "pre-registered.txt"));
+    fs.writeFileSync(preRegisteredTarget, "published before commit");
+    const finalizedPreRegistered = store.writeArtifact({
+      id: "pre-registered",
+      runId: "run-recovery",
+      path: "pre-registered.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "published before commit"
+    });
+    expect(finalizedPreRegistered).toMatchObject({ status: "available", previousChecksum: null, writtenAt: FIXED_TIME });
+
     const orphanTarget = path.join(repoRoot, artifactStoragePath("run-recovery", "orphan.txt"));
     fs.writeFileSync(orphanTarget, "published before commit");
     const finalized = store.writeArtifact({
@@ -617,8 +674,22 @@ describe("Agentflow run-state SQLite store", () => {
       content: "published before commit"
     });
     expect(finalized.status).toBe("available");
-    expect(store.listArtifacts("run-recovery").map((artifact) => artifact.id)).toEqual(["orphan", "report"]);
+    expect(store.listArtifacts("run-recovery").map((artifact) => artifact.id)).toEqual(["orphan", "pre-registered", "report"]);
     store.close();
+  });
+
+  test("initializes the run-state schema safely across concurrent first opens", async () => {
+    const repoRoot = temporaryRepo();
+    const modulePath = path.resolve("packages/agentflow-core/src/run_state.ts");
+    const script = `
+      import { openAgentflowRunState } from ${JSON.stringify(modulePath)};
+      const store = await openAgentflowRunState({ cwd: process.env.AF_ROOT });
+      store.close();
+    `;
+    const children = Array.from({ length: 4 }, () =>
+      Bun.spawn({ cmd: [process.execPath, "-e", script], env: { ...process.env, AF_ROOT: repoRoot } })
+    );
+    expect(await Promise.all(children.map((child) => child.exited))).toEqual([0, 0, 0, 0]);
   });
 
   test("serializes concurrent no-overwrite publication across processes", async () => {
