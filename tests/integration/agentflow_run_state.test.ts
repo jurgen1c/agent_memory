@@ -302,6 +302,21 @@ describe("Agentflow run-state SQLite store", () => {
       Object.defineProperty(fs, "readFileSync", readFileSyncDescriptor);
     }
     expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("available");
+    fs.writeFileSync(target, "short");
+    Object.defineProperty(fs, "readFileSync", {
+      ...readFileSyncDescriptor,
+      value: (...args: unknown[]) => {
+        if (path.resolve(String(args[0])) === target) throw new Error("size mismatch should not be hashed");
+        return Reflect.apply(originalReadFileSync, fs, args);
+      }
+    });
+    try {
+      expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("stale");
+    } finally {
+      Object.defineProperty(fs, "readFileSync", readFileSyncDescriptor);
+    }
+    fs.writeFileSync(target, "{\"result\":1}\n");
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("available");
     store.upsertArtifact({
       id: "report",
       runId: "run-artifacts",

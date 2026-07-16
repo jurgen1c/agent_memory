@@ -860,13 +860,16 @@ export class AgentflowRunStateStore {
     try {
       if (isSymbolicLink(target)) {
         status = "stale";
-      } else if (!fs.statSync(target).isFile() || row.checksum === null) {
-        status = "stale";
       } else {
-        const actualChecksum = `sha256:${createHash("sha256").update(fs.readFileSync(target)).digest("hex")}`;
-        status = actualChecksum !== row.checksum
-          ? "stale"
-          : row.status === "overwritten" ? "overwritten" : "available";
+        const stat = fs.statSync(target);
+        if (!stat.isFile() || row.checksum === null || (row.size_bytes !== null && stat.size !== row.size_bytes)) {
+          status = "stale";
+        } else {
+          const actualChecksum = `sha256:${createHash("sha256").update(fs.readFileSync(target)).digest("hex")}`;
+          status = actualChecksum !== row.checksum
+            ? "stale"
+            : row.status === "overwritten" ? "overwritten" : "available";
+        }
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
