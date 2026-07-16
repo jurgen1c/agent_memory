@@ -152,8 +152,12 @@ function compileGlobAutomaton(pattern: string): GlobAutomaton {
       addTransition(nonSlashGlobCharacter());
     } else if (character === "[") {
       const closing = pattern.indexOf("]", index + 1);
+      if (closing === -1) {
+        addTransition(neverGlobCharacter());
+        break;
+      }
       const content = pattern.slice(index + 1, closing);
-      addTransition(classGlobCharacter(content));
+      addTransition(content.length === 0 ? neverGlobCharacter() : classGlobCharacter(content));
       index = closing;
     } else {
       addTransition(literalGlobCharacter(character));
@@ -344,12 +348,21 @@ function literalGlobCharacter(literal: string): GlobCharacterPredicate {
   };
 }
 
+function neverGlobCharacter(): GlobCharacterPredicate {
+  return { key: "never", boundaries: [0, 0x10000], matches: () => false };
+}
+
 const classPredicateCache = new Map<string, GlobCharacterPredicate>();
 
 function classGlobCharacter(content: string): GlobCharacterPredicate {
   const negated = content.startsWith("!");
   const members = (negated ? content.slice(1) : content).replaceAll("\\", "\\\\");
-  const expression = new RegExp(`^[${negated ? "^" : ""}${members}]$`);
+  let expression: RegExp;
+  try {
+    expression = new RegExp(`^[${negated ? "^" : ""}${members}]$`);
+  } catch {
+    return neverGlobCharacter();
+  }
   const key = `class:${expression.source}`;
   const cached = classPredicateCache.get(key);
   if (cached !== undefined) return cached;

@@ -10,6 +10,10 @@ import {
   parseAgentflowWorkflowOrThrow,
   validateAgentflowWorkflow
 } from "../../packages/agentflow-core/src";
+import {
+  policyGlobsCoverSubtree,
+  policyGlobsIntersect
+} from "../../packages/agentflow-core/src/policy_utils";
 
 const POLICY_WORKFLOW = `
 name: policy-runtime
@@ -58,6 +62,12 @@ steps:
 `;
 
 describe("Agentflow policy primitives", () => {
+  test("fails closed for malformed globs passed directly to exported helpers", () => {
+    expect(policyGlobsIntersect("src/[", "src/**")).toBe(false);
+    expect(policyGlobsIntersect("src/[z-a]", "src/**")).toBe(false);
+    expect(policyGlobsCoverSubtree("src", ["src/[]/**"])).toBe(false);
+  });
+
   test("ignores session-like fields in ordinary step data", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`
 name: policy-metadata
