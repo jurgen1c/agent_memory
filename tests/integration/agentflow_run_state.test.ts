@@ -313,21 +313,21 @@ describe("Agentflow run-state SQLite store", () => {
       producerStepId: "report",
       writtenAt: first.writtenAt
     });
-    const originalReadFileSync = fs.readFileSync;
-    const readFileSyncDescriptor = Object.getOwnPropertyDescriptor(fs, "readFileSync")!;
-    Object.defineProperty(fs, "readFileSync", {
-      ...readFileSyncDescriptor,
+    const originalOpenSync = fs.openSync;
+    const openSyncDescriptor = Object.getOwnPropertyDescriptor(fs, "openSync")!;
+    Object.defineProperty(fs, "openSync", {
+      ...openSyncDescriptor,
       value: (...args: unknown[]) => {
         if (path.resolve(String(args[0])) === target) {
           throw Object.assign(new Error("artifact disappeared during inspection"), { code: "ENOENT" });
         }
-        return Reflect.apply(originalReadFileSync, fs, args);
+        return Reflect.apply(originalOpenSync, fs, args);
       }
     });
     try {
       expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("missing");
     } finally {
-      Object.defineProperty(fs, "readFileSync", readFileSyncDescriptor);
+      Object.defineProperty(fs, "openSync", openSyncDescriptor);
     }
     expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("overwritten");
     const artifactDirectory = path.dirname(target);
@@ -339,17 +339,17 @@ describe("Agentflow run-state SQLite store", () => {
     fs.writeFileSync(target, "{\"result\":1}\n");
     expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("overwritten");
     fs.writeFileSync(target, "short");
-    Object.defineProperty(fs, "readFileSync", {
-      ...readFileSyncDescriptor,
+    Object.defineProperty(fs, "openSync", {
+      ...openSyncDescriptor,
       value: (...args: unknown[]) => {
         if (path.resolve(String(args[0])) === target) throw new Error("size mismatch should not be hashed");
-        return Reflect.apply(originalReadFileSync, fs, args);
+        return Reflect.apply(originalOpenSync, fs, args);
       }
     });
     try {
       expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("stale");
     } finally {
-      Object.defineProperty(fs, "readFileSync", readFileSyncDescriptor);
+      Object.defineProperty(fs, "openSync", openSyncDescriptor);
     }
     fs.writeFileSync(target, "{\"result\":1}\n");
     expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("overwritten");

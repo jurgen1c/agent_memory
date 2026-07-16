@@ -866,7 +866,7 @@ export class AgentflowRunStateStore {
         if (!stat.isFile() || row.checksum === null || (row.size_bytes !== null && stat.size !== row.size_bytes)) {
           status = "stale";
         } else {
-          const actualChecksum = `sha256:${createHash("sha256").update(fs.readFileSync(target)).digest("hex")}`;
+          const actualChecksum = artifactChecksum(target);
           status = actualChecksum !== row.checksum
             ? "stale"
             : row.previous_checksum !== null ? "overwritten" : "available";
@@ -1262,7 +1262,19 @@ function removeArtifactStagingEntry(candidate: string): void {
 }
 
 function artifactChecksum(candidate: string): string {
-  return `sha256:${createHash("sha256").update(fs.readFileSync(candidate)).digest("hex")}`;
+  const hash = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  const descriptor = fs.openSync(candidate, "r");
+  try {
+    let bytesRead: number;
+    do {
+      bytesRead = fs.readSync(descriptor, buffer, 0, buffer.length, null);
+      if (bytesRead > 0) hash.update(buffer.subarray(0, bytesRead));
+    } while (bytesRead > 0);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  return `sha256:${hash.digest("hex")}`;
 }
 
 function requiredString(value: unknown, label: string): string {
