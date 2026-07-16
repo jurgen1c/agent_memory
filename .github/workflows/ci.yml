@@ -20,3 +20,10 @@ jobs:
           node-version: 25
       - run: bun install --frozen-lockfile
       - run: bun run ci
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bun-coverage
+          path: coverage/lcov.info
+          if-no-files-found: ignore

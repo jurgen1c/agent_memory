@@ -501,6 +501,9 @@ bun test
 bun run test:coverage
 ```
 
+The coverage command prints a summary and writes `coverage/lcov.info`. CI runs
+the command and retains the LCOV report as the `bun-coverage` artifact.
+
 Run the mock app memory flow:
 
 ```bash
