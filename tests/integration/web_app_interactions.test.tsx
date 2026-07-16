@@ -65,6 +65,16 @@ const memory = {
         severityCounts: { high: 1 },
         reviewCount: 1,
         searchText: "auth oauth identities tenant scoped"
+      },
+      {
+        id: "system:billing",
+        system: "billing",
+        color: "#7c3aed",
+        claimCount: 1,
+        statusCounts: { current: 1 },
+        severityCounts: { normal: 1 },
+        reviewCount: 0,
+        searchText: "billing invoices"
       }
     ],
     systemRelations: []
@@ -212,6 +222,14 @@ describe("Agent Memory web interactions", () => {
         return Response.json({ claim, relations: [], relatedClaims: [] });
       }
 
+      if (path === "/api/graph/systems/auth") {
+        return Response.json({ system: "auth", claims: [claim], relations: [] });
+      }
+
+      if (path === "/api/graph/systems/billing") {
+        return new Response("billing graph unavailable", { status: 503 });
+      }
+
       if (path === "/api/workflows/recipes") {
         return Response.json({ recipes: [recipe] });
       }
@@ -247,6 +265,45 @@ describe("Agent Memory web interactions", () => {
     await waitFor(() => expect(view.getByText("Memory loaded.")).toBeTruthy());
     expect(view.getByText("docs/agent-memory")).toBeTruthy();
 
+    fireEvent.click(view.container.querySelector('[data-id="system:auth"]')!);
+    await waitFor(() => expect(requests).toContainEqual({ method: "GET", path: "/api/graph/systems/auth" }));
+    await waitFor(() => expect(view.container.querySelector('[data-id="claim:auth.oauth"]')).toBeTruthy());
+    const claimNode = view.container.querySelector('[data-id="claim:auth.oauth"]');
+    fireEvent.doubleClick(claimNode!);
+    expect(view.getByRole("button", { name: "Clear focus" })).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Clear focus" }));
+
+    const search = view.getByPlaceholderText("title, claim, tag, file");
+    fireEvent.change(search, { target: { value: "oauth" } });
+    fireEvent.change(view.getByLabelText("System"), { target: { value: "auth" } });
+    fireEvent.change(view.getByLabelText("Status"), { target: { value: "needs_review" } });
+    fireEvent.change(view.getByLabelText("Severity"), { target: { value: "high" } });
+    fireEvent.change(view.getByLabelText("Status"), { target: { value: "current" } });
+    await waitFor(() => expect(view.container.querySelector('[data-id="system:auth"]')).toBeNull());
+    fireEvent.change(view.getByLabelText("Status"), { target: { value: "needs_review" } });
+    await waitFor(() => expect(view.container.querySelector('[data-id="claim:auth.oauth"]')).toBeTruthy());
+    fireEvent.change(view.getByLabelText("Severity"), { target: { value: "normal" } });
+    await waitFor(() => expect(view.container.querySelector('[data-id="system:auth"]')).toBeNull());
+    fireEvent.change(view.getByLabelText("Severity"), { target: { value: "high" } });
+    await waitFor(() => expect(view.container.querySelector('[data-id="claim:auth.oauth"]')).toBeTruthy());
+    fireEvent.change(search, { target: { value: "not-present" } });
+    fireEvent.change(search, { target: { value: "" } });
+    fireEvent.change(view.getByLabelText("System"), { target: { value: "all" } });
+    fireEvent.change(view.getByLabelText("Status"), { target: { value: "all" } });
+    fireEvent.change(view.getByLabelText("Severity"), { target: { value: "all" } });
+    fireEvent.click(view.getByLabelText("explicit"));
+    fireEvent.click(view.getByLabelText("explicit"));
+
+    fireEvent.click(view.container.querySelector('[data-id="system:auth"]')!);
+    await waitFor(() => expect(view.container.querySelector('[data-id="claim:auth.oauth"]')).toBeNull());
+    fireEvent.click(view.container.querySelector('[data-id="system:auth"]')!);
+    await waitFor(() => expect(view.container.querySelector('[data-id="claim:auth.oauth"]')).toBeTruthy());
+    fireEvent.click(view.container.querySelector('[data-id="system:billing"]')!);
+    await waitFor(() => expect(view.getByText("billing graph unavailable")).toBeTruthy());
+
+    fireEvent.click(view.getAllByRole("button", { name: "Hide" })[0]);
+    fireEvent.click(view.getByRole("button", { name: "Filters" }));
+
     fireEvent.click(view.getByRole("button", { name: "Files" }));
     fireEvent.click(view.getByRole("button", { name: /oauth\.md/ }));
     await waitFor(() => expect(view.getByRole("heading", { name: claim.title })).toBeTruthy());
@@ -254,7 +311,19 @@ describe("Agent Memory web interactions", () => {
 
     const resizeHandle = view.getByRole("separator", { name: "Resize claim drawer" });
     fireEvent.keyDown(resizeHandle, { key: "ArrowLeft" });
+    fireEvent.keyDown(resizeHandle, { key: "ArrowRight" });
+    fireEvent.keyDown(resizeHandle, { key: "Enter" });
     expect(browser.localStorage.getItem("agent-memory.drawer-width")).toBeTruthy();
+
+    const drawer = view.getByRole("heading", { name: claim.title }).closest("aside");
+    expect(drawer).toBeTruthy();
+    fireEvent.change(within(drawer!).getByLabelText("Status"), { target: { value: "current" } });
+    fireEvent.change(within(drawer!).getByLabelText("Confidence"), { target: { value: "high" } });
+    fireEvent.click(within(drawer!).getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(requests.filter((request) => request.path === "/api/claims/auth.oauth/review")).toHaveLength(1));
+    fireEvent.click(within(drawer!).getByRole("button", { name: "Claim ID" }));
+    fireEvent.click(within(drawer!).getByRole("button", { name: "Show command" }));
+    fireEvent.click(within(drawer!).getByRole("button", { name: "Source path" }));
 
     fireEvent.click(view.getAllByRole("button", { name: "Hide" })[1]);
     expect(view.getByRole("button", { name: "Details" })).toBeTruthy();
@@ -275,6 +344,9 @@ describe("Agent Memory web interactions", () => {
 
     const runCard = view.getByRole("heading", { name: planRun.task }).closest("article");
     expect(runCard).toBeTruthy();
+    fireEvent.change(within(runCard!).getByPlaceholderText("Block reason"), { target: { value: "Waiting for tenant evidence." } });
+    fireEvent.click(within(runCard!).getByRole("button", { name: "Block" }));
+    await waitFor(() => expect(view.getByText("Plan stage blocked.")).toBeTruthy());
     fireEvent.change(within(runCard!).getByPlaceholderText("Evidence"), { target: { value: "Reviewed the current contract." } });
     fireEvent.click(within(runCard!).getByRole("button", { name: "Complete" }));
     await waitFor(() =>
