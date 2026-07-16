@@ -868,7 +868,7 @@ export function moveSystemChildren(nodes: Node[], system: string, delta: { x: nu
   });
 }
 
-function HealthPanel(props: { memory: UiMemoryModel | null; notice: string; busy: boolean; onSync(): void }) {
+export function HealthPanel(props: { memory: UiMemoryModel | null; notice: string; busy: boolean; onSync(): void }) {
   const warnings = [
     ...(props.memory?.validation.errors.map((issue) => issue.message) ?? []),
     ...(props.memory?.doctor.checks.filter((check) => check.status === "warning").map((check) => check.message) ?? [])
@@ -892,7 +892,7 @@ function HealthPanel(props: { memory: UiMemoryModel | null; notice: string; busy
   );
 }
 
-function FileView(props: { root: UiFileNode; onSelectClaim(id: string): void }) {
+export function FileView(props: { root: UiFileNode; onSelectClaim(id: string): void }) {
   return (
     <div className="file-view">
       <h2>Memory Files</h2>
@@ -925,7 +925,7 @@ function FileNode(props: { node: UiFileNode; onSelectClaim(id: string): void }) 
   );
 }
 
-function ReviewView(props: { items: UiReviewItem[]; onSelect(id: string): void; onApprove(id: string): void }) {
+export function ReviewView(props: { items: UiReviewItem[]; onSelect(id: string): void; onApprove(id: string): void }) {
   return (
     <div className="review-view">
       <h2>Review Queue</h2>
@@ -949,7 +949,7 @@ function ReviewView(props: { items: UiReviewItem[]; onSelect(id: string): void; 
   );
 }
 
-function WorkflowView(props: {
+export function WorkflowView(props: {
   summary: UiWorkflowSummary;
   data: WorkflowData | null;
   loading: boolean;
@@ -1367,7 +1367,7 @@ function replaceStage(
   return stages.map((stage, candidateIndex) => (candidateIndex === index ? { ...stage, ...patch } : stage));
 }
 
-function ClaimDrawer(props: {
+export function ClaimDrawer(props: {
   detail: ClaimDetail | null;
   commandPrefix: string;
   onClose(): void;
@@ -1486,7 +1486,7 @@ function DrawerResizeHandle(props: {
   );
 }
 
-function ClaimReader(props: {
+export function ClaimReader(props: {
   detail: ClaimDetail;
   commandPrefix: string;
   onClose(): void;

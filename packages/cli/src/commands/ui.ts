@@ -4,6 +4,7 @@ import type { ExitCode } from "../../../core/src/types";
 
 export interface UiCommandContext {
   cwd?: string;
+  startServer?: typeof startUiServer;
 }
 
 export interface UiCommandResult {
@@ -19,7 +20,7 @@ interface UiCommandOptions {
 
 export async function runUiCommand(args: string[], context: UiCommandContext = {}): Promise<UiCommandResult> {
   const options = parseUiArgs(args);
-  const server = await startUiServer({
+  const server = await (context.startServer ?? startUiServer)({
     cwd: context.cwd,
     host: options.host,
     port: options.port

@@ -8,6 +8,52 @@ const repoRoot = path.resolve(".");
 const mockApp = path.join(repoRoot, "examples/mock-app");
 
 describe("plans command", () => {
+  test("renders the text workflow and validates malformed command options", async () => {
+    const cwd = await compiledMockAppWithPlan();
+
+    const suggested = await dispatch(["plans", "suggest", "--task=change student oauth provider"], { cwd });
+    expect(suggested.stdout).toContain("# Plan Suggestions");
+    expect(suggested.stdout).toContain("Reasons:");
+
+    const created = await dispatch(
+      ["plans", "new", "--template=plan_template.auth.oauth_change", "--task=change student oauth provider"],
+      { cwd }
+    );
+    expect(created.stdout).toContain("Plan run created.");
+    const runId = created.stdout.match(/^ID: (.+)$/m)?.[1];
+    expect(runId).toBeTruthy();
+
+    const shown = await dispatch(["plans", "show", runId!], { cwd });
+    expect(shown.stdout).toContain(`# Plan Run ${runId}`);
+    await dispatch(["plans", "complete-stage", runId!, "--stage", "inspect", "--evidence", "Reviewed"], { cwd });
+    await dispatch(["plans", "complete-stage", runId!, "--stage", "implement", "--evidence", "Verified"], { cwd });
+
+    const promoted = await dispatch(
+      ["plans", "promote", runId!, "--to-template", "--title", "Text OAuth plan", "--system", "auth"],
+      { cwd }
+    );
+    expect(promoted.stdout).toContain("Plan template written.");
+    const finished = await dispatch(["plans", "finish", runId!, "--archive", "--confirm-unresolved"], { cwd });
+    expect(finished.stdout).toContain("Plan run archived.");
+    const pruned = await dispatch(["plans", "prune", "--completed", "--dry-run"], { cwd });
+    expect(pruned.stdout).toContain("Plan runs selected: 1");
+
+    expect(dispatch(["plans"], { cwd })).rejects.toThrow("plans requires a subcommand");
+    expect(dispatch(["plans", "templates"], { cwd })).rejects.toThrow("plans templates requires list or show");
+    expect(dispatch(["plans", "suggest", "--wat"], { cwd })).rejects.toThrow("Unknown plans suggest option: --wat");
+    expect(dispatch(["plans", "suggest"], { cwd })).rejects.toThrow("plans suggest requires --task");
+    expect(dispatch(["plans", "show"], { cwd })).rejects.toThrow("plans show requires an ID");
+    expect(dispatch(["plans", "complete-stage", "run", "--wat"], { cwd })).rejects.toThrow("Unknown complete-stage option: --wat");
+    expect(dispatch(["plans", "complete-stage", "run"], { cwd })).rejects.toThrow("complete-stage requires a plan ID and --stage");
+    expect(dispatch(["plans", "block-stage", "run", "--wat"], { cwd })).rejects.toThrow("Unknown block-stage option: --wat");
+    expect(dispatch(["plans", "block-stage", "run"], { cwd })).rejects.toThrow("block-stage requires a plan ID and --stage");
+    expect(dispatch(["plans", "finish"], { cwd })).rejects.toThrow("plans finish requires a plan ID");
+    expect(dispatch(["plans", "finish", "run", "--wat"], { cwd })).rejects.toThrow("Unknown finish option: --wat");
+    expect(dispatch(["plans", "prune", "--older-than", "old"], { cwd })).rejects.toThrow("Expected age like 7d, got: old");
+    expect(dispatch(["plans", "prune", "--wat"], { cwd })).rejects.toThrow("Unknown prune option: --wat");
+    expect(dispatch(["plans", "promote", "run", "--wat"], { cwd })).rejects.toThrow("Unknown promote option: --wat");
+  });
+
   test("lists, shows, and suggests plan templates", async () => {
     const cwd = await compiledMockAppWithPlan();
 

@@ -13,6 +13,19 @@ export interface OpenSqliteDatabaseOptions {
   busyTimeoutMs?: number;
 }
 
+export type NodeDatabaseSyncConstructor = new (
+  path: string,
+  options?: { readOnly?: boolean; timeout?: number }
+) => {
+  exec(sql: string): void;
+  prepare(sql: string): {
+    run(...params: SqliteValue[]): void;
+    all(...params: SqliteValue[]): unknown[];
+    get(...params: SqliteValue[]): unknown;
+  };
+  close(): void;
+};
+
 export const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 5_000;
 
 export async function openSqliteDatabase(databasePath: string, options: OpenSqliteDatabaseOptions = {}): Promise<SqliteDatabase> {
@@ -48,23 +61,16 @@ async function openBunSqliteDatabase(databasePath: string, options: OpenSqliteDa
   };
 }
 
-async function openNodeSqliteDatabase(databasePath: string, options: OpenSqliteDatabaseOptions): Promise<SqliteDatabase> {
+export async function openNodeSqliteDatabase(databasePath: string, options: OpenSqliteDatabaseOptions = {}): Promise<SqliteDatabase> {
   const sqlite = await import("node:sqlite");
-  const DatabaseSync = sqlite.DatabaseSync as new (
-    path: string,
-    options?: {
-      readOnly?: boolean;
-      timeout?: number;
-    }
-  ) => {
-    exec(sql: string): void;
-    prepare(sql: string): {
-      run(...params: SqliteValue[]): void;
-      all(...params: SqliteValue[]): unknown[];
-      get(...params: SqliteValue[]): unknown;
-    };
-    close(): void;
-  };
+  return createNodeSqliteDatabase(sqlite.DatabaseSync as NodeDatabaseSyncConstructor, databasePath, options);
+}
+
+export function createNodeSqliteDatabase(
+  DatabaseSync: NodeDatabaseSyncConstructor,
+  databasePath: string,
+  options: OpenSqliteDatabaseOptions = {}
+): SqliteDatabase {
   const database = new DatabaseSync(databasePath, {
     readOnly: options.readonly ?? false,
     timeout: busyTimeoutMs(options)

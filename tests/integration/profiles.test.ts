@@ -8,6 +8,45 @@ const repoRoot = path.resolve(".");
 const mockApp = path.join(repoRoot, "examples/mock-app");
 
 describe("profiles command", () => {
+  test("supports output modes, option aliases, and actionable argument errors", async () => {
+    const cwd = await compiledMockAppWithProfiles();
+
+    const list = await dispatch(["profiles", "list", "--include-stale", "--json"], { cwd });
+    expect(JSON.parse(list.stdout).traits.length).toBeGreaterThan(0);
+
+    const show = await dispatch(["profiles", "show", "profile_trait.review.findings_first", "--json"], { cwd });
+    expect(JSON.parse(show.stdout).trait.id).toBe("profile_trait.review.findings_first");
+
+    const match = await dispatch(
+      [
+        "profiles",
+        "match",
+        "--task=review auth changes",
+        "--system=auth",
+        "--recipe=recipe.auth.modify_student_oauth",
+        "--profile=review",
+        "--profile-trait=profile_trait.review.findings_first",
+        "--limit=2",
+        "--include-inactive"
+      ],
+      { cwd }
+    );
+    expect(match.stdout).toContain("# Profile Trait Matches");
+    expect(match.stdout).toContain("Selected because:");
+    expect(match.stdout).toContain("## Dropped Profile Traits");
+
+    expect(dispatch(["profiles"], { cwd })).rejects.toThrow("profiles requires a subcommand");
+    expect(dispatch(["profiles", "list", "--wat"], { cwd })).rejects.toThrow("Unknown profiles list option: --wat");
+    expect(dispatch(["profiles", "show"], { cwd })).rejects.toThrow("profiles show requires a profile trait ID");
+    expect(dispatch(["profiles", "show", "profile_trait.review.findings_first", "--wat"], { cwd })).rejects.toThrow(
+      "Unknown profiles show option: --wat"
+    );
+    expect(dispatch(["profiles", "match"], { cwd })).rejects.toThrow("profiles match requires");
+    expect(dispatch(["profiles", "match", "--task"], { cwd })).rejects.toThrow("--task requires a value");
+    expect(dispatch(["profiles", "match", "--task=x", "--limit=0"], { cwd })).rejects.toThrow("Expected a positive integer, got: 0");
+    expect(dispatch(["profiles", "match", "--task=x", "--wat"], { cwd })).rejects.toThrow("Unknown profiles match option: --wat");
+  });
+
   test("lists and shows profile traits", async () => {
     const cwd = await compiledMockAppWithProfiles();
 

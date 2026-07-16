@@ -2,12 +2,13 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isAddressInUse, startBunUiServer, startUiServer, type BunRuntime } from "../../packages/core/src/ui_server";
+import { isAddressInUse, startBunUiServer, startNodeUiServer as startUiServer, type BunRuntime } from "../../packages/core/src/ui_server";
 
 const repoRoot = path.resolve(".");
 const mockApp = path.join(repoRoot, "examples/mock-app");
 
 describe("UI server", () => {
+  // Exercise the Node adapter explicitly; ui_bun_handler.test.ts covers Bun's adapter without binding sockets.
   test("serves memory JSON and static assets", async () => {
     const cwd = copyFixture(mockApp);
     const staticRoot = makeStaticRoot();
