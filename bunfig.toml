@@ -3,12 +3,3 @@ coverageReporter = ["text", "lcov"]
 coverageDir = "coverage"
 coverageSkipTestFiles = true
 coverageThreshold = { lines = 0.9, functions = 0.9 }
-concurrentTestGlob = [
-  "tests/unit/config.test.ts",
-  "tests/unit/files.test.ts",
-  "tests/unit/graph_layout.test.ts",
-  "tests/unit/repo.test.ts",
-  "tests/unit/sqlite.test.ts",
-  "tests/unit/ui_command.test.ts",
-  "tests/unit/yaml_markdown.test.ts",
-]

@@ -180,7 +180,7 @@ describe("workspace package layout", () => {
     expect(rootPackage.scripts?.build).toBe("node scripts/run-root-verification.mjs build");
     expect(rootPackage.scripts?.typecheck).toBe("node scripts/run-root-verification.mjs typecheck");
     expect(rootPackage.scripts?.test).toBe("bun test");
-    expect(rootPackage.scripts?.["test:coverage"]).toBe("bun test --coverage --config=bunfig.coverage.toml");
+    expect(rootPackage.scripts?.["test:coverage"]).toBe("bun test --coverage");
     expect(rootPackage.scripts?.ci).toContain("bun run test:coverage");
     expect(rootPackage.scripts?.ci).not.toContain("&& bun test &&");
 
@@ -188,14 +188,7 @@ describe("workspace package layout", () => {
     expect(bunfig).toContain('coverageReporter = ["text", "lcov"]');
     expect(bunfig).toContain("coverageSkipTestFiles = true");
     expect(bunfig).toContain("coverageThreshold = { lines = 0.9, functions = 0.9 }");
-    expect(bunfig).toContain("concurrentTestGlob = [");
-    expect(bunfig).toContain('"tests/unit/ui_command.test.ts"');
-
-    const coverageBunfig = fs.readFileSync(path.join(repoRoot, "bunfig.coverage.toml"), "utf8");
-    expect(coverageBunfig).toContain('coverageReporter = ["text", "lcov"]');
-    expect(coverageBunfig).toContain("coverageSkipTestFiles = true");
-    expect(coverageBunfig).toContain("coverageThreshold = { lines = 0.9, functions = 0.9 }");
-    expect(coverageBunfig).not.toContain("concurrentTestGlob");
+    expect(bunfig).not.toContain("concurrentTestGlob");
 
     const workspaceNames = workspacePackageNames();
     const buildPlan = verificationPlan("build");
