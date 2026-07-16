@@ -468,6 +468,13 @@ export class AgentflowRunStateStore {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const existing = this.database.get<ArtifactRow>("SELECT * FROM artifacts WHERE run_id = ? AND id = ?", [runId, id]);
+      const pathOwner = this.database.get<ArtifactRow>("SELECT * FROM artifacts WHERE run_id = ? AND path = ?", [runId, artifactPath]);
+      if (pathOwner !== null && pathOwner.id !== id) {
+        throw new AgentflowRunStateError(
+          `Artifact path ${artifactPath} is already registered as ${pathOwner.id} for run ${runId}.`,
+          "AGENTFLOW_ARTIFACT_COLLISION"
+        );
+      }
       if (existing !== null && existing.path !== artifactPath) {
         throw new AgentflowRunStateError(
           `Artifact ${id} is already registered at ${existing.path}; artifact paths cannot be reassigned.`,
@@ -850,19 +857,20 @@ export class AgentflowRunStateStore {
   private inspectArtifact(row: ArtifactRow): AgentflowArtifactRecord {
     const target = artifactStoragePath(this.repoRoot, row.run_id, row.path, false, true);
     let status: AgentflowArtifactStatus;
-    if (isSymbolicLink(target)) {
-      status = "stale";
-    } else if (!fs.existsSync(target)) {
+    try {
+      if (isSymbolicLink(target)) {
+        status = "stale";
+      } else if (!fs.statSync(target).isFile() || row.checksum === null) {
+        status = "stale";
+      } else {
+        const actualChecksum = `sha256:${createHash("sha256").update(fs.readFileSync(target)).digest("hex")}`;
+        status = actualChecksum !== row.checksum
+          ? "stale"
+          : row.status === "overwritten" ? "overwritten" : "available";
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       status = "missing";
-    } else if (!fs.statSync(target).isFile()) {
-      status = "stale";
-    } else if (row.checksum === null) {
-      status = "stale";
-    } else {
-      const actualChecksum = `sha256:${createHash("sha256").update(fs.readFileSync(target)).digest("hex")}`;
-      status = actualChecksum !== row.checksum
-        ? "stale"
-        : row.status === "overwritten" ? "overwritten" : "available";
     }
     if (status !== row.status) {
       const timestamp = currentTimestamp(this.now);
@@ -1204,6 +1212,9 @@ function restoreArtifactWrite(target: string, temporaryPath: string, backupPath:
 }
 
 function recoverArtifactStaging(target: string, temporaryPath: string, backupPath: string, registeredChecksum: string | null): void {
+  if (isSymbolicLink(backupPath)) {
+    throw new AgentflowRunStateError(`Artifact recovery backup cannot be a symbolic link: ${backupPath}`, "AGENTFLOW_ARTIFACT_PATH");
+  }
   if (fs.existsSync(backupPath)) {
     const targetMatchesRegistry = fs.existsSync(target)
       && fs.statSync(target).isFile()
@@ -1211,9 +1222,11 @@ function recoverArtifactStaging(target: string, temporaryPath: string, backupPat
       && artifactChecksum(target) === registeredChecksum;
     if (targetMatchesRegistry) {
       removeArtifactStagingFile(backupPath);
-    } else {
+    } else if (registeredChecksum === null || artifactChecksum(backupPath) === registeredChecksum) {
       if (fs.existsSync(target)) fs.unlinkSync(target);
       fs.renameSync(backupPath, target);
+    } else {
+      removeArtifactStagingFile(backupPath);
     }
   }
   removeArtifactStagingFile(temporaryPath);

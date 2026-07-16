@@ -285,6 +285,23 @@ describe("Agentflow run-state SQLite store", () => {
     });
     const target = path.join(repoRoot, first.storagePath);
     expect(first.status).toBe("available");
+    const originalReadFileSync = fs.readFileSync;
+    const readFileSyncDescriptor = Object.getOwnPropertyDescriptor(fs, "readFileSync")!;
+    Object.defineProperty(fs, "readFileSync", {
+      ...readFileSyncDescriptor,
+      value: (...args: unknown[]) => {
+        if (path.resolve(String(args[0])) === target) {
+          throw Object.assign(new Error("artifact disappeared during inspection"), { code: "ENOENT" });
+        }
+        return Reflect.apply(originalReadFileSync, fs, args);
+      }
+    });
+    try {
+      expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("missing");
+    } finally {
+      Object.defineProperty(fs, "readFileSync", readFileSyncDescriptor);
+    }
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("available");
     store.upsertArtifact({
       id: "report",
       runId: "run-artifacts",
@@ -308,6 +325,22 @@ describe("Agentflow run-state SQLite store", () => {
       kind: "result",
       contentType: "application/json"
     })).toThrow(/cannot be reassigned/);
+    let pathCollisionError: unknown;
+    try {
+      store.upsertArtifact({
+        id: "duplicate-report",
+        runId: "run-artifacts",
+        path: "reports/result.json",
+        kind: "result",
+        contentType: "application/json"
+      });
+    } catch (error) {
+      pathCollisionError = error;
+    }
+    expect(pathCollisionError).toMatchObject({
+      code: "AGENTFLOW_ARTIFACT_COLLISION",
+      message: expect.stringContaining("already registered as report")
+    });
     expect(() => store.writeArtifact({
       id: "report",
       runId: "run-artifacts",
@@ -519,6 +552,44 @@ describe("Agentflow run-state SQLite store", () => {
     expect(recovered).toMatchObject({ status: "overwritten", previousChecksum: original.checksum });
     expect(fs.readFileSync(target, "utf8")).toBe("replacement");
     expect(fs.existsSync(backup)).toBe(false);
+
+    fs.writeFileSync(backup, "original");
+    fs.unlinkSync(target);
+    const resumedAfterCleanupInterruption = store.writeArtifact({
+      id: "report",
+      runId: "run-recovery",
+      path: "report.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "replacement"
+    });
+    expect(resumedAfterCleanupInterruption.status).toBe("overwritten");
+    expect(fs.readFileSync(target, "utf8")).toBe("replacement");
+    expect(fs.existsSync(backup)).toBe(false);
+
+    const outsideBackup = path.join(repoRoot, "outside-backup.txt");
+    fs.writeFileSync(outsideBackup, "replacement");
+    fs.unlinkSync(target);
+    fs.symlinkSync(outsideBackup, backup);
+    expect(() => store.writeArtifact({
+      id: "report",
+      runId: "run-recovery",
+      path: "report.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "replacement"
+    })).toThrow(/backup cannot be a symbolic link/);
+    expect(fs.existsSync(target)).toBe(false);
+    expect(fs.readFileSync(outsideBackup, "utf8")).toBe("replacement");
+    fs.unlinkSync(backup);
+    store.writeArtifact({
+      id: "report",
+      runId: "run-recovery",
+      path: "report.txt",
+      kind: "output",
+      contentType: "text/plain",
+      content: "replacement"
+    });
 
     const orphanTarget = path.join(repoRoot, artifactStoragePath("run-recovery", "orphan.txt"));
     fs.writeFileSync(orphanTarget, "published before commit");
