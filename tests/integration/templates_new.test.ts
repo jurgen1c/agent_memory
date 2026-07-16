@@ -28,6 +28,24 @@ describe("templates command", () => {
     expect(fs.existsSync(target)).toBe(true);
     expect(fs.readFileSync(target, "utf8")).toContain("type: fact");
   });
+
+  test("supports copy aliases and reports incomplete or invalid requests", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-template-options-"));
+    const target = path.join(dir, "fact.md");
+
+    const copied = await dispatch(["templates", "copy", "claim:fact", `--to=${target}`]);
+    expect(copied.stdout).toContain("created");
+    const overwritten = await dispatch(["templates", "copy", "claim:fact", `--to=${target}`, "--force"]);
+    expect(overwritten.stdout).toContain("overwritten");
+
+    expect(dispatch(["templates", "show"])).rejects.toThrow("templates show requires a template name");
+    expect(dispatch(["templates", "show", "claim:fact", "extra"])).rejects.toThrow("Unexpected templates show arguments: extra");
+    expect(dispatch(["templates", "copy"])).rejects.toThrow("templates copy requires a template name");
+    expect(dispatch(["templates", "copy", "claim:fact", "--to"])).rejects.toThrow("--to requires a destination path");
+    expect(dispatch(["templates", "copy", "claim:fact", "--wat"])).rejects.toThrow("Unknown templates copy option: --wat");
+    expect(dispatch(["templates", "copy", "claim:fact"])).rejects.toThrow("templates copy requires --to <path>");
+    expect(dispatch(["templates", "unknown"])).rejects.toThrow("Unknown templates subcommand: unknown");
+  });
 });
 
 describe("new claim command", () => {
@@ -107,6 +125,38 @@ describe("new claim command", () => {
     expect(result.stdout).toContain("ID: ci.tests.must_pass");
     const content = fs.readFileSync(path.join(repoRoot, "docs/agent-memory/claims/ci/tests-must-pass.md"), "utf8");
     expect(content).toContain("severity: critical");
+  });
+
+  test("supports equals-form claim options and validates bad input", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+
+    const result = await dispatch(
+      [
+        "new",
+        "claim",
+        "--type=decision",
+        "--system=auth",
+        "--title=Use tenant OAuth",
+        "--id=auth.oauth.tenant_decision",
+        "--source-file=src/auth.ts",
+        "--claim=OAuth decisions are tenant scoped.",
+        "--verification-step=bun test",
+        "--severity=important",
+        "--force"
+      ],
+      { cwd: repoRoot }
+    );
+    expect(result.stdout).toContain("ID: auth.oauth.tenant_decision");
+
+    expect(dispatch(["new", "unknown"], { cwd: repoRoot })).rejects.toThrow("Unknown new target: unknown");
+    expect(dispatch(["new", "claim"], { cwd: repoRoot })).rejects.toThrow("Missing required new claim options");
+    expect(dispatch(["new", "claim", "--type=invalid"], { cwd: repoRoot })).rejects.toThrow("Unsupported claim type: invalid");
+    expect(
+      dispatch(["new", "claim", "--type=fact", "--system=auth", "--title=Invalid severity", "--severity=urgent"], { cwd: repoRoot })
+    ).rejects.toThrow("Unsupported claim severity: urgent");
+    expect(dispatch(["new", "claim", "--type"], { cwd: repoRoot })).rejects.toThrow("--type requires a value");
+    expect(dispatch(["new", "claim", "--wat"], { cwd: repoRoot })).rejects.toThrow("Unknown new claim option: --wat");
   });
 });
 

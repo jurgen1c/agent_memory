@@ -210,6 +210,20 @@ describe("install-hooks command", () => {
     }
   });
 
+  test("supports forced JSON installs and rejects unknown options", async () => {
+    const cwd = makeGitRepo();
+    const init = await dispatch(["init", "--yes"], { cwd });
+    expect(init.exitCode).toBe(0);
+    await dispatch(["install-hooks"], { cwd });
+
+    const result = await dispatch(["install-hooks", "--force", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as { actions: Array<{ status: string; path: string }> };
+    expect(result.exitCode).toBe(0);
+    expect(parsed.actions).toHaveLength(3);
+    expect(parsed.actions.every((action) => action.status === "overwritten")).toBe(true);
+    expect(dispatch(["install-hooks", "--wat"], { cwd })).rejects.toThrow("Unknown install-hooks option: --wat");
+  });
+
   test("installs hooks from a linked worktree", async () => {
     const main = makeGitRepo();
     fs.writeFileSync(path.join(main, "README.md"), "# Main\n");
