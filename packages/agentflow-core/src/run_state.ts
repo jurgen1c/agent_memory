@@ -458,6 +458,7 @@ export class AgentflowRunStateStore {
   upsertArtifact(input: UpsertAgentflowArtifactInput): void {
     this.assertOpen();
     const runId = requiredString(input.runId, "Run ID");
+    this.requireRun(runId);
     const id = requiredString(input.id, "Artifact ID");
     const artifactPath = repoRelativeArtifactPath(input.path);
     if (input.sizeBytes !== undefined && (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes < 0)) {

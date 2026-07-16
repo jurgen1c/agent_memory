@@ -511,7 +511,7 @@ describe("Agentflow run-state SQLite store", () => {
     expect(fs.readFileSync(target, "utf8")).toBe("replacement");
     expect(fs.existsSync(backup)).toBe(false);
 
-    const orphanTarget = path.join(repoRoot, ".agentflow/runs", artifactRunDirectory("run-recovery"), "artifacts/orphan.txt");
+    const orphanTarget = path.join(repoRoot, artifactStoragePath("run-recovery", "orphan.txt"));
     fs.writeFileSync(orphanTarget, "published before commit");
     const finalized = store.writeArtifact({
       id: "orphan",
@@ -644,6 +644,19 @@ describe("Agentflow run-state SQLite store", () => {
       kind: "output",
       contentType: "text/plain"
     })).toThrow(/repo-relative/);
+    let missingRunError: unknown;
+    try {
+      store.upsertArtifact({
+        id: "missing-run",
+        runId: "missing-run",
+        path: "result.txt",
+        kind: "output",
+        contentType: "text/plain"
+      });
+    } catch (error) {
+      missingRunError = error;
+    }
+    expect(missingRunError).toMatchObject({ code: "AGENTFLOW_RUN_NOT_FOUND" });
     store.close();
 
     await expect(openAgentflowRunState({ cwd: repoRoot, databasePath: path.join(os.tmpdir(), "outside-agentflow.sqlite") }))
