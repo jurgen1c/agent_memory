@@ -855,9 +855,9 @@ export class AgentflowRunStateStore {
   }
 
   private inspectArtifact(row: ArtifactRow): AgentflowArtifactRecord {
-    const target = artifactStoragePath(this.repoRoot, row.run_id, row.path, false, true);
     let status: AgentflowArtifactStatus;
     try {
+      const target = artifactStoragePath(this.repoRoot, row.run_id, row.path, false, true);
       if (isSymbolicLink(target)) {
         status = "stale";
       } else {
@@ -872,8 +872,14 @@ export class AgentflowRunStateStore {
         }
       }
     } catch (error) {
-      if (!["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
-      status = "missing";
+      const code = (error as NodeJS.ErrnoException).code ?? "";
+      if ((error instanceof AgentflowRunStateError && error.code === "AGENTFLOW_ARTIFACT_PATH") || code === "ELOOP") {
+        status = "stale";
+      } else if (["ENOENT", "ENOTDIR"].includes(code)) {
+        status = "missing";
+      } else {
+        throw error;
+      }
     }
     const timestamp = currentTimestamp(this.now);
     const original = row;
@@ -1047,7 +1053,7 @@ function hydrateArtifact(repoRoot: string, row: ArtifactRow): AgentflowArtifactR
     runId: row.run_id,
     producerStepId: row.step_id,
     declaredPath: row.path,
-    storagePath: path.relative(repoRoot, artifactStoragePath(repoRoot, row.run_id, row.path, false, true)).replaceAll("\\", "/"),
+    storagePath: path.relative(repoRoot, artifactStorageLocation(repoRoot, row.run_id, row.path)).replaceAll("\\", "/"),
     kind: row.kind,
     contentType: row.content_type,
     status: row.status,
@@ -1146,6 +1152,15 @@ function artifactStoragePath(
   createParent: boolean,
   allowTargetSymlink = false
 ): string {
+  const target = artifactStorageLocation(repoRoot, runId, declaredPath);
+  verifyArtifactPath(repoRoot, path.dirname(target), createParent);
+  if (!allowTargetSymlink && isSymbolicLink(target)) {
+    throw new AgentflowRunStateError(`Artifact path cannot be a symbolic link: ${target}`, "AGENTFLOW_ARTIFACT_PATH");
+  }
+  return target;
+}
+
+function artifactStorageLocation(repoRoot: string, runId: string, declaredPath: string): string {
   const normalizedRunId = artifactRunId(runId);
   const normalizedPath = repoRelativeArtifactPath(declaredPath);
   const artifactRoot = path.join(repoRoot, ".agentflow", "runs", artifactRunDirectory(normalizedRunId), "artifacts");
@@ -1156,10 +1171,6 @@ function artifactStoragePath(
     `Artifact path must stay inside the repository: ${target}`,
     "AGENTFLOW_ARTIFACT_PATH"
   );
-  verifyArtifactPath(repoRoot, path.dirname(target), createParent);
-  if (!allowTargetSymlink && isSymbolicLink(target)) {
-    throw new AgentflowRunStateError(`Artifact path cannot be a symbolic link: ${target}`, "AGENTFLOW_ARTIFACT_PATH");
-  }
   return target;
 }
 
@@ -1236,6 +1247,7 @@ function recoverArtifactStaging(target: string, temporaryPath: string, backupPat
       return;
     }
     const targetMatchesRegistry = fs.existsSync(target)
+      && !isSymbolicLink(target)
       && fs.statSync(target).isFile()
       && registeredChecksum !== null
       && artifactChecksum(target) === registeredChecksum;

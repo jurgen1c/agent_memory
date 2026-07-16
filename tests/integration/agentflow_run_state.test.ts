@@ -473,7 +473,33 @@ describe("Agentflow run-state SQLite store", () => {
     });
     expect(replacedMissing).toMatchObject({ status: "overwritten", previousChecksum: overwritten.checksum });
     fs.unlinkSync(target);
-    fs.symlinkSync(path.join(os.tmpdir(), "agentflow-replaced-artifact"), target);
+    const replacedArtifactTarget = path.join(repoRoot, "agentflow-replaced-artifact");
+    fs.writeFileSync(replacedArtifactTarget, "{\"result\":3}\n");
+    fs.symlinkSync(replacedArtifactTarget, target);
+    const originalLstatSync = fs.lstatSync;
+    const lstatSyncDescriptor = Object.getOwnPropertyDescriptor(fs, "lstatSync")!;
+    let targetChecks = 0;
+    Object.defineProperty(fs, "lstatSync", {
+      ...lstatSyncDescriptor,
+      value: (...args: unknown[]) => {
+        if (path.resolve(String(args[0])) === target && targetChecks++ === 0) {
+          return { isSymbolicLink: () => false };
+        }
+        return Reflect.apply(originalLstatSync, fs, args);
+      }
+    });
+    try {
+      expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("stale");
+    } finally {
+      Object.defineProperty(fs, "lstatSync", lstatSyncDescriptor);
+    }
+    const artifactRoot = path.dirname(target);
+    const realArtifactRoot = `${artifactRoot}-real`;
+    fs.renameSync(artifactRoot, realArtifactRoot);
+    fs.symlinkSync(realArtifactRoot, artifactRoot);
+    expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("stale");
+    fs.unlinkSync(artifactRoot);
+    fs.renameSync(realArtifactRoot, artifactRoot);
     const locker = new Database(store.databasePath);
     locker.exec("BEGIN IMMEDIATE");
     expect(store.listArtifacts("run-artifacts")[0]?.status).toBe("stale");
@@ -667,6 +693,39 @@ describe("Agentflow run-state SQLite store", () => {
       contentType: "text/plain",
       content: "replacement"
     });
+
+    fs.renameSync(target, backup);
+    const outsideTarget = path.join(repoRoot, "outside-target.txt");
+    fs.writeFileSync(outsideTarget, "outside must remain untouched");
+    fs.symlinkSync(outsideTarget, target);
+    const originalLstatSync = fs.lstatSync;
+    const lstatSyncDescriptor = Object.getOwnPropertyDescriptor(fs, "lstatSync")!;
+    let targetChecks = 0;
+    Object.defineProperty(fs, "lstatSync", {
+      ...lstatSyncDescriptor,
+      value: (...args: unknown[]) => {
+        if (path.resolve(String(args[0])) === target && targetChecks++ === 0) {
+          return { isSymbolicLink: () => false };
+        }
+        return Reflect.apply(originalLstatSync, fs, args);
+      }
+    });
+    let recoveredFromTargetSymlink;
+    try {
+      recoveredFromTargetSymlink = store.writeArtifact({
+        id: "report",
+        runId: "run-recovery",
+        path: "report.txt",
+        kind: "output",
+        contentType: "text/plain",
+        content: "replacement"
+      });
+    } finally {
+      Object.defineProperty(fs, "lstatSync", lstatSyncDescriptor);
+    }
+    expect(recoveredFromTargetSymlink.status).toBe("overwritten");
+    expect(fs.readFileSync(target, "utf8")).toBe("replacement");
+    expect(fs.readFileSync(outsideTarget, "utf8")).toBe("outside must remain untouched");
 
     fs.renameSync(target, backup);
     fs.mkdirSync(target);
