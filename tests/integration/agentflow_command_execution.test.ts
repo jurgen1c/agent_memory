@@ -387,6 +387,32 @@ steps:
     expect(fs.existsSync(marker)).toBe(false);
     store.close();
   });
+
+  test("rejects declared outputs through existing symlinked parent directories before execution", async () => {
+    const repoRoot = temporaryRepo();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "agentflow-output-outside-"));
+    fs.symlinkSync(outside, path.join(repoRoot, "linked-output"), "dir");
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: symlink-output
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - id: escape
+    type: command
+    command: touch linked-output/result.txt
+    outputs: [linked-output/result.txt]
+`);
+    const store = await openAgentflowRunState({ cwd: repoRoot });
+    createAgentflowLifecycleRun(store, { id: "run-symlink-output", workflow });
+
+    const result = await executeAgentflowCommandPipeline(store, "run-symlink-output", workflow);
+
+    expect(result).toMatchObject({ status: "failed", failedStep: "escape" });
+    expect(result.message).toContain("stay inside the repository");
+    expect(fs.existsSync(path.join(outside, "result.txt"))).toBe(false);
+    store.close();
+  });
 });
 
 function temporaryRepo(): string {

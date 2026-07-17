@@ -232,7 +232,6 @@ function runCommand(
     let timedOut = false;
     let settled = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
-    let lifecycleTimer: ReturnType<typeof setInterval> | undefined;
     let terminationMessage: string | undefined;
     const child = spawn(command, {
       cwd: repoRoot,
@@ -263,7 +262,7 @@ function runCommand(
     const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
       requestTermination("Command exceeded timeout_seconds and was terminated.", true);
     }, timeoutMs);
-    lifecycleTimer = setInterval(() => {
+    const lifecycleTimer = setInterval(() => {
       const status = stopStatus();
       if (status !== undefined) requestTermination(`Agentflow run was ${status}; command was terminated.`, false);
     }, 25);
@@ -364,9 +363,14 @@ function validateCommandStep(
     return { status: "failed", message: "Command steps require a non-empty command." };
   }
   if (step.timeout_seconds !== undefined &&
-      (typeof step.timeout_seconds !== "number" || !Number.isFinite(step.timeout_seconds) || step.timeout_seconds <= 0 ||
-       step.timeout_seconds > MAX_AGENTFLOW_COMMAND_TIMEOUT_SECONDS)) {
+      (typeof step.timeout_seconds !== "number" || !Number.isFinite(step.timeout_seconds) || step.timeout_seconds <= 0)) {
     return { status: "failed", message: "Command timeout_seconds must be a positive finite number." };
+  }
+  if (typeof step.timeout_seconds === "number" && step.timeout_seconds > MAX_AGENTFLOW_COMMAND_TIMEOUT_SECONDS) {
+    return {
+      status: "failed",
+      message: `Command timeout_seconds cannot exceed ${MAX_AGENTFLOW_COMMAND_TIMEOUT_SECONDS}.`
+    };
   }
 
   const approval = evaluateAgentflowPolicy(workflow, { kind: "approval", operation: "command" });
@@ -423,7 +427,18 @@ function resolveOutputPath(repoRoot: string, declaredPath: string): string | und
   const normalized = path.posix.normalize(declaredPath);
   if (path.posix.isAbsolute(normalized) || normalized === ".." || normalized.startsWith("../")) return undefined;
   const candidate = path.resolve(repoRoot, ...normalized.split("/"));
-  return inside(repoRoot, candidate) ? candidate : undefined;
+  if (!inside(repoRoot, candidate)) return undefined;
+  let existingAncestor = candidate;
+  while (!fs.existsSync(existingAncestor)) {
+    const parent = path.dirname(existingAncestor);
+    if (parent === existingAncestor) return undefined;
+    existingAncestor = parent;
+  }
+  try {
+    return inside(repoRoot, fs.realpathSync(existingAncestor)) ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function inside(root: string, candidate: string): boolean {
