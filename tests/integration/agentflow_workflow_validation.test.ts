@@ -732,7 +732,7 @@ steps:
 
     expect(validateAgentflowWorkflow(workflow).errors).toContainEqual({
       code: "workflow.parallel.file_scope.required",
-      message: 'Parallel writer session "writer" must declare a non-empty file_scope.include list.',
+      message: 'Parallel writer session "writer" requires a non-empty effective file_scope.include list from policies.file_scope, the session, or the parallel operation.',
       path: "steps[0].body[0].body[0].file_scope.include",
       stepId: "parallel_work"
     });

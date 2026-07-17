@@ -839,7 +839,7 @@ function validateParallelWriters(
         if (writer.includeLayers.length === 0) {
           errors.push({
             code: "workflow.parallel.file_scope.required",
-            message: `Parallel writer session "${writer.session}" must declare a non-empty file_scope.include list.`,
+            message: `Parallel writer session "${writer.session}" requires a non-empty effective file_scope.include list from policies.file_scope, the session, or the parallel operation.`,
             path: `${writer.path}.file_scope.include`,
             ...(context.id === undefined ? {} : { stepId: context.id })
           });

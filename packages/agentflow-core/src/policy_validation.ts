@@ -328,7 +328,7 @@ function validateRetentionPolicy(value: AgentflowYamlValue | undefined, errors: 
         errors.push(issue(
           "workflow.policy.retention.invalid",
           `retention.${name}.${field}`,
-          `Retention ${field} must be a non-empty list of repo-relative patterns.`
+          `Retention ${field} must be a non-empty list of run-directory-relative patterns.`
         ));
       } else {
         stringList(rule[field]).forEach((pattern, index) => {

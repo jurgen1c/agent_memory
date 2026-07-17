@@ -397,12 +397,12 @@ steps:
       path: "src/x.ts",
       fileScope: { include: ["src/**"], exclude: ["src/[z-a].ts"] }
     })).toMatchObject({ status: "fail", code: "policy.input.invalid" });
-    for (const path of [" src/index.ts", "src\\index.ts"]) {
+    for (const candidatePath of [" src/index.ts", "src\\index.ts"]) {
       expect(evaluateAgentflowPolicy(workflow, {
         kind: "file_write",
         rootPath,
         session: "writer",
-        path
+        path: candidatePath
       })).toMatchObject({ status: "fail", code: "policy.file_scope.denied" });
     }
 
@@ -754,6 +754,16 @@ steps:
       kind: "unsafe_operation",
       operation: "force push"
     })).toMatchObject({ status: "fail", code: "policy.configuration.invalid" });
+
+    const emptyRetentionList = parseAgentflowWorkflowOrThrow(POLICY_WORKFLOW.replace(
+      "delete: [temp/**, logs/**]",
+      "delete: []"
+    ));
+    expect(validateAgentflowWorkflow(emptyRetentionList).errors).toContainEqual({
+      code: "workflow.policy.retention.invalid",
+      message: "Retention delete must be a non-empty list of run-directory-relative patterns.",
+      path: "retention.on_success.delete"
+    });
 
     const controlCharacterPattern = parseAgentflowWorkflowOrThrow(POLICY_WORKFLOW.replace(
       "include: [src/**]",
