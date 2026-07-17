@@ -160,7 +160,7 @@ export function transformAgentflowFixtureArtifact(
     );
   }
   const source = isBinaryArtifactValue(input)
-    ? Buffer.from(input.data, "base64")
+    ? decodeBinaryArtifactValue(input, context.inputPath)
     : Buffer.from(typeof input === "string" ? input : stableJson(input), "utf8");
   if (source.byteLength > MAX_AGENTFLOW_TRANSFORM_INPUT_BYTES) {
     throw new AgentflowArtifactTransformError(
@@ -173,6 +173,24 @@ export function transformAgentflowFixtureArtifact(
   return typeof result.content === "string"
     ? result.content
     : { __agentflow_binary__: "base64", data: Buffer.from(result.content).toString("base64") };
+}
+
+function decodeBinaryArtifactValue(input: AgentflowBinaryArtifactValue, inputPath: string): Buffer {
+  const canonicalBase64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+  if (!canonicalBase64.test(input.data)) {
+    throw new AgentflowArtifactTransformError(
+      `Fixture artifact ${inputPath} contains invalid base64 binary data.`,
+      "AGENTFLOW_ARTIFACT_TRANSFORM_INPUT"
+    );
+  }
+  const decoded = Buffer.from(input.data, "base64");
+  if (decoded.toString("base64") !== input.data) {
+    throw new AgentflowArtifactTransformError(
+      `Fixture artifact ${inputPath} contains non-canonical base64 binary data.`,
+      "AGENTFLOW_ARTIFACT_TRANSFORM_INPUT"
+    );
+  }
+  return decoded;
 }
 
 function validateTransformOutput(transformName: string, output: AgentflowArtifactTransformOutput): void {

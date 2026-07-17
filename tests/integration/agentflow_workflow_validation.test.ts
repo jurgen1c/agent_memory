@@ -181,6 +181,31 @@ steps:
     ]);
   });
 
+  test("rejects transform failure targets unsupported by the runtime", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: unsupported-transform-target
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - id: render
+    type: artifact_transform
+    input: ticket.json
+    output: ticket.md
+    transform: jira_ticket_to_markdown
+    on_failure: { then: recover }
+  - id: recover
+    type: result
+    status: completed
+`);
+
+    expect(validateAgentflowWorkflow(workflow).errors).toContainEqual({
+      code: "workflow.artifact_transform.target.unsupported",
+      message: "Artifact transform runtime supports only retry and then: continue, ignore, fail, or pause.",
+      path: "steps[0].on_failure.then",
+      stepId: "render"
+    });
+  });
+
   test("validates nested targets and loop bounds deterministically", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`name: nested
 version: 1
@@ -2253,6 +2278,28 @@ steps:
     expect(validateAgentflowWorkflow(workflow).errors.map((issue) => [issue.code, issue.path])).toEqual([
       ["workflow.artifact.path.invalid", "steps[0].input"],
       ["workflow.artifact.path.invalid", "steps[0].output"]
+    ]);
+  });
+
+  test("rejects dynamic artifact transform paths that the runtime cannot resolve", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: dynamic-transform-paths
+version: 1
+style: pipeline
+maturity: experimental
+inputs:
+  source: { required: true }
+  target: { required: true }
+steps:
+  - id: render
+    type: artifact_transform
+    input: "{{ inputs.source }}"
+    output: "{{ inputs.target }}"
+    transform: jira_ticket_to_markdown
+`);
+
+    expect(validateAgentflowWorkflow(workflow).errors.map((issue) => [issue.code, issue.path])).toEqual([
+      ["workflow.artifact.path.dynamic", "steps[0].input"],
+      ["workflow.artifact.path.dynamic", "steps[0].output"]
     ]);
   });
 

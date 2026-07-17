@@ -337,6 +337,18 @@ function validateRequiredStepFields(context: StepContext, errors: AgentflowWorkf
         `${failureLabel} failures may continue or be ignored only when on_failure.allowed is true.`
       );
     }
+    if (context.type === "artifact_transform") {
+      const unsupportedTarget = unsupportedTransformFailureTarget(context.step.on_failure);
+      if (unsupportedTarget !== undefined) {
+        addStepIssue(
+          errors,
+          context,
+          "workflow.artifact_transform.target.unsupported",
+          `on_failure.${unsupportedTarget}`,
+          "Artifact transform runtime supports only retry and then: continue, ignore, fail, or pause."
+        );
+      }
+    }
   }
 
   if (context.type === "condition") {
@@ -368,6 +380,13 @@ function validateRequiredStepFields(context: StepContext, errors: AgentflowWorkf
       );
     }
   }
+}
+
+function unsupportedTransformFailureTarget(onFailure: AgentflowYamlMapping): string | undefined {
+  const then = nonEmptyString(onFailure.then);
+  if (then !== undefined && !["continue", "ignore", "fail", "pause"].includes(then)) return "then";
+  return ["goto", "route_to", "on_remediated", "on_unresolved", "return_to"]
+    .find((field) => onFailure[field] !== undefined);
 }
 
 function validateArtifactFieldShapes(context: StepContext, errors: AgentflowWorkflowIssue[]): void {
@@ -827,7 +846,17 @@ function validateArtifactPaths(contexts: StepContext[], errors: AgentflowWorkflo
     if (context.type !== "artifact_transform") continue;
     for (const field of ["input", "output"] as const) {
       const value = nonEmptyString(context.step[field]);
-      if (value === undefined || isDynamicReference(value)) continue;
+      if (value === undefined) continue;
+      if (isDynamicReference(value)) {
+        addStepIssue(
+          errors,
+          context,
+          "workflow.artifact.path.dynamic",
+          field,
+          `Artifact transform ${field} must be a static declared artifact path.`
+        );
+        continue;
+      }
       try {
         normalizeAgentflowArtifactPath(value);
         continue;

@@ -546,6 +546,15 @@ function validateTransformStep(step: AgentflowWorkflowStep): string | undefined 
   if (["continue", "ignore"].includes(String(onFailure?.then)) && onFailure?.allowed !== true) {
     return "Artifact transform failures may continue or be ignored only when on_failure.allowed is true.";
   }
+  if (onFailure !== undefined) {
+    const then = typeof onFailure.then === "string" && onFailure.then.trim().length > 0
+      ? onFailure.then.trim()
+      : undefined;
+    if ((then !== undefined && !["continue", "ignore", "fail", "pause"].includes(then))
+        || ["goto", "route_to", "on_remediated", "on_unresolved", "return_to"].some((field) => onFailure[field] !== undefined)) {
+      return "Artifact transform runtime supports only retry and then: continue, ignore, fail, or pause.";
+    }
+  }
   return undefined;
 }
 
@@ -628,7 +637,7 @@ function failureRetries(step: AgentflowWorkflowStep): number {
 
 function failureThen(step: AgentflowWorkflowStep): string | undefined {
   const then = mapping(step.on_failure)?.then;
-  return typeof then === "string" ? then : undefined;
+  return typeof then === "string" && then.trim().length > 0 ? then.trim() : undefined;
 }
 
 function failureContinues(step: AgentflowWorkflowStep): boolean {

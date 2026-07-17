@@ -639,7 +639,14 @@ export class AgentflowRunStateStore {
           "SELECT checksum FROM artifacts WHERE run_id = ? AND path = ?",
           [runId, requiredArtifact.path]
         );
-        if (current?.checksum !== requiredArtifact.checksum) {
+        let backingChecksum: string | undefined;
+        try {
+          const requiredTarget = artifactStoragePath(this.repoRoot, runId, requiredArtifact.path, false);
+          backingChecksum = artifactChecksum(requiredTarget);
+        } catch {
+          backingChecksum = undefined;
+        }
+        if (current?.checksum !== requiredArtifact.checksum || backingChecksum !== requiredArtifact.checksum) {
           throw new AgentflowRunStateError(
             `Required input artifact ${requiredArtifact.path} was overwritten before ${declaredPath} could be published.`,
             "AGENTFLOW_ARTIFACT_STALE"

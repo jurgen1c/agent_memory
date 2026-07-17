@@ -298,6 +298,41 @@ steps:
     store.close();
   });
 
+  test("fails closed for unsupported transform failure targets on externally persisted workflows", async () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: invalid-transform-target
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - id: render
+    type: artifact_transform
+    input: ticket.json
+    output: ticket.md
+    transform: never_run
+    on_failure: { then: complete }
+`);
+    const temporaryRoot = temporaryRepo();
+    const store = await openAgentflowRunState({ cwd: temporaryRoot });
+    store.createRunWithEvent({
+      id: "invalid-transform-target",
+      workflow: { name: workflow.name, version: workflow.version, style: workflow.style, maturity: workflow.maturity },
+      context: { workflow: workflow as unknown as AgentflowRunStateValue }
+    }, { type: "run.created", payload: { status: "pending" } });
+    seedInput(store, "invalid-transform-target", "hello");
+    let calls = 0;
+    const registry = new AgentflowArtifactTransformRegistry().register("never_run", () => {
+      calls += 1;
+      return { content: "unexpected", contentType: "text/plain" };
+    });
+
+    const result = await executeAgentflowCommandPipeline(store, "invalid-transform-target", workflow, registry);
+
+    expect(result).toMatchObject({ status: "failed", failedStep: "render" });
+    expect(result.message).toContain("supports only retry");
+    expect(calls).toBe(0);
+    store.close();
+  });
+
   test("does not publish transform output after concurrent cancellation", async () => {
     const workflow = transformWorkflow("cancel_during_transform");
     const temporaryRoot = temporaryRepo();
@@ -412,6 +447,27 @@ steps:
     expect(firstStore.getArtifact("concurrent-input", "ticket.md")).toBeNull();
     firstStore.close();
     secondStore.close();
+  });
+
+  test("rejects output publication when input backing bytes change without a registry update", async () => {
+    const workflow = transformWorkflow("mutate_backing_file");
+    const temporaryRoot = temporaryRepo();
+    const store = await openAgentflowRunState({ cwd: temporaryRoot });
+    createAgentflowLifecycleRun(store, { id: "stale-backing-input", workflow });
+    seedInput(store, "stale-backing-input", "old");
+    const input = store.getArtifact("stale-backing-input", "ticket.json");
+    if (input === null) throw new Error("Expected seeded input artifact.");
+    const registry = new AgentflowArtifactTransformRegistry().register("mutate_backing_file", (content) => {
+      fs.writeFileSync(path.join(temporaryRoot, input.storagePath), "new");
+      return { content, contentType: "text/plain" };
+    });
+
+    const result = await executeAgentflowCommandPipeline(store, "stale-backing-input", workflow, registry);
+
+    expect(result).toMatchObject({ status: "paused", failedStep: "render" });
+    expect(result.message).toContain("was overwritten before ticket.md could be published");
+    expect(store.getArtifact("stale-backing-input", "ticket.md")).toBeNull();
+    store.close();
   });
 
   test("rejects oversized inputs through a bounded artifact read", async () => {
@@ -587,6 +643,58 @@ steps:
     expect(result.artifactValues["ticket.md"]).toBe("# AM-24: Producer\n");
   });
 
+  test("rejects fixture artifact keys that collide after path normalization", () => {
+    const result = simulateAgentflowWorkflow(transformWorkflow("jira_ticket_to_markdown"), {
+      artifacts: {
+        "ticket.json": { key: "AM-24", fields: { summary: "First" } },
+        "inputs/../ticket.json": { key: "AM-24", fields: { summary: "Second" } }
+      }
+    });
+
+    expect(result.status).toBe("unresolved");
+    expect(result.artifactValues["ticket.json"]).toBeUndefined();
+    expect(result.unresolvedBranches).toContainEqual({
+      stepId: "(fixture)",
+      reason: "Fixture artifact keys collide at canonical path ticket.json."
+    });
+  });
+
+  test("rejects per-step fixture output keys that collide after path normalization", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: colliding-step-output-fixture
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - id: fixture
+    type: command
+    command: echo ticket
+    outputs: [ticket.json]
+  - id: render
+    type: artifact_transform
+    input: ticket.json
+    output: ticket.md
+    transform: jira_ticket_to_markdown
+`);
+
+    const result = simulateAgentflowWorkflow(workflow, {
+      steps: {
+        fixture: {
+          outputs: {
+            "inputs/../ticket.json": { key: "AM-24", fields: { summary: "First" } },
+            "ticket.json": { key: "AM-24", fields: { summary: "Second" } }
+          }
+        }
+      }
+    });
+
+    expect(result.status).toBe("unresolved");
+    expect(result.artifactValues["ticket.json"]).toBeUndefined();
+    expect(result.unresolvedBranches).toContainEqual({
+      stepId: "fixture",
+      reason: "Fixture output keys collide at canonical path ticket.json."
+    });
+  });
+
   test("rejects oversized transform fixture inputs during simulation", () => {
     const result = simulateAgentflowWorkflow(transformWorkflow("jira_ticket_to_markdown"), {
       artifacts: { "ticket.json": "x".repeat(MAX_AGENTFLOW_TRANSFORM_INPUT_BYTES + 1) }
@@ -632,6 +740,57 @@ steps:
     expect(collision.status).toBe("unresolved");
     expect(collision.unresolvedBranches[0]?.reason).toContain("declare overwrite: true");
     expect(collision.artifactValues["ticket.md"]).toBe("existing");
+  });
+
+  test("pauses simulation for a targetless transform failure policy", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: targetless-transform-failure
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - id: render
+    type: artifact_transform
+    input: ticket.json
+    output: ticket.md
+    transform: jira_ticket_to_markdown
+    on_failure: {}
+`);
+
+    const result = simulateAgentflowWorkflow(workflow, { artifacts: { "ticket.json": "not-json" } });
+
+    expect(result.status).toBe("paused");
+    expect(result.terminalStates).toEqual([{ stepId: "render", status: "paused" }]);
+
+    const fixtureFailure = simulateAgentflowWorkflow(workflow, {
+      artifacts: { "ticket.json": { key: "AM-24", fields: { summary: "Valid" } } },
+      steps: { render: { outcome: "failed" } }
+    });
+    expect(fixtureFailure.status).toBe("paused");
+    expect(fixtureFailure.terminalStates).toEqual([{ stepId: "render", status: "paused" }]);
+  });
+
+  test("normalizes padded transform failure targets during execution", async () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: padded-transform-failure-target
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - id: render
+    type: artifact_transform
+    input: ticket.json
+    output: ticket.md
+    transform: jira_ticket_to_markdown
+    on_failure: { then: " fail " }
+`);
+    const temporaryRoot = temporaryRepo();
+    const store = await openAgentflowRunState({ cwd: temporaryRoot });
+    createAgentflowLifecycleRun(store, { id: "padded-transform-target", workflow });
+    seedInput(store, "padded-transform-target", "invalid");
+
+    const result = await executeAgentflowCommandPipeline(store, "padded-transform-target", workflow);
+
+    expect(result).toMatchObject({ status: "failed", failedStep: "render" });
+    store.close();
   });
 
   test("applies retry and continue policies to transform failures during simulation", () => {
@@ -702,8 +861,20 @@ steps:
       steps: { downstream: { outputs: { "downstream.txt": "continued" } } }
     });
     expect(continued.status).toBe("completed");
-    expect(continued.visitedSteps.map((step) => step.id)).toEqual(["render", "downstream"]);
+    expect(continued.visitedSteps).toEqual([
+      { id: "render", type: "artifact_transform", outcome: "failed" },
+      { id: "downstream", type: "command", outcome: "succeeded" }
+    ]);
     expect(continued.availableArtifacts).toEqual(["downstream.txt", "ticket.json"]);
+
+    const missingContinued = simulateAgentflowWorkflow(continueWorkflow, {
+      steps: { downstream: { outputs: { "downstream.txt": "continued" } } }
+    });
+    expect(missingContinued.status).toBe("completed");
+    expect(missingContinued.missingArtifacts).toEqual([
+      { stepId: "render", artifact: "ticket.json", kind: "input" }
+    ]);
+    expect(missingContinued.visitedSteps.map((step) => step.id)).toEqual(["render", "downstream"]);
   });
 
   test("continues runtime execution for an ignored transform failure", async () => {
@@ -762,6 +933,35 @@ steps:
     expect(result.unresolvedBranches[0]?.reason).toContain("must include a value");
   });
 
+  test("clears stale content for availability-only overwritten fixture outputs", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: availability-only-overwrite
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - id: fixture
+    type: command
+    command: printf ticket > ticket.json
+    outputs: [ticket.json]
+    overwrite: true
+  - id: render
+    type: artifact_transform
+    input: ticket.json
+    output: ticket.md
+    transform: jira_ticket_to_markdown
+`);
+
+    const result = simulateAgentflowWorkflow(workflow, {
+      artifacts: { "ticket.json": { key: "STALE", fields: { summary: "Old" } } },
+      steps: { fixture: { outputs: ["ticket.json"] } }
+    });
+
+    expect(result.status).toBe("unresolved");
+    expect(result.artifactValues["ticket.json"]).toBeUndefined();
+    expect(result.artifactValues["ticket.md"]).toBeUndefined();
+    expect(result.unresolvedBranches[0]?.reason).toContain("must include a value");
+  });
+
   test("resolves dynamic artifact inputs and preserves binary transform values losslessly", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`name: binary-transform
 version: 1
@@ -793,6 +993,60 @@ steps:
     expect(result.status).toBe("completed");
     expect(result.artifactValues["encoded.bin"]).toEqual({ __agentflow_binary__: "base64", data: "/wCA" });
     expect(result.artifactValues["encoded.hex"]).toBe("ff0080");
+  });
+
+  test("compares simulated artifact objects independently of key insertion order", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: equivalent-binary-artifact
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - id: encode
+    type: artifact_transform
+    input: source.txt
+    output: encoded.bin
+    transform: binary
+`);
+    const registry = new AgentflowArtifactTransformRegistry().register("binary", () => ({
+      content: Uint8Array.from([0xff, 0x00, 0x80]),
+      contentType: "application/octet-stream"
+    }));
+
+    const result = simulateAgentflowWorkflow(workflow, {
+      artifacts: {
+        "source.txt": "ignored",
+        "encoded.bin": { data: "/wCA", __agentflow_binary__: "base64" }
+      }
+    }, registry);
+
+    expect(result.status).toBe("completed");
+    expect(result.unresolvedBranches).toEqual([]);
+  });
+
+  test("rejects malformed binary fixture encodings", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: malformed-binary-fixture
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - id: inspect
+    type: artifact_transform
+    input: encoded.bin
+    output: encoded.hex
+    transform: hex
+`);
+    const registry = new AgentflowArtifactTransformRegistry().register("hex", (input) => ({
+      content: Buffer.from(input).toString("hex"),
+      contentType: "text/plain"
+    }));
+
+    const result = simulateAgentflowWorkflow(workflow, {
+      artifacts: { "encoded.bin": { __agentflow_binary__: "base64", data: "not base64!" } }
+    }, registry);
+
+    expect(result.status).toBe("unresolved");
+    expect(result.unresolvedBranches[0]?.reason).toContain("invalid base64 binary data");
+    expect(result.artifactValues["encoded.hex"]).toBeUndefined();
   });
 
   test("rejects invalid custom transform output contracts during simulation", () => {
