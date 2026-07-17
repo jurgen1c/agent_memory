@@ -37,10 +37,16 @@ describe("built Node CLI", () => {
     const agentflowVersion = run([builtAgentflowCli, "--version"], repoRoot, env);
     const agentflowRepo = fs.mkdtempSync(path.join(os.tmpdir(), "agentflow-lifecycle-node-"));
     fs.mkdirSync(path.join(agentflowRepo, ".git"));
-    fs.copyFileSync(
-      path.join(repoRoot, "tests/fixtures/agentflow/workflows/simple-ci.yml"),
-      path.join(agentflowRepo, "workflow.yml")
-    );
+    fs.writeFileSync(path.join(agentflowRepo, "workflow.yml"), `
+name: simple-ci
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - id: node-check
+    type: command
+    command: printf 'node check passed\\n'
+`);
     const agentflowRun = run([
       builtAgentflowCli,
       "run",
@@ -50,15 +56,15 @@ describe("built Node CLI", () => {
     ], agentflowRepo, env);
 
     expect(agentflowHelp.exitCode).toBe(0);
-    expect(agentflowHelp.stdout).toContain("Lifecycle state management is active");
+    expect(agentflowHelp.stdout).toContain("Command-only pipeline execution");
     expect(agentflowVersion.exitCode).toBe(0);
     expect(agentflowVersion.stdout).toContain("agentflow ");
-    expect(agentflowRun.exitCode).toBe(7);
+    expect(agentflowRun.exitCode).toBe(0);
     expect(agentflowRun.stdout).toContain("Created Agentflow run node-lifecycle");
-    expect(agentflowRun.stderr).toContain("Workflow step execution is not available yet");
+    expect(agentflowRun.stdout).toContain("Status: completed");
     const agentflowStatus = run([builtAgentflowCli, "status", "node-lifecycle"], agentflowRepo, env);
     expect(agentflowStatus.exitCode).toBe(0);
-    expect(agentflowStatus.stdout).toContain("Status: pending");
+    expect(agentflowStatus.stdout).toContain("Status: completed");
 
     const nestedPackageRoot = installNestedAgentflowPackage();
     const nestedAgentflowVersion = run([path.join(nestedPackageRoot, "dist/agentflow.js"), "--version"], path.dirname(nestedPackageRoot), env);
