@@ -11,7 +11,11 @@ import {
 } from "./run_state";
 import type { AgentflowWorkflow, AgentflowWorkflowStep, AgentflowYamlMapping } from "./workflow";
 import { evaluateAgentflowPolicy } from "./policy";
-import { agentflowCommandUnsafeReason, MAX_AGENTFLOW_COMMAND_TIMEOUT_SECONDS } from "./validation";
+import {
+  agentflowCommandUnsafeReason,
+  MAX_AGENTFLOW_COMMAND_RETRIES,
+  MAX_AGENTFLOW_COMMAND_TIMEOUT_SECONDS
+} from "./validation";
 
 const MAX_CAPTURE_BYTES = 10 * 1024 * 1024;
 
@@ -370,6 +374,22 @@ function validateCommandStep(
     return {
       status: "failed",
       message: `Command timeout_seconds cannot exceed ${MAX_AGENTFLOW_COMMAND_TIMEOUT_SECONDS}.`
+    };
+  }
+
+  const onFailure = mapping(step.on_failure);
+  const retry = onFailure?.retry;
+  if (retry !== undefined &&
+      (!Number.isSafeInteger(retry) || Number(retry) < 0 || Number(retry) > MAX_AGENTFLOW_COMMAND_RETRIES)) {
+    return {
+      status: "failed",
+      message: `Command on_failure.retry must be an integer from 0 through ${MAX_AGENTFLOW_COMMAND_RETRIES}.`
+    };
+  }
+  if (onFailure?.then === "continue" && onFailure.allowed !== true) {
+    return {
+      status: "failed",
+      message: "Command failures may continue only when on_failure.allowed is true."
     };
   }
 

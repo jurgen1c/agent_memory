@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  type AgentflowRunStateValue,
   createAgentflowLifecycleRun,
   executeAgentflowCommandPipeline,
   openAgentflowRunState,
@@ -33,6 +34,45 @@ steps:
 
     expect(store.getRun("mismatched-workflow")?.status).toBe("pending");
     store.close();
+  });
+
+  test("fails closed for invalid failure policies on externally persisted runs", async () => {
+    for (const [runId, failurePolicy, expectedMessage] of [
+      ["invalid-retry", "retry: 101\n      then: fail", "integer from 0 through 100"],
+      ["unapproved-continue", "then: continue", "on_failure.allowed is true"]
+    ] as const) {
+      const repoRoot = temporaryRepo();
+      const workflow = parseAgentflowWorkflowOrThrow(`
+name: ${runId}
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - id: unsafe-policy
+    type: command
+    command: touch command-started
+    on_failure:
+      ${failurePolicy}
+`);
+      const store = await openAgentflowRunState({ cwd: repoRoot });
+      store.createRunWithEvent({
+        id: runId,
+        workflow: {
+          name: workflow.name,
+          version: workflow.version,
+          style: workflow.style,
+          maturity: workflow.maturity
+        },
+        context: { workflow: workflow as unknown as AgentflowRunStateValue }
+      }, { type: "run.created", payload: { status: "pending" } });
+
+      const result = await executeAgentflowCommandPipeline(store, runId, workflow);
+
+      expect(result).toMatchObject({ status: "failed", failedStep: "unsafe-policy" });
+      expect(result.message).toContain(expectedMessage);
+      expect(fs.existsSync(path.join(repoRoot, "command-started"))).toBe(false);
+      store.close();
+    }
   });
 
   test("does not allow a second executor to share a running run", async () => {

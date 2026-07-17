@@ -65,7 +65,7 @@ const TARGET_FIELDS = new Set(["else", "goto", "on_approve", "on_cancel", "on_re
 const SECRET_PATH = /(^|[/._-])(\.env|credentials|id_rsa|id_ed25519|private[_-]?key|secrets?)([/._-]|$)/i;
 const SHELL_EXECUTABLES = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
 const SHELL_ANALYSIS_BUDGET = 65_536;
-const MAX_COMMAND_RETRIES = 100;
+export const MAX_AGENTFLOW_COMMAND_RETRIES = 100;
 const STEP_REQUIREMENTS: Readonly<Record<string, ReadonlyArray<readonly [string, "string" | "array"]>>> = {
   approval: [["reviewer", "string"], ["artifacts", "array"]],
   artifact_transform: [["input", "string"], ["output", "string"], ["transform", "string"]],
@@ -315,13 +315,13 @@ function validateRequiredStepFields(context: StepContext, errors: AgentflowWorkf
 
   if (context.type === "command" && isRecord(context.step.on_failure)) {
     const retry = context.step.on_failure.retry;
-    if (retry !== undefined && (!Number.isSafeInteger(retry) || Number(retry) < 0 || Number(retry) > MAX_COMMAND_RETRIES)) {
+    if (retry !== undefined && (!Number.isSafeInteger(retry) || Number(retry) < 0 || Number(retry) > MAX_AGENTFLOW_COMMAND_RETRIES)) {
       addStepIssue(
         errors,
         context,
         "workflow.command.retry.invalid",
         "on_failure.retry",
-        `Command on_failure.retry must be an integer from 0 through ${MAX_COMMAND_RETRIES}.`
+        `Command on_failure.retry must be an integer from 0 through ${MAX_AGENTFLOW_COMMAND_RETRIES}.`
       );
     }
     if (context.step.on_failure.then === "continue" && context.step.on_failure.allowed !== true) {
