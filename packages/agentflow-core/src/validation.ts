@@ -6,6 +6,7 @@ import type {
 } from "./workflow";
 import { validateAgentflowPolicyPrimitives } from "./policy";
 import { policyGlobLayersHaveWritablePath } from "./policy_utils";
+import { normalizeAgentflowArtifactPath } from "./run_state";
 
 export const MAX_AGENTFLOW_COMMAND_TIMEOUT_SECONDS = 2_147_483.647;
 
@@ -102,6 +103,7 @@ export function validateAgentflowWorkflow(workflow: AgentflowWorkflow): Agentflo
   validateLoopBounds(contexts, errors);
   validateControlFlowCycles(workflow, contexts, errors);
   validateInputReferences(workflow, errors);
+  validateArtifactPaths(contexts, errors);
   validateArtifactOutputs(workflow, contexts, errors);
   validateApprovals(contexts, errors);
   validateParallelWriters(workflow, contexts, errors);
@@ -313,24 +315,26 @@ function validateRequiredStepFields(context: StepContext, errors: AgentflowWorkf
     );
   }
 
-  if (context.type === "command" && isRecord(context.step.on_failure)) {
+  if ((context.type === "command" || context.type === "artifact_transform") && isRecord(context.step.on_failure)) {
+    const failureLabel = context.type === "command" ? "Command" : "Artifact transform";
+    const failureCode = context.type === "command" ? "workflow.command" : "workflow.artifact_transform";
     const retry = context.step.on_failure.retry;
     if (retry !== undefined && (!Number.isSafeInteger(retry) || Number(retry) < 0 || Number(retry) > MAX_AGENTFLOW_COMMAND_RETRIES)) {
       addStepIssue(
         errors,
         context,
-        "workflow.command.retry.invalid",
+        `${failureCode}.retry.invalid`,
         "on_failure.retry",
-        `Command on_failure.retry must be an integer from 0 through ${MAX_AGENTFLOW_COMMAND_RETRIES}.`
+        `${failureLabel} on_failure.retry must be an integer from 0 through ${MAX_AGENTFLOW_COMMAND_RETRIES}.`
       );
     }
-    if (context.step.on_failure.then === "continue" && context.step.on_failure.allowed !== true) {
+    if (["continue", "ignore"].includes(String(context.step.on_failure.then)) && context.step.on_failure.allowed !== true) {
       addStepIssue(
         errors,
         context,
-        "workflow.command.continue.not_allowed",
+        `${failureCode}.continue.not_allowed`,
         "on_failure.allowed",
-        "Command failures may continue only when on_failure.allowed is true."
+        `${failureLabel} failures may continue or be ignored only when on_failure.allowed is true.`
       );
     }
   }
@@ -814,6 +818,29 @@ function validateArtifactOutputs(
       } else {
         outputs.set(outputKey, outputContext);
       }
+    }
+  }
+}
+
+function validateArtifactPaths(contexts: StepContext[], errors: AgentflowWorkflowIssue[]): void {
+  for (const context of contexts) {
+    if (context.type !== "artifact_transform") continue;
+    for (const field of ["input", "output"] as const) {
+      const value = nonEmptyString(context.step[field]);
+      if (value === undefined || isDynamicReference(value)) continue;
+      try {
+        normalizeAgentflowArtifactPath(value);
+        continue;
+      } catch {
+        // Report the shared runtime path contract as a workflow validation issue.
+      }
+      addStepIssue(
+        errors,
+        context,
+        "workflow.artifact.path.invalid",
+        field,
+        `Artifact path "${value}" must be repo-relative and stay within the repository.`
+      );
     }
   }
 }
