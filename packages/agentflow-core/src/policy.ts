@@ -3,6 +3,7 @@ import type { AgentflowWorkflow, AgentflowYamlValue } from "./workflow";
 import { validateAgentflowPolicyPrimitives } from "./policy_validation";
 import {
   isSupportedPolicyGlob,
+  isPolicyRootDirectory,
   mapping,
   matchesPolicyGlob,
   nonEmptyString,
@@ -199,6 +200,9 @@ function checkFileWrite(
   if (typeof request.path !== "string") {
     return fail("policy.input.invalid", "File-write checks require a string path.");
   }
+  if (!isPolicyRootDirectory(request.rootPath)) {
+    return fail("policy.input.invalid", "File-write checks require rootPath to identify an existing directory.");
+  }
   const sessionName = request.session === undefined
     ? undefined
     : typeof request.session === "string"
@@ -263,6 +267,9 @@ function checkCleanup(
   }
   if (request.ageDays !== undefined && !nonNegativeFinite(request.ageDays)) {
     return fail("policy.input.invalid", "Cleanup ageDays must be a non-negative finite number when present.");
+  }
+  if (!isPolicyRootDirectory(request.rootPath)) {
+    return fail("policy.input.invalid", "Cleanup checks require rootPath to identify an existing directory.");
   }
 
   const cleanupMode = policyMode(workflow, "cleanup", "allow");

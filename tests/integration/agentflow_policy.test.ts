@@ -243,6 +243,8 @@ steps:
     const workflow = parseAgentflowWorkflowOrThrow(POLICY_WORKFLOW);
     const rootPath = temporaryRepo();
     fs.mkdirSync(path.join(rootPath, "src"));
+    const fileRootPath = path.join(rootPath, "not-a-directory");
+    fs.writeFileSync(fileRootPath, "not a directory\n", "utf8");
 
     expect(evaluateAgentflowPolicy(workflow, {
       kind: "file_write",
@@ -254,6 +256,23 @@ steps:
       code: "policy.input.invalid",
       message: "File-write checks require a string path."
     });
+    for (const invalidRootPath of [
+      undefined as unknown as string,
+      "",
+      path.join(rootPath, "missing"),
+      fileRootPath
+    ]) {
+      expect(evaluateAgentflowPolicy(workflow, {
+        kind: "file_write",
+        rootPath: invalidRootPath,
+        session: "writer",
+        path: "src/index.ts"
+      })).toEqual({
+        status: "fail",
+        code: "policy.input.invalid",
+        message: "File-write checks require rootPath to identify an existing directory."
+      });
+    }
 
     expect(evaluateAgentflowPolicy(workflow, {
       kind: "file_write",
@@ -436,6 +455,27 @@ steps:
   test("enforces cleanup approval and retention restrictions", () => {
     const workflow = parseAgentflowWorkflowOrThrow(POLICY_WORKFLOW);
     const rootPath = temporaryRepo();
+    const fileRootPath = path.join(rootPath, "not-a-directory");
+    fs.writeFileSync(fileRootPath, "not a directory\n", "utf8");
+
+    for (const invalidRootPath of [
+      undefined as unknown as string,
+      "",
+      path.join(rootPath, "missing"),
+      fileRootPath
+    ]) {
+      expect(evaluateAgentflowPolicy(workflow, {
+        kind: "cleanup",
+        rootPath: invalidRootPath,
+        recursive: false,
+        runStatus: "completed",
+        paths: ["temp/cache.json"]
+      })).toEqual({
+        status: "fail",
+        code: "policy.input.invalid",
+        message: "Cleanup checks require rootPath to identify an existing directory."
+      });
+    }
 
     expect(evaluateAgentflowPolicy(workflow, {
       kind: "cleanup",

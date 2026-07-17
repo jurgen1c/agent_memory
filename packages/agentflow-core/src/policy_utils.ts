@@ -533,6 +533,15 @@ export function normalizeRepoPath(value: string): string | undefined {
   return resolved;
 }
 
+export function isPolicyRootDirectory(value: unknown): value is string {
+  if (!nonEmptyString(value)) return false;
+  try {
+    return fs.statSync(fs.realpathSync(value)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 export function resolveScopedRepoPath(rootPath: string, value: string): string | undefined {
   const normalized = normalizeRepoPath(value);
   if (normalized === undefined || !nonEmptyString(rootPath)) return undefined;
