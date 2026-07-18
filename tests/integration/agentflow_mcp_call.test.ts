@@ -39,6 +39,46 @@ steps:
     ]);
   });
 
+  test("classifies externally persisted contract failures as rejected MCP policy", async () => {
+    const root = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`name: rejected-mcp-contract
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - { id: fetch, type: mcp_call, server: fixture, tool: fetch, arguments: {} }
+`);
+    const store = await openAgentflowRunState({ cwd: root });
+    store.createRunWithEvent({
+      id: "rejected-contract",
+      workflow: {
+        name: workflow.name,
+        version: workflow.version,
+        style: workflow.style,
+        maturity: workflow.maturity
+      },
+      context: { workflow: workflow as never }
+    }, { type: "run.created", payload: { status: "pending" } });
+    const classifications: string[] = [];
+    const recordFailure = store.recordFailure.bind(store);
+    store.recordFailure = (input) => {
+      classifications.push(input.classification);
+      recordFailure(input);
+    };
+
+    const result = await executeAgentflowCommandPipeline(store, "rejected-contract", workflow);
+
+    expect(result).toMatchObject({ status: "failed", failedStep: "fetch" });
+    expect(classifications).toEqual(["mcp_call_policy"]);
+    expect(store.listEvents("rejected-contract").map((event) => event.type)).toEqual([
+      "run.created",
+      "run.started",
+      "step.rejected",
+      "run.failed"
+    ]);
+    store.close();
+  });
+
   test("rejects malformed, duplicate, and dynamic output declarations", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`name: invalid-mcp-outputs
 version: 1

@@ -94,7 +94,7 @@ export async function executeAgentflowCommandPipeline(
     if (typeof step.type === "string" && step.type.trim() === "mcp_call") {
       const preflightError = validateMcpCallStep(step);
       if (preflightError !== undefined) {
-        persistMcpCallFailure(store, runId, stepId, preflightError, false, 1);
+        persistMcpCallFailure(store, runId, stepId, preflightError, false, 1, true);
         return finishFailure(store, runId, completedSteps, stepId, {
           exitCode: null,
           timedOut: false,
@@ -427,20 +427,21 @@ function persistMcpCallFailure(
   stepId: string,
   message: string,
   retryable: boolean,
-  attempt: number
+  attempt: number,
+  rejected = false
 ): void {
   const payload = { attempt, message };
   store.upsertStep({ runId, stepId, attempt, status: "failed", error: payload });
   store.recordFailure({
-    id: `mcp-call:${safeId(stepId)}:attempt-${attempt}`,
+    id: rejected ? `mcp-call:${safeId(stepId)}:preflight` : `mcp-call:${safeId(stepId)}:attempt-${attempt}`,
     runId,
     stepId,
-    classification: "mcp_call_failure",
+    classification: rejected ? "mcp_call_policy" : "mcp_call_failure",
     message,
     retryable,
     payload
   });
-  store.appendRunEvent(runId, { type: "step.failed", stepId, payload });
+  store.appendRunEvent(runId, { type: rejected ? "step.rejected" : "step.failed", stepId, payload });
 }
 
 function persistSessionRequestInterruption(
