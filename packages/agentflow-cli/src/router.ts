@@ -197,15 +197,15 @@ async function runLifecycleCommand(
     if (command === "run") {
       const fixture = args.length === 5 ? readRunFixture(args[4], options.cwd) : null;
       if (fixture !== null && "exitCode" in fixture) return fixture;
-      const hasSessionRequest = workflowResult!.workflow.steps.some((step) => step.type === "session_request");
-      if (hasSessionRequest && fixture === null) {
+      const sessionRequestSteps = collectSessionRequestSteps(workflowResult!.workflow.steps);
+      if (sessionRequestSteps.length > 0 && fixture === null) {
         return {
           exitCode: 1,
           stderr: "Session-request workflows require --fixture <file> until a non-fixture provider adapter is configured."
         };
       }
-      const unsupportedProviders = workflowResult!.workflow.steps
-        .filter((step) => step.type === "session_request" && typeof step.session === "string")
+      const unsupportedProviders = sessionRequestSteps
+        .filter((step) => typeof step.session === "string")
         .map((step) => workflowResult!.workflow.sessions?.[String(step.session).trim()])
         .flatMap((session) => session !== null && typeof session === "object" && !Array.isArray(session)
           ? [String((session as Record<string, unknown>).provider ?? "").trim()]
@@ -218,13 +218,13 @@ async function runLifecycleCommand(
         };
       }
       if (fixture !== null) {
-        const unsupportedOutputStep = workflowResult!.workflow.steps.find((step) =>
-          step.type === "session_request" && fixture.arrayOutputSteps.has(String(step.id ?? ""))
+        const unsupportedOutputStep = sessionRequestSteps.find((step) =>
+          fixture.arrayOutputSteps.has(String(step.id ?? "").trim())
         );
         if (unsupportedOutputStep !== undefined) {
           return {
             exitCode: 2,
-            stderr: `Run fixture step ${String(unsupportedOutputStep.id)}.outputs must be an object with materializable output values; array-form outputs are simulation-only.`
+            stderr: `Run fixture step ${String(unsupportedOutputStep.id).trim()}.outputs must be an object with materializable output values; array-form outputs are simulation-only.`
           };
         }
       }
@@ -541,6 +541,26 @@ function readWorkflow(
   }
 
   return { workflow: parsed.workflow };
+}
+
+function collectSessionRequestSteps(
+  steps: import("@jurgen1c/agentflow-core").AgentflowWorkflowStep[]
+): import("@jurgen1c/agentflow-core").AgentflowWorkflowStep[] {
+  const requests: import("@jurgen1c/agentflow-core").AgentflowWorkflowStep[] = [];
+  const visit = (step: import("@jurgen1c/agentflow-core").AgentflowWorkflowStep): void => {
+    if (typeof step.type === "string" && step.type.trim() === "session_request") requests.push(step);
+    for (const field of ["body", "steps", "branches"] as const) {
+      const nested = step[field];
+      if (!Array.isArray(nested)) continue;
+      for (const entry of nested) {
+        if (entry !== null && typeof entry === "object" && !Array.isArray(entry)) {
+          visit(entry as import("@jurgen1c/agentflow-core").AgentflowWorkflowStep);
+        }
+      }
+    }
+  };
+  steps.forEach(visit);
+  return requests;
 }
 
 function isPlannedRuntimeCommand(command: string): boolean {

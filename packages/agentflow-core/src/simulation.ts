@@ -80,6 +80,7 @@ interface SimulationState {
   artifacts: Set<string>;
   artifactValues: Map<string, AgentflowYamlValue>;
   producedArtifacts: Map<string, number>;
+  artifactProducers: Map<string, string>;
   transforms: AgentflowArtifactTransformRegistry;
   visitedSteps: AgentflowSimulationVisitedStep[];
   missingArtifacts: AgentflowSimulationMissingArtifact[];
@@ -186,6 +187,7 @@ export function simulateAgentflowWorkflow(
     artifacts: new Set([...fixtureArtifacts.values.keys(), ...fixtureArtifacts.collisions]),
     artifactValues: fixtureArtifacts.values,
     producedArtifacts: new Map(),
+    artifactProducers: new Map(),
     transforms,
     visitedSteps: [],
     missingArtifacts: [],
@@ -383,7 +385,7 @@ function runStep(step: AgentflowWorkflowStep, state: SimulationState, insideLoop
       const artifact = canonicalArtifactName(saved);
       state.artifacts.add(artifact);
       state.artifactValues.set(artifact, stepFixture.input);
-      markArtifactProduced(state, artifact);
+      markArtifactProduced(state, artifact, id);
     }
   }
   if (type === "loop") return loopControl(step, stepFixture, id, state);
@@ -405,17 +407,38 @@ function simulateSessionRequestStep(
   stepId: string,
   state: SimulationState
 ): SequenceControl {
-  const missingInput = (Array.isArray(step.inputs) ? step.inputs : [])
-    .flatMap((value) => artifactName(value, state))
-    .find((artifact) => !state.artifacts.has(artifact));
-  if (missingInput !== undefined) {
-    state.handledMissingArtifacts.add(missingArtifactKey({ stepId, artifact: missingInput, kind: "input" }));
+  const resolvedInputs: string[] = [];
+  for (const value of Array.isArray(step.inputs) ? step.inputs : []) {
+    const name = nonEmptyString(value);
+    const reference = name === undefined ? null : /^\{\{\s*inputs\.([A-Za-z0-9_-]+)\s*}}$/.exec(name);
+    if (reference === null) {
+      resolvedInputs.push(...artifactName(value, state));
+      continue;
+    }
+    const resolved = state.fixture.inputs?.[reference[1]!];
+    const normalized = typeof resolved === "string" ? tryNormalizeArtifactPath(resolved.trim()) : undefined;
+    if (normalized === undefined) {
+      return simulatedSessionFailure(
+        step,
+        fixture,
+        stepId,
+        state,
+        `Session input ${name} must resolve to a non-empty normalized artifact path.`
+      );
+    }
+    resolvedInputs.push(normalized);
+  }
+  const missingInputs = resolvedInputs.filter((artifact) => !state.artifacts.has(artifact));
+  if (missingInputs.length > 0) {
+    for (const artifact of missingInputs) {
+      state.handledMissingArtifacts.add(missingArtifactKey({ stepId, artifact, kind: "input" }));
+    }
     return simulatedSessionFailure(
       step,
       fixture,
       stepId,
       state,
-      `Fixture does not provide declared session input ${missingInput}.`
+      `Fixture does not provide declared session input ${missingInputs[0]}.`
     );
   }
 
@@ -444,7 +467,7 @@ function simulateSessionRequestStep(
     const name = nonEmptyString(output);
     if (name === undefined) continue;
     const artifact = canonicalArtifactName(name);
-    if (state.artifacts.has(artifact) && step.overwrite !== true) {
+    if (state.artifacts.has(artifact) && state.artifactProducers.get(artifact) !== stepId && step.overwrite !== true) {
       return simulatedSessionFailure(
         step,
         fixture,
@@ -564,6 +587,8 @@ function parallelControl(step: AgentflowWorkflowStep, state: SimulationState, in
   const mergedArtifactValues = new Map(initialArtifactValues);
   const initialProducedArtifacts = new Map(state.producedArtifacts);
   const mergedProducedArtifacts = new Map(initialProducedArtifacts);
+  const initialArtifactProducers = new Map(state.artifactProducers);
+  const mergedArtifactProducers = new Map(initialArtifactProducers);
   const parallelArtifactValues = new Map<string, AgentflowYamlValue | undefined>();
   const conflictedArtifacts = new Set<string>();
   const parallelId = nonEmptyString(step.id) ?? "(unnamed)";
@@ -576,6 +601,7 @@ function parallelControl(step: AgentflowWorkflowStep, state: SimulationState, in
       state.artifacts = new Set(initialArtifacts);
       state.artifactValues = new Map(initialArtifactValues);
       state.producedArtifacts = new Map(initialProducedArtifacts);
+      state.artifactProducers = new Map(initialArtifactProducers);
       const branchId = nonEmptyString(entry.id) ?? "(unnamed)";
       if (!takeTransition(state, branchId)) {
         finalControl = { kind: "terminal", status: "unresolved" };
@@ -611,6 +637,8 @@ function parallelControl(step: AgentflowWorkflowStep, state: SimulationState, in
         const initialCount = initialProducedArtifacts.get(artifact) ?? 0;
         if (producedCount <= initialCount) continue;
         mergedProducedArtifacts.set(artifact, Math.max(mergedProducedArtifacts.get(artifact) ?? 0, producedCount));
+        const producer = state.artifactProducers.get(artifact);
+        if (producer !== undefined) mergedArtifactProducers.set(artifact, producer);
         if (conflictedArtifacts.has(artifact)) continue;
         const hasValue = state.artifactValues.has(artifact);
         const value = state.artifactValues.get(artifact);
@@ -620,6 +648,7 @@ function parallelControl(step: AgentflowWorkflowStep, state: SimulationState, in
         if (valuesConflict) {
           addUnresolved(state, parallelId, `Parallel branches produced conflicting values for artifact ${artifact}; fixture simulation cannot apply the declared conflict policy.`);
           mergedArtifactValues.delete(artifact);
+          mergedArtifactProducers.delete(artifact);
           conflictedArtifacts.add(artifact);
           finalControl = { kind: "terminal", status: "unresolved" };
           continue;
@@ -637,6 +666,7 @@ function parallelControl(step: AgentflowWorkflowStep, state: SimulationState, in
   state.artifacts = mergedArtifacts;
   state.artifactValues = mergedArtifactValues;
   state.producedArtifacts = mergedProducedArtifacts;
+  state.artifactProducers = mergedArtifactProducers;
   return finalControl;
 }
 
@@ -730,7 +760,7 @@ function recordOutputs(
   for (const artifact of declared) {
     if (provided.has(artifact)) {
       state.artifacts.add(artifact);
-      markArtifactProduced(state, artifact);
+      markArtifactProduced(state, artifact, stepId);
       const value = provided.get(artifact);
       if (value !== undefined) state.artifactValues.set(artifact, value);
       else state.artifactValues.delete(artifact);
@@ -781,7 +811,7 @@ function simulateTransformStep(
     }
     state.artifacts.add(outputPath);
     state.artifactValues.set(outputPath, output);
-    markArtifactProduced(state, outputPath);
+    markArtifactProduced(state, outputPath, stepId);
     return { kind: "done" };
   } catch (error) {
     const message = error instanceof AgentflowArtifactTransformError
@@ -950,8 +980,9 @@ function addMissingArtifact(state: SimulationState, entry: AgentflowSimulationMi
   }
 }
 
-function markArtifactProduced(state: SimulationState, artifact: string): void {
+function markArtifactProduced(state: SimulationState, artifact: string, stepId: string): void {
   state.producedArtifacts.set(artifact, (state.producedArtifacts.get(artifact) ?? 0) + 1);
+  state.artifactProducers.set(artifact, stepId);
 }
 
 function missingArtifactKey(entry: AgentflowSimulationMissingArtifact): string {

@@ -83,6 +83,17 @@ export class AgentflowSessionRequestInterruptedError extends AgentflowSessionReq
   }
 }
 
+export class AgentflowSessionPolicyError extends AgentflowSessionRequestError {
+  constructor(
+    message: string,
+    code: string,
+    readonly status: "pause" | "fail"
+  ) {
+    super(message, code);
+    this.name = "AgentflowSessionPolicyError";
+  }
+}
+
 export class AgentflowSessionProviderRegistry {
   private readonly providers = new Map<string, AgentflowSessionProviderAdapter>();
 
@@ -161,7 +172,8 @@ export async function executeAgentflowSessionRequest(
   }
   const stepId = requiredName(step.id, "Session request step ID");
   const declaredStep = findWorkflowStep(workflow.steps, stepId);
-  if (step.type !== "session_request" || !isDeepStrictEqual(run.context.workflow, workflow)
+  if (requiredName(step.type, `Session request ${stepId} type`) !== "session_request"
+      || !isDeepStrictEqual(run.context.workflow, workflow)
       || declaredStep === undefined || !isDeepStrictEqual(declaredStep, step)) {
     throw new AgentflowSessionRequestError(
       `Session request ${stepId} must match a step in the workflow persisted for run ${runId}.`,
@@ -212,7 +224,7 @@ export async function executeAgentflowSessionRequest(
     }
     inputs.push(input);
   }
-  const requestPath = `session-requests/${safePathSegment(stepId)}-${digest(stepId).slice(0, 12)}.json`;
+  const requestPath = `session-requests/${safePathSegment(stepId).slice(0, 200)}-${digest(stepId).slice(0, 12)}.json`;
   preflightOutputCollisions(store, runId, step, outputPaths, requestPath);
   const request: AgentflowSessionProviderRequest = {
     runId,
@@ -449,7 +461,7 @@ function reserveModelCallBudgets(
   const usage = Object.fromEntries(kinds.map((kind) => [kind, store.getBudget(runId, `model:${kind}`)?.used ?? 0]));
   const decision = evaluateAgentflowPolicy(workflow, { kind: "model_usage", session: sessionId, usage });
   if (decision.status !== "allow") {
-    throw new AgentflowSessionRequestError(decision.message, decision.code);
+    throw new AgentflowSessionPolicyError(decision.message, decision.code, decision.status);
   }
   const limits = mapping(workflow.limits);
   store.reserveBudgets(kinds.flatMap((kind) => {
@@ -471,9 +483,9 @@ function reserveModelCallBudgets(
 
 function readPrompt(repoRoot: string, declaredPath: string): AgentflowSessionProviderRequest["prompt"] {
   const resolved = resolveRepoFile(repoRoot, declaredPath);
-  let content: Buffer;
+  let descriptor: number;
   try {
-    content = fs.readFileSync(resolved);
+    descriptor = fs.openSync(resolved, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   } catch (error) {
     throw new AgentflowSessionRequestError(
       `Could not read prompt ${declaredPath}: ${errorMessage(error)}`,
@@ -481,13 +493,43 @@ function readPrompt(repoRoot: string, declaredPath: string): AgentflowSessionPro
       { cause: error }
     );
   }
-  if (content.byteLength > MAX_AGENTFLOW_SESSION_PROMPT_BYTES) {
+  let content: Buffer;
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile()) {
+      throw new AgentflowSessionRequestError(
+        `Prompt ${declaredPath} must be a regular file.`,
+        "AGENTFLOW_SESSION_PROMPT_PATH"
+      );
+    }
+    if (stat.size > MAX_AGENTFLOW_SESSION_PROMPT_BYTES) throw promptTooLarge(declaredPath);
+    const bounded = Buffer.allocUnsafe(MAX_AGENTFLOW_SESSION_PROMPT_BYTES + 1);
+    let size = 0;
+    while (size < bounded.byteLength) {
+      const read = fs.readSync(descriptor, bounded, size, bounded.byteLength - size, null);
+      if (read === 0) break;
+      size += read;
+    }
+    if (size > MAX_AGENTFLOW_SESSION_PROMPT_BYTES) throw promptTooLarge(declaredPath);
+    content = bounded.subarray(0, size);
+  } catch (error) {
+    if (error instanceof AgentflowSessionRequestError) throw error;
     throw new AgentflowSessionRequestError(
-      `Prompt ${declaredPath} exceeds the ${MAX_AGENTFLOW_SESSION_PROMPT_BYTES}-byte session prompt limit.`,
-      "AGENTFLOW_SESSION_PROMPT_TOO_LARGE"
+      `Could not read prompt ${declaredPath}: ${errorMessage(error)}`,
+      "AGENTFLOW_SESSION_PROMPT_MISSING",
+      { cause: error }
     );
+  } finally {
+    fs.closeSync(descriptor);
   }
   return { path: declaredPath, content: content.toString("utf8"), checksum: `sha256:${digest(content)}` };
+}
+
+function promptTooLarge(declaredPath: string): AgentflowSessionRequestError {
+  return new AgentflowSessionRequestError(
+    `Prompt ${declaredPath} exceeds the ${MAX_AGENTFLOW_SESSION_PROMPT_BYTES}-byte session prompt limit.`,
+    "AGENTFLOW_SESSION_PROMPT_TOO_LARGE"
+  );
 }
 
 function readInput(
@@ -626,7 +668,8 @@ function ownedSessionOutput(
 }
 
 function resolveRepoFile(repoRoot: string, declaredPath: string): string {
-  if (declaredPath.trim() !== declaredPath || declaredPath.includes("\\") || path.posix.isAbsolute(declaredPath)) {
+  if (declaredPath.trim() !== declaredPath || declaredPath.includes("\\")
+      || path.posix.isAbsolute(declaredPath) || path.win32.isAbsolute(declaredPath)) {
     throw new AgentflowSessionRequestError(
       `Prompt path ${JSON.stringify(declaredPath)} must be a normalized repo-relative path.`,
       "AGENTFLOW_SESSION_PROMPT_PATH"
@@ -729,7 +772,7 @@ function mapping(value: unknown): AgentflowYamlMapping | undefined {
 
 function findWorkflowStep(steps: AgentflowWorkflowStep[], stepId: string): AgentflowWorkflowStep | undefined {
   for (const step of steps) {
-    if (step.id === stepId) return step;
+    if (typeof step.id === "string" && step.id.trim() === stepId) return step;
     for (const field of ["body", "steps"] as const) {
       const nested = Array.isArray(step[field])
         ? (step[field] as unknown[]).filter((entry): entry is AgentflowWorkflowStep => mapping(entry) !== undefined)
@@ -793,6 +836,10 @@ function validateProviderMetadata(
     ancestors.delete(value);
   };
   try {
+    if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)
+        || ![Object.prototype, null].includes(Object.getPrototypeOf(metadata))) {
+      throw new Error("metadata must be a plain object");
+    }
     validate(metadata, 0);
     const serialized = stableJson(metadata);
     if (Buffer.byteLength(serialized) > MAX_AGENTFLOW_SESSION_METADATA_BYTES) {

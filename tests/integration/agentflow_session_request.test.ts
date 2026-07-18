@@ -9,6 +9,7 @@ import {
   executeAgentflowCommandPipeline,
   executeAgentflowSessionRequest,
   MAX_AGENTFLOW_SESSION_METADATA_BYTES,
+  MAX_AGENTFLOW_SESSION_PROMPT_BYTES,
   MAX_AGENTFLOW_SESSION_TOTAL_INPUT_BYTES,
   MAX_AGENTFLOW_SESSION_OUTPUT_BYTES,
   openAgentflowRunState,
@@ -133,6 +134,29 @@ steps:
 
     expect(result).toMatchObject({ status: "completed", availableArtifacts: ["request.md", "response.md"] });
     expect(result.artifactValues["response.md"]).toBe("Fixture response");
+
+    const repeatedWorkflow = parseAgentflowWorkflowOrThrow(`name: repeated-session-simulation
+version: 1
+style: pipeline
+maturity: experimental
+sessions:
+  writer: { provider: fixture, resume: true }
+steps:
+  - id: repeat
+    type: loop
+    max_iterations: 2
+    body:
+      - { id: draft, type: session_request, session: writer, prompt: prompt.md, inputs: [request.md], outputs: [response.md] }
+`);
+    const repeated = simulateAgentflowWorkflow(repeatedWorkflow, {
+      artifacts: { "request.md": "Request" },
+      steps: {
+        repeat: { iterations: 2 },
+        draft: { outputs: { "response.md": "Repeated response" } }
+      }
+    });
+    expect(repeated).toMatchObject({ status: "completed", availableArtifacts: ["request.md", "response.md"] });
+    expect(repeated.visitedSteps.filter((step) => step.id === "draft")).toHaveLength(2);
   });
 
   test("simulates output collisions with runtime overwrite semantics", () => {
@@ -156,6 +180,45 @@ steps:
       expect(result.visitedSteps).toContainEqual(expect.objectContaining({ id: "draft", outcome: "failed" }));
       expect(result.availableArtifacts).not.toContain("response.md");
       expect(result.availableArtifacts).not.toContain("other.md");
+    }
+
+    const multipleMissingWorkflow = parseAgentflowWorkflowOrThrow(`name: missing-session-inputs
+version: 1
+style: pipeline
+maturity: experimental
+sessions:
+  writer: { provider: fixture }
+steps:
+  - { id: draft, type: session_request, session: writer, prompt: prompt.md, inputs: [first.md, second.md], outputs: [response.md], on_failure: { then: pause } }
+`);
+    const multipleMissing = simulateAgentflowWorkflow(multipleMissingWorkflow, {
+      steps: { draft: { outputs: { "response.md": "Response" } } }
+    });
+    expect(multipleMissing.status).toBe("paused");
+    expect(multipleMissing.missingArtifacts).toEqual([
+      { stepId: "draft", artifact: "first.md", kind: "input" },
+      { stepId: "draft", artifact: "second.md", kind: "input" }
+    ]);
+
+    const unresolvedReferenceWorkflow = parseAgentflowWorkflowOrThrow(`name: unresolved-session-input
+version: 1
+style: pipeline
+maturity: experimental
+inputs:
+  failure_payload: { required: true }
+sessions:
+  writer: { provider: fixture }
+steps:
+  - { id: draft, type: session_request, session: writer, prompt: prompt.md, inputs: ["{{ inputs.failure_payload }}"], outputs: [response.md], on_failure: { then: pause } }
+`);
+    for (const failurePayload of ["", { invalid: true }]) {
+      const unresolvedReference = simulateAgentflowWorkflow(unresolvedReferenceWorkflow, {
+        inputs: { failure_payload: failurePayload },
+        steps: { draft: { outputs: { "response.md": "Response" } } }
+      });
+      expect(unresolvedReference.status).toBe("paused");
+      expect(unresolvedReference.visitedSteps).toContainEqual(expect.objectContaining({ id: "draft", outcome: "failed" }));
+      expect(unresolvedReference.availableArtifacts).not.toContain("response.md");
     }
   });
 
@@ -250,6 +313,92 @@ steps:
     store.close();
   });
 
+  test("executes session steps with validator-normalized IDs and types", async () => {
+    const root = temporaryRepo();
+    fs.mkdirSync(path.join(root, "prompts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "prompts", "draft.md"), "Draft.\n");
+    const workflow = parseAgentflowWorkflowOrThrow(`name: normalized-session-step
+version: 1
+style: pipeline
+maturity: experimental
+sessions:
+  writer: { provider: fixture }
+steps:
+  - { id: " draft ", type: " session_request ", session: writer, prompt: prompts/draft.md, inputs: [request.md], outputs: [response.md] }
+`);
+    expect(validateAgentflowWorkflow(workflow)).toEqual({ valid: true, errors: [] });
+    const store = await openAgentflowRunState({ cwd: root });
+    createAgentflowLifecycleRun(store, { id: "normalized-session-step", workflow });
+    store.writeArtifact({ id: "request", runId: "normalized-session-step", path: "request.md", kind: "fixture", contentType: "text/plain", content: "Request" });
+    const providers = createAgentflowSessionProviderRegistry().register("fixture", () => ({
+      outputs: { "response.md": "Response" }
+    }));
+
+    const result = await executeAgentflowCommandPipeline(store, "normalized-session-step", workflow, undefined, providers);
+
+    expect(result).toMatchObject({ status: "completed", completedSteps: ["draft"] });
+    expect(store.readArtifact("normalized-session-step", "response.md").content.toString()).toBe("Response");
+    store.close();
+  });
+
+  test("preserves provider state when a padded session ID fails", async () => {
+    const root = temporaryRepo();
+    fs.mkdirSync(path.join(root, "prompts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "prompts", "draft.md"), "Draft.\n");
+    const workflow = parseAgentflowWorkflowOrThrow(`name: normalized-failing-session
+version: 1
+style: pipeline
+maturity: experimental
+sessions:
+  writer: { provider: fixture }
+steps:
+  - { id: draft, type: session_request, session: " writer ", prompt: prompts/draft.md, inputs: [request.md], outputs: [response.md], on_failure: { then: pause } }
+`);
+    expect(validateAgentflowWorkflow(workflow)).toEqual({ valid: true, errors: [] });
+    const store = await openAgentflowRunState({ cwd: root });
+    createAgentflowLifecycleRun(store, { id: "normalized-failing-session", workflow });
+    store.writeArtifact({ id: "request", runId: "normalized-failing-session", path: "request.md", kind: "fixture", contentType: "text/plain", content: "Request" });
+    const providers = createAgentflowSessionProviderRegistry().register("fixture", () => {
+      throw new Error("provider failed");
+    });
+
+    const result = await executeAgentflowCommandPipeline(store, "normalized-failing-session", workflow, undefined, providers);
+
+    expect(result).toMatchObject({ status: "paused", failedStep: "draft" });
+    expect(store.getSession("normalized-failing-session", "writer")).toMatchObject({
+      provider: "fixture",
+      status: "paused"
+    });
+    expect(store.listSessions("normalized-failing-session")).toHaveLength(1);
+    store.close();
+  });
+
+  test("bounds request metadata filenames for long valid step IDs", async () => {
+    const root = temporaryRepo();
+    fs.mkdirSync(path.join(root, "prompts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "prompts", "draft.md"), "Draft.\n");
+    const longStepId = `draft-${"x".repeat(300)}`;
+    const workflow = parseAgentflowWorkflowOrThrow(`name: long-session-step-id
+version: 1
+style: pipeline
+maturity: experimental
+sessions:
+  writer: { provider: fixture }
+steps:
+  - { id: "${longStepId}", type: session_request, session: writer, prompt: prompts/draft.md, inputs: [request.md], outputs: [response.md] }
+`);
+    const store = await openAgentflowRunState({ cwd: root });
+    createAgentflowLifecycleRun(store, { id: "long-session-step-id", workflow });
+    store.writeArtifact({ id: "request", runId: "long-session-step-id", path: "request.md", kind: "fixture", contentType: "text/plain", content: "Request" });
+    const providers = createAgentflowSessionProviderRegistry().register("fixture", () => ({ outputs: { "response.md": "Response" } }));
+
+    await expect(executeAgentflowCommandPipeline(store, "long-session-step-id", workflow, undefined, providers))
+      .resolves.toMatchObject({ status: "completed" });
+    const requestArtifact = store.listArtifacts("long-session-step-id").find((artifact) => artifact.kind === "session_request");
+    expect(path.basename(requestArtifact!.declaredPath).length).toBeLessThanOrEqual(255);
+    store.close();
+  });
+
   test("supports an explicit fixture provider and fails closed on missing fixture output", async () => {
     const root = temporaryRepo();
     fs.mkdirSync(path.join(root, "prompts"), { recursive: true });
@@ -298,6 +447,29 @@ steps:
     store.close();
   });
 
+  test("rejects oversized prompts before invoking a provider", async () => {
+    const root = temporaryRepo();
+    fs.mkdirSync(path.join(root, "prompts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "prompts", "draft.md"), Buffer.alloc(MAX_AGENTFLOW_SESSION_PROMPT_BYTES + 1, "x"));
+    const workflow = sessionWorkflow();
+    const store = await openAgentflowRunState({ cwd: root });
+    createAgentflowLifecycleRun(store, { id: "oversized-prompt", workflow });
+    store.writeArtifact({ id: "request", runId: "oversized-prompt", path: "request.md", kind: "fixture", contentType: "text/plain", content: "Request" });
+    let calls = 0;
+    const providers = createAgentflowSessionProviderRegistry().register("fixture", () => {
+      calls += 1;
+      return { outputs: { "response.md": "Response" } };
+    });
+
+    const result = await executeAgentflowCommandPipeline(store, "oversized-prompt", workflow, undefined, providers);
+
+    expect(result).toMatchObject({ status: "paused", failedStep: "draft" });
+    expect(result.message).toContain("session prompt limit");
+    expect(calls).toBe(0);
+    expect(store.getSession("oversized-prompt", "writer")).toMatchObject({ status: "paused" });
+    store.close();
+  });
+
   test("rejects oversized provider metadata before persisting request artifacts", async () => {
     const root = temporaryRepo();
     fs.mkdirSync(path.join(root, "prompts"), { recursive: true });
@@ -316,6 +488,27 @@ steps:
     expect(result).toMatchObject({ status: "paused", failedStep: "draft" });
     expect(result.message).toContain("metadata exceeds");
     expect(store.listArtifacts("oversized-metadata").some((artifact) => artifact.kind === "session_request")).toBe(false);
+    store.close();
+  });
+
+  test("rejects provider metadata whose top level is not a plain object", async () => {
+    const root = temporaryRepo();
+    fs.mkdirSync(path.join(root, "prompts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "prompts", "draft.md"), "Draft.\n");
+    const workflow = sessionWorkflow();
+    const store = await openAgentflowRunState({ cwd: root });
+    createAgentflowLifecycleRun(store, { id: "invalid-metadata-shape", workflow });
+    store.writeArtifact({ id: "request", runId: "invalid-metadata-shape", path: "request.md", kind: "fixture", contentType: "text/plain", content: "Request" });
+    const providers = createAgentflowSessionProviderRegistry().register("fixture", () => ({
+      outputs: { "response.md": "Response" },
+      metadata: [] as never
+    }));
+
+    const result = await executeAgentflowCommandPipeline(store, "invalid-metadata-shape", workflow, undefined, providers);
+
+    expect(result).toMatchObject({ status: "paused", failedStep: "draft" });
+    expect(result.message).toContain("metadata must be a plain object");
+    expect(store.listArtifacts("invalid-metadata-shape").some((artifact) => artifact.kind === "session_request")).toBe(false);
     store.close();
   });
 
@@ -399,6 +592,42 @@ steps:
     )).rejects.toMatchObject({ code: "AGENTFLOW_SESSION_RUN_STATUS" });
     expect(calls).toBe(0);
     expect(store.getSession("inactive-session", "writer")).toBeNull();
+    store.close();
+  });
+
+  test("rejects Windows-absolute prompt paths at the direct runtime boundary", async () => {
+    const root = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`name: windows-absolute-prompt
+version: 1
+style: pipeline
+maturity: experimental
+sessions:
+  writer: { provider: fixture }
+steps:
+  - { id: draft, type: session_request, session: writer, prompt: C:/tmp/prompt.md, inputs: [request.md], outputs: [response.md] }
+`);
+    const store = await openAgentflowRunState({ cwd: root });
+    store.createRun({
+      id: "windows-absolute-prompt",
+      status: "running",
+      workflow: { name: workflow.name, version: workflow.version, style: workflow.style, maturity: workflow.maturity },
+      context: { workflow }
+    });
+    let calls = 0;
+    const providers = createAgentflowSessionProviderRegistry().register("fixture", () => {
+      calls += 1;
+      return { outputs: { "response.md": "Response" } };
+    });
+
+    await expect(executeAgentflowSessionRequest(
+      store,
+      "windows-absolute-prompt",
+      workflow,
+      workflow.steps[0]!,
+      providers
+    )).rejects.toMatchObject({ code: "AGENTFLOW_SESSION_PROMPT_PATH" });
+    expect(calls).toBe(0);
+    expect(store.getSession("windows-absolute-prompt", "writer")).toBeNull();
     store.close();
   });
 
@@ -751,6 +980,38 @@ steps:
     store.close();
   });
 
+  test("does not let failure routing override a model-budget pause", async () => {
+    const root = temporaryRepo();
+    fs.mkdirSync(path.join(root, "prompts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "prompts", "draft.md"), "Draft.\n");
+    const workflow = parseAgentflowWorkflowOrThrow(`name: policy-pause-session
+version: 1
+style: pipeline
+maturity: experimental
+limits: { max_model_calls: 1 }
+sessions:
+  writer: { provider: fixture }
+steps:
+  - { id: first, type: session_request, session: writer, prompt: prompts/draft.md, inputs: [request.md], outputs: [first.md] }
+  - { id: second, type: session_request, session: writer, prompt: prompts/draft.md, inputs: [request.md], outputs: [second.md], on_failure: { then: continue, allowed: true } }
+`);
+    const store = await openAgentflowRunState({ cwd: root });
+    createAgentflowLifecycleRun(store, { id: "policy-pause-session", workflow });
+    store.writeArtifact({ id: "request", runId: "policy-pause-session", path: "request.md", kind: "fixture", contentType: "text/plain", content: "Request" });
+    const calls: string[] = [];
+    const providers = createAgentflowSessionProviderRegistry().register("fixture", (request) => {
+      calls.push(request.stepId);
+      return { outputs: { [`${request.stepId}.md`]: request.stepId } };
+    });
+
+    const result = await executeAgentflowCommandPipeline(store, "policy-pause-session", workflow, undefined, providers);
+
+    expect(result).toMatchObject({ status: "paused", completedSteps: ["first"], failedStep: "second" });
+    expect(result.message).toContain('Budget "model_calls" would exceed its limit of 1');
+    expect(calls).toEqual(["first"]);
+    store.close();
+  });
+
   test("atomically rejects concurrent execution of the same session", async () => {
     const root = temporaryRepo();
     fs.mkdirSync(path.join(root, "prompts"), { recursive: true });
@@ -790,6 +1051,39 @@ steps:
     await first;
     expect(store.getBudget("concurrent-budget", "model:model_calls")?.used).toBe(1);
     other.close();
+    store.close();
+  });
+
+  test("does not pause an active session when pipeline claiming conflicts", async () => {
+    const root = temporaryRepo();
+    fs.mkdirSync(path.join(root, "prompts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "prompts", "draft.md"), "Draft.\n");
+    const workflow = sessionWorkflow();
+    const store = await openAgentflowRunState({ cwd: root });
+    createAgentflowLifecycleRun(store, { id: "active-claim-conflict", workflow });
+    store.writeArtifact({ id: "request", runId: "active-claim-conflict", path: "request.md", kind: "fixture", contentType: "text/plain", content: "Request" });
+    store.claimSession({
+      id: "writer",
+      runId: "active-claim-conflict",
+      stepId: "other-step",
+      provider: "fixture",
+      status: "running",
+      state: { owner: "other-executor" }
+    });
+    let calls = 0;
+    const providers = createAgentflowSessionProviderRegistry().register("fixture", () => {
+      calls += 1;
+      return { outputs: { "response.md": "Response" } };
+    });
+
+    await expect(executeAgentflowCommandPipeline(store, "active-claim-conflict", workflow, undefined, providers))
+      .rejects.toMatchObject({ code: "AGENTFLOW_SESSION_ACTIVE" });
+    expect(calls).toBe(0);
+    expect(store.getSession("active-claim-conflict", "writer")).toMatchObject({
+      status: "running",
+      stepId: "other-step",
+      state: { owner: "other-executor" }
+    });
     store.close();
   });
 

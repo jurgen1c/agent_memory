@@ -797,13 +797,13 @@ export class AgentflowRunStateStore {
     if (new Set(paths).size !== paths.length) {
       throw new AgentflowRunStateError("Atomic artifact batches must not contain duplicate paths.", "AGENTFLOW_ARTIFACT_INVALID");
     }
-    let snapshots: Array<{ declaredPath: string; row: ArtifactRow | null; content: Buffer | null }> = [];
+    let snapshots: Array<{ declaredPath: string; row: ArtifactRow | null; targetExisted: boolean }> = [];
     this.database.exec("BEGIN IMMEDIATE");
     try {
       snapshots = paths.map((declaredPath) => {
         const row = this.database.get<ArtifactRow>("SELECT * FROM artifacts WHERE run_id = ? AND path = ?", [runId, declaredPath]);
         const target = artifactStoragePath(this.repoRoot, runId, declaredPath, false);
-        return { declaredPath, row, content: readArtifactSnapshot(target) };
+        return { declaredPath, row, targetExisted: artifactTargetExists(target) };
       });
       this.artifactBatchActive = true;
       const artifacts = inputs.map((input) => this.writeArtifact(input));
@@ -838,14 +838,32 @@ export class AgentflowRunStateStore {
 
   private restoreArtifactBatch(
     runId: string,
-    snapshots: Array<{ declaredPath: string; row: ArtifactRow | null; content: Buffer | null }>
+    snapshots: Array<{ declaredPath: string; row: ArtifactRow | null; targetExisted: boolean }>
   ): void {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       for (const snapshot of snapshots) {
         const target = artifactStoragePath(this.repoRoot, runId, snapshot.declaredPath, true);
-        if (snapshot.content === null) removeArtifactStagingEntry(target);
-        else fs.writeFileSync(target, snapshot.content);
+        const { backupPath } = artifactStagingPaths(this.repoRoot, runId, snapshot.declaredPath);
+        if (snapshot.targetExisted) {
+          if (fs.existsSync(backupPath)) {
+            if (isSymbolicLink(backupPath) || !fs.statSync(backupPath).isFile()) {
+              throw new AgentflowRunStateError(
+                `Artifact rollback backup is not a regular file: ${backupPath}`,
+                "AGENTFLOW_ARTIFACT_ROLLBACK"
+              );
+            }
+            fs.rmSync(target, { force: true, recursive: true });
+            fs.renameSync(backupPath, target);
+          } else if (!fs.existsSync(target)) {
+            throw new AgentflowRunStateError(
+              `Artifact rollback backup is missing for ${snapshot.declaredPath}.`,
+              "AGENTFLOW_ARTIFACT_ROLLBACK"
+            );
+          }
+        } else {
+          removeArtifactStagingEntry(target);
+        }
         this.database.run("DELETE FROM artifacts WHERE run_id = ? AND path = ?", [runId, snapshot.declaredPath]);
         if (snapshot.row !== null) {
           const row = snapshot.row;
@@ -1838,12 +1856,12 @@ function artifactChecksum(candidate: string): string {
   return `sha256:${hash.digest("hex")}`;
 }
 
-function readArtifactSnapshot(candidate: string): Buffer | null {
+function artifactTargetExists(candidate: string): boolean {
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(candidate);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;
   }
   if (stat.isSymbolicLink()) {
@@ -1852,15 +1870,7 @@ function readArtifactSnapshot(candidate: string): Buffer | null {
   if (!stat.isFile()) {
     throw new AgentflowRunStateError(`Artifact target is not a regular file: ${candidate}`, "AGENTFLOW_ARTIFACT_PATH");
   }
-  const descriptor = fs.openSync(candidate, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-  try {
-    if (!fs.fstatSync(descriptor).isFile()) {
-      throw new AgentflowRunStateError(`Artifact target is not a regular file: ${candidate}`, "AGENTFLOW_ARTIFACT_PATH");
-    }
-    return fs.readFileSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
+  return true;
 }
 
 function requiredString(value: unknown, label: string): string {

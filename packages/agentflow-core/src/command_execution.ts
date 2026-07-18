@@ -23,6 +23,7 @@ import {
 } from "./validation";
 import {
   AgentflowSessionProviderRegistry,
+  AgentflowSessionPolicyError,
   AgentflowSessionRequestInterruptedError,
   createAgentflowSessionProviderRegistry,
   executeAgentflowSessionRequest
@@ -114,7 +115,7 @@ export async function executeAgentflowCommandPipeline(
         message: failure
       }, failureStatus(step));
     }
-    if (step.type === "session_request") {
+    if (typeof step.type === "string" && step.type.trim() === "session_request") {
       const preflightError = validateSessionRequestStep(step);
       if (preflightError !== undefined) {
         const sessionId = typeof step.session === "string" && step.session.trim().length > 0
@@ -133,7 +134,7 @@ export async function executeAgentflowCommandPipeline(
         const stopped = activeStopStatus(store, runId);
         if (stopped !== undefined) return stoppedPipelineResult(store, runId, completedSteps)!;
         store.updateRun(runId, { currentStepId: stepId, error: null });
-        const sessionId = step.session as string;
+        const sessionId = (step.session as string).trim();
         const input = {
           attempt,
           session: sessionId,
@@ -172,6 +173,15 @@ export async function executeAgentflowCommandPipeline(
             store.appendRunEvent(runId, { type: "step.interrupted", stepId, payload: output });
             return stoppedPipelineResult(store, runId, completedSteps)!;
           }
+          if (error instanceof AgentflowSessionPolicyError) {
+            failure = error.message;
+            persistSessionRequestFailure(store, runId, stepId, sessionId, failure, false, true, attempt);
+            return finishFailure(store, runId, completedSteps, stepId, {
+              exitCode: null,
+              timedOut: false,
+              message: failure
+            }, error.status === "pause" ? "paused" : "failed");
+          }
           if (error instanceof AgentflowRunStateError && error.code === "AGENTFLOW_ARTIFACT_RUN_STATUS") {
             const status = activeStopStatus(store, runId);
             if (status !== undefined) {
@@ -189,6 +199,9 @@ export async function executeAgentflowCommandPipeline(
             store.upsertStep({ runId, stepId, attempt, sessionId, status: stopped, output });
             store.appendRunEvent(runId, { type: "step.interrupted", stepId, payload: output });
             return stoppedPipelineResult(store, runId, completedSteps)!;
+          }
+          if (error instanceof AgentflowRunStateError && error.code === "AGENTFLOW_SESSION_ACTIVE") {
+            throw error;
           }
           failure = error instanceof Error ? error.message : String(error);
           const sessionDefinition = mapping(workflow.sessions?.[sessionId]);

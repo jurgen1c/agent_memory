@@ -221,6 +221,42 @@ steps:
     expect(arrayOutputs.stderr).toContain("array-form outputs are simulation-only");
     expect(await captureCli(["status", "array-outputs"], repo)).toMatchObject({ exitCode: 4 });
 
+    fs.writeFileSync(path.join(repo, "nested.yml"), `name: nested-fixture-session
+version: 1
+style: pipeline
+maturity: experimental
+sessions:
+  writer: { provider: fixture }
+steps:
+  - id: bounded
+    type: loop
+    max_iterations: 1
+    body:
+      - { id: " nested-draft ", type: " session_request ", session: writer, prompt: prompts/draft.md, inputs: [request.md], outputs: [response.md] }
+`);
+    const nestedWithoutFixture = await captureCli(["run", "nested.yml", "--id", "nested-missing-fixture"], repo);
+    expect(nestedWithoutFixture).toMatchObject({ exitCode: 1 });
+    expect(nestedWithoutFixture.stderr).toContain("require --fixture");
+
+    fs.writeFileSync(path.join(repo, "fixture.json"), JSON.stringify({
+      artifacts: { "request.md": "Request" },
+      steps: { "nested-draft": { outputs: ["response.md"] } }
+    }));
+    const nestedArrayOutputs = await captureCli(["run", "nested.yml", "--id", "nested-array-outputs", "--fixture", "fixture.json"], repo);
+    expect(nestedArrayOutputs).toMatchObject({ exitCode: 2 });
+    expect(nestedArrayOutputs.stderr).toContain("array-form outputs are simulation-only");
+    expect(await captureCli(["status", "nested-array-outputs"], repo)).toMatchObject({ exitCode: 4 });
+
+    fs.writeFileSync(path.join(repo, "fixture.json"), JSON.stringify({
+      artifacts: { "request.md": "Request" },
+      steps: { "nested-draft": { outputs: { "response.md": "Response" } } }
+    }));
+    fs.writeFileSync(path.join(repo, "nested-unsupported.yml"), fs.readFileSync(path.join(repo, "nested.yml"), "utf8")
+      .replace("provider: fixture", "provider: local"));
+    const nestedUnsupported = await captureCli(["run", "nested-unsupported.yml", "--id", "nested-unsupported", "--fixture", "fixture.json"], repo);
+    expect(nestedUnsupported).toMatchObject({ exitCode: 1 });
+    expect(nestedUnsupported.stderr).toContain('supports only provider "fixture"');
+
     fs.writeFileSync(path.join(repo, "fixture.json"), JSON.stringify({
       artifacts: { "request.md": "First", "inputs/../request.md": "Second" },
       steps: { draft: { outputs: { "response.md": "Response" } } }
