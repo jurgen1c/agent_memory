@@ -884,6 +884,29 @@ function validateArtifactOutputs(
 function validateArtifactPaths(contexts: StepContext[], errors: AgentflowWorkflowIssue[]): void {
   for (const context of contexts) {
     if (context.type === "mcp_call") {
+      for (const field of ["server", "tool"] as const) {
+        const value = nonEmptyString(context.step[field]);
+        if (value !== undefined && (value.includes("{{") || value.includes("}}"))) {
+          addStepIssue(
+            errors,
+            context,
+            `workflow.mcp_call.${field}.invalid`,
+            field,
+            `MCP call ${field} must be a static non-empty name.`
+          );
+        }
+      }
+      visitValue(context.step.arguments, `${context.path}.arguments`, (value, path) => {
+        if (typeof value !== "string" || (!value.includes("{{") && !value.includes("}}"))) return;
+        const remainder = value.replace(/(?<!\{)\{\{\s*inputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*}}(?!})/g, "");
+        if (!remainder.includes("{{") && !remainder.includes("}}")) return;
+        errors.push({
+          code: "workflow.mcp_call.arguments.expression.unsupported",
+          message: "MCP call argument expressions must use {{ inputs.<name> }} references.",
+          path,
+          ...(context.id === undefined ? {} : { stepId: context.id })
+        });
+      });
       const seen = new Set<string>();
       for (const [index, value] of stringList(context.step.outputs).entries()) {
         let normalized = "";

@@ -29,10 +29,13 @@ import {
   executeAgentflowSessionRequest
 } from "./session_request";
 import {
+  AgentflowMcpCallError,
   AgentflowMcpCallRegistry,
   AgentflowMcpCallInterruptedError,
   createAgentflowMcpCallRegistry,
-  executeAgentflowMcpCall
+  executeAgentflowMcpCall,
+  validateAgentflowMcpArgumentExpressions,
+  validateAgentflowMcpOutputPaths
 } from "./mcp_call";
 
 const MAX_CAPTURE_BYTES = 10 * 1024 * 1024;
@@ -129,7 +132,7 @@ export async function executeAgentflowCommandPipeline(
           const stoppedAfterPublish = activeStopStatus(store, runId);
           if (stoppedAfterPublish !== undefined) {
             persistMcpCallInterruption(store, runId, stepId, attempt, stoppedAfterPublish);
-            return stoppedPipelineResult(store, runId, completedSteps)!;
+            return interruptedPipelineResult(store, runId, completedSteps, stoppedAfterPublish);
           }
           const output = {
             attempt,
@@ -146,15 +149,17 @@ export async function executeAgentflowCommandPipeline(
         } catch (error) {
           if (error instanceof AgentflowMcpCallInterruptedError) {
             persistMcpCallInterruption(store, runId, stepId, attempt, error.status);
-            return stoppedPipelineResult(store, runId, completedSteps)!;
+            return interruptedPipelineResult(store, runId, completedSteps, error.status);
           }
           const stopped = activeStopStatus(store, runId);
           if (stopped !== undefined) {
             persistMcpCallInterruption(store, runId, stepId, attempt, stopped);
-            return stoppedPipelineResult(store, runId, completedSteps)!;
+            return interruptedPipelineResult(store, runId, completedSteps, stopped);
           }
           failure = error instanceof Error ? error.message : String(error);
-          persistMcpCallFailure(store, runId, stepId, failure, attempt <= retries, attempt);
+          const retryable = attempt <= retries && mcpCallFailureIsRetryable(error);
+          persistMcpCallFailure(store, runId, stepId, failure, retryable, attempt);
+          if (!retryable) break;
         }
       }
       if (failure === undefined) continue;
@@ -444,6 +449,10 @@ function persistMcpCallFailure(
   store.appendRunEvent(runId, { type: rejected ? "step.rejected" : "step.failed", stepId, payload });
 }
 
+function mcpCallFailureIsRetryable(error: unknown): boolean {
+  return error instanceof AgentflowMcpCallError && error.code === "AGENTFLOW_MCP_ADAPTER_FAILED";
+}
+
 function persistSessionRequestInterruption(
   store: AgentflowRunStateStore,
   runId: string,
@@ -579,6 +588,19 @@ function stoppedPipelineResult(
     `Agentflow run ${runId} cannot continue while its status is ${String(status)}.`,
     "AGENTFLOW_RUN_TRANSITION"
   );
+}
+
+function interruptedPipelineResult(
+  store: AgentflowRunStateStore,
+  runId: string,
+  completedSteps: string[],
+  interruptedStatus: "paused" | "cancelled"
+): AgentflowCommandPipelineResult {
+  return stoppedPipelineResult(store, runId, completedSteps) ?? {
+    status: interruptedStatus,
+    completedSteps,
+    message: `Agentflow run ${runId} was interrupted as ${interruptedStatus}; no additional commands were started.`
+  };
 }
 
 function activeStopStatus(store: AgentflowRunStateStore, runId: string): "paused" | "cancelled" | undefined {
@@ -848,6 +870,15 @@ function validateMcpCallStep(step: AgentflowWorkflowStep): string | undefined {
       || typeof step.tool !== "string" || step.tool.trim().length === 0
       || mapping(step.arguments) === undefined || !nonEmptyStringArray(step.outputs)) {
     return "MCP call requires a non-empty server, tool, arguments mapping, and outputs list.";
+  }
+  if ([step.server, step.tool].some((value) => value.includes("{{") || value.includes("}}"))) {
+    return "MCP call server and tool must be static non-empty names.";
+  }
+  try {
+    validateAgentflowMcpArgumentExpressions(step.arguments, typeof step.id === "string" ? step.id.trim() : "(unnamed)");
+    validateAgentflowMcpOutputPaths(step.outputs, typeof step.id === "string" ? step.id.trim() : "(unnamed)");
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
   }
   const onFailure = mapping(step.on_failure);
   const retry = onFailure?.retry;

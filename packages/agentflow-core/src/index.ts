@@ -63,6 +63,8 @@ export {
   AgentflowMcpCallInterruptedError,
   AgentflowMcpCallRegistry,
   MAX_AGENTFLOW_MCP_METADATA_BYTES,
+  MAX_AGENTFLOW_MCP_ARGUMENT_BYTES,
+  MAX_AGENTFLOW_MCP_CONTENT_TYPE_BYTES,
   MAX_AGENTFLOW_MCP_OUTPUT_BYTES,
   createAgentflowFixtureMcpAdapter,
   createAgentflowMcpCallRegistry,

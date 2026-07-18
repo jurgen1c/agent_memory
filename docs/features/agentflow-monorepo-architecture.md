@@ -240,7 +240,7 @@ provides typed create, update, resume-lookup, step, artifact, event, session,
 failure, approval, and budget writes for later runtime phases. Its event log
 provides deterministic sequence-ordered reads, and its artifact registry owns
 safe run-scoped content writes plus restart-safe metadata/status reads. Schema
-version 2 migrates version-1 artifact metadata in place.
+version 3 migrates earlier artifact metadata in place and adds monotonic artifact generations.
 
 The phase-1 authoring boundary exposes parsing, validation, and linting from
 `@jurgen1c/agentflow-core`. Validation returns stable issue codes for structure,

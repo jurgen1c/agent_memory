@@ -4,12 +4,15 @@ import {
   normalizeAgentflowArtifactPath,
   type AgentflowArtifactRecord,
   type AgentflowRunStateStore,
-  type AgentflowRunStateValue
+  type AgentflowRunStateValue,
+  type WriteAgentflowArtifactInput
 } from "./run_state";
 import type { AgentflowWorkflow, AgentflowWorkflowStep, AgentflowYamlMapping } from "./workflow";
 
 export const MAX_AGENTFLOW_MCP_OUTPUT_BYTES = 10 * 1024 * 1024;
 export const MAX_AGENTFLOW_MCP_METADATA_BYTES = 1024 * 1024;
+export const MAX_AGENTFLOW_MCP_ARGUMENT_BYTES = 1024 * 1024;
+export const MAX_AGENTFLOW_MCP_CONTENT_TYPE_BYTES = 64 * 1024;
 
 export interface AgentflowMcpCallRequest {
   runId: string;
@@ -133,6 +136,12 @@ export async function executeAgentflowMcpCall(
 
   const server = requiredName(step.server, `MCP call ${stepId} server`);
   const tool = requiredName(step.tool, `MCP call ${stepId} tool`);
+  if ([server, tool].some((value) => value.includes("{{") || value.includes("}}"))) {
+    throw new AgentflowMcpCallError(
+      `MCP call ${stepId} server and tool must be static non-empty names.`,
+      "AGENTFLOW_MCP_CALL_INVALID"
+    );
+  }
   const adapter = registry.get(server);
   if (adapter === undefined) {
     throw new AgentflowMcpCallError(
@@ -147,23 +156,26 @@ export async function executeAgentflowMcpCall(
       "AGENTFLOW_MCP_CALL_INVALID"
     );
   }
-  const argumentsValue = resolveValue(
-    declaredArguments as Record<string, AgentflowRunStateValue>,
-    run.inputs,
-    stepId
-  );
-  const resolvedArguments = runStateMapping(argumentsValue);
-  if (resolvedArguments === undefined) {
+  const requestArguments = resolveAgentflowMcpArguments(declaredArguments, run.inputs, stepId);
+  const auditArguments = normalizeJsonValue(requestArguments, new Set(), 0) as Record<string, AgentflowRunStateValue>;
+  if (Buffer.byteLength(stableJson(auditArguments)) > MAX_AGENTFLOW_MCP_ARGUMENT_BYTES) {
     throw new AgentflowMcpCallError(
-      `MCP call ${stepId} arguments must resolve to a mapping.`,
-      "AGENTFLOW_MCP_ARGUMENTS_INVALID"
+      `MCP call ${stepId} arguments exceed the ${MAX_AGENTFLOW_MCP_ARGUMENT_BYTES}-byte limit.`,
+      "AGENTFLOW_MCP_ARGUMENTS_TOO_LARGE"
     );
   }
-  const requestArguments = normalizeJsonValue(resolvedArguments, new Set(), 0) as Record<string, AgentflowRunStateValue>;
-  const auditArguments = normalizeJsonValue(requestArguments, new Set(), 0) as Record<string, AgentflowRunStateValue>;
-  const outputs = normalizedOutputPaths(step.outputs, stepId);
+  const outputs = validateAgentflowMcpOutputPaths(step.outputs, stepId);
   const requestPath = `mcp-calls/${safePathSegment(stepId).slice(0, 200)}-${digest(stepId).slice(0, 12)}.json`;
-  preflightCollisions(store, runId, stepId, server, step.overwrite === true, outputs, requestPath);
+  const artifactSnapshots = preflightCollisions(
+    store,
+    runId,
+    stepId,
+    server,
+    tool,
+    step.overwrite === true,
+    outputs,
+    requestPath
+  );
 
   const request: AgentflowMcpCallRequest = {
     runId,
@@ -199,6 +211,7 @@ export async function executeAgentflowMcpCall(
     ...(responseMetadata === undefined ? {} : { responseMetadata })
   };
   const requestArtifactId = `mcp-request:${digest(requestPath)}`;
+  const existingRequestArtifact = artifactSnapshots.request.artifact;
   const publications = [
     {
       id: requestArtifactId,
@@ -208,13 +221,15 @@ export async function executeAgentflowMcpCall(
       kind: "mcp_request",
       contentType: "application/json; charset=utf-8",
       content: `${stableJson(requestMetadata)}\n`,
-      overwrite: store.getArtifact(runId, requestPath) !== null,
+      overwrite: existingRequestArtifact !== null,
       requiredRunStatus: "running" as const,
+      requiredCurrentArtifact: artifactSnapshots.request.required,
       metadata: { server, tool }
     },
     ...outputs.map((outputPath) => {
       const output = returned.get(outputPath)!;
-      const existing = store.getArtifact(runId, outputPath);
+      const snapshot = artifactSnapshots.outputs.get(outputPath)!;
+      const existing = snapshot.artifact;
       return {
         id: existing?.id ?? `mcp-output:${digest(outputPath)}`,
         runId,
@@ -223,8 +238,9 @@ export async function executeAgentflowMcpCall(
         kind: "mcp_output",
         contentType: output.contentType ?? contentTypeFor(outputPath, output.content),
         content: serializeContent(output.content),
-        overwrite: step.overwrite === true || ownedMcpOutput(existing, stepId, server),
+        overwrite: step.overwrite === true || ownedMcpOutput(existing, stepId, server, tool),
         requiredRunStatus: "running" as const,
+        requiredCurrentArtifact: snapshot.required,
         metadata: { server, tool, requestArtifact: requestPath }
       };
     })
@@ -261,45 +277,65 @@ function validateResponse(
       "AGENTFLOW_MCP_OUTPUT_INVALID"
     );
   }
-  if (response.contentTypes !== undefined && (!plainObject(response.contentTypes)
-      || Object.entries(response.contentTypes).some(([output, contentType]) =>
-        !declared.has(output) || typeof contentType !== "string" || contentType.trim().length === 0))) {
+  const contentTypeEntries = response.contentTypes === undefined || !plainObject(response.contentTypes)
+    ? undefined
+    : Object.entries(response.contentTypes);
+  if (response.contentTypes !== undefined && (contentTypeEntries === undefined
+      || contentTypeEntries.some(([output, contentType]) =>
+        !declared.has(output) || typeof contentType !== "string" || contentType.trim().length === 0)
+      || contentTypeEntries.reduce((bytes, [output, contentType]) =>
+        bytes + Buffer.byteLength(output) + Buffer.byteLength(String(contentType)), 0) > MAX_AGENTFLOW_MCP_CONTENT_TYPE_BYTES)) {
     throw new AgentflowMcpCallError(
-      `MCP adapter response content types for step ${stepId} must map declared outputs to non-empty strings.`,
+      `MCP adapter response content types for step ${stepId} must map declared outputs to non-empty strings within the ${MAX_AGENTFLOW_MCP_CONTENT_TYPE_BYTES}-byte limit.`,
       "AGENTFLOW_MCP_OUTPUT_INVALID"
     );
   }
 
+  const contentTypes = new Map(contentTypeEntries ?? []);
   let totalBytes = 0;
   return new Map(outputs.map((outputPath) => {
     const value = response.outputs[outputPath];
     let content: AgentflowRunStateValue | Uint8Array;
+    let size: number;
     try {
-      content = value instanceof Uint8Array
-        ? Uint8Array.from(value)
-        : normalizeJsonValue(value, new Set(), 0);
+      if (value instanceof Uint8Array) {
+        size = value.byteLength;
+        validateOutputSize(stepId, size, totalBytes + size);
+        content = Uint8Array.from(value);
+      } else if (typeof value === "string") {
+        size = Buffer.byteLength(value);
+        validateOutputSize(stepId, size, totalBytes + size);
+        content = value;
+      } else {
+        content = normalizeJsonValue(value, new Set(), 0);
+        size = serializeContent(content).byteLength;
+        validateOutputSize(stepId, size, totalBytes + size);
+      }
     } catch (error) {
+      if (error instanceof AgentflowMcpCallError) throw error;
       throw new AgentflowMcpCallError(
         `MCP adapter output ${outputPath} for step ${stepId} must contain JSON-compatible, string, or binary content: ${errorMessage(error)}`,
         "AGENTFLOW_MCP_OUTPUT_INVALID",
         { cause: error }
       );
     }
-    const size = serializeContent(content).byteLength;
     totalBytes += size;
-    if (size > MAX_AGENTFLOW_MCP_OUTPUT_BYTES || totalBytes > MAX_AGENTFLOW_MCP_OUTPUT_BYTES) {
-      throw new AgentflowMcpCallError(
-        `MCP adapter outputs for step ${stepId} exceed the ${MAX_AGENTFLOW_MCP_OUTPUT_BYTES}-byte limit.`,
-        "AGENTFLOW_MCP_OUTPUT_TOO_LARGE"
-      );
-    }
     return [outputPath, {
       content,
-      ...(response.contentTypes?.[outputPath] !== undefined
-        ? { contentType: response.contentTypes[outputPath]!.trim() }
+      ...(contentTypes.has(outputPath)
+        ? { contentType: contentTypes.get(outputPath)!.trim() }
         : {})
     }];
   }));
+}
+
+function validateOutputSize(stepId: string, size: number, totalBytes: number): void {
+  if (size > MAX_AGENTFLOW_MCP_OUTPUT_BYTES || totalBytes > MAX_AGENTFLOW_MCP_OUTPUT_BYTES) {
+    throw new AgentflowMcpCallError(
+      `MCP adapter outputs for step ${stepId} exceed the ${MAX_AGENTFLOW_MCP_OUTPUT_BYTES}-byte limit.`,
+      "AGENTFLOW_MCP_OUTPUT_TOO_LARGE"
+    );
+  }
 }
 
 async function invokeAdapter(
@@ -365,28 +401,49 @@ function preflightCollisions(
   runId: string,
   stepId: string,
   server: string,
+  tool: string,
   overwrite: boolean,
   outputs: string[],
   requestPath: string
-): void {
+): { request: McpArtifactSnapshot; outputs: Map<string, McpArtifactSnapshot> } {
   if (outputs.includes(requestPath)) {
     throw new AgentflowMcpCallError(
       `MCP output ${requestPath} conflicts with the runtime request metadata artifact.`,
       "AGENTFLOW_MCP_OUTPUT_COLLISION"
     );
   }
+  const requestArtifactId = `mcp-request:${digest(requestPath)}`;
+  const requestIdOwner = store.getArtifactById(runId, requestArtifactId);
+  if (requestIdOwner !== null && requestIdOwner.declaredPath !== requestPath) {
+    throw new AgentflowMcpCallError(
+      `MCP request metadata ID ${requestArtifactId} is already registered at ${requestIdOwner.declaredPath}.`,
+      "AGENTFLOW_MCP_OUTPUT_COLLISION"
+    );
+  }
   const requestArtifact = store.getArtifact(runId, requestPath);
   if (requestArtifact !== null &&
-      (requestArtifact.kind !== "mcp_request" || requestArtifact.id !== `mcp-request:${digest(requestPath)}`)) {
+      !ownedMcpRequest(requestArtifact, requestArtifactId, stepId, server, tool)) {
     throw new AgentflowMcpCallError(
       `MCP request metadata path ${requestPath} is already owned by another artifact.`,
       "AGENTFLOW_MCP_OUTPUT_COLLISION"
     );
   }
-  if (overwrite) return;
-  const collision = outputs.find((output) => {
-    const existing = store.getArtifact(runId, output);
-    return existing !== null && !ownedMcpOutput(existing, stepId, server);
+  const requestSnapshot = currentArtifactSnapshot(store, runId, requestPath, requestArtifact);
+  const outputSnapshots = new Map(outputs.map((output) => {
+    const artifact = store.getArtifact(runId, output);
+    const generatedId = `mcp-output:${digest(output)}`;
+    const idOwner = artifact === null ? store.getArtifactById(runId, generatedId) : null;
+    if (idOwner !== null && idOwner.declaredPath !== output) {
+      throw new AgentflowMcpCallError(
+        `MCP output ID ${generatedId} is already registered at ${idOwner.declaredPath}.`,
+        "AGENTFLOW_MCP_OUTPUT_COLLISION"
+      );
+    }
+    return [output, currentArtifactSnapshot(store, runId, output, artifact)] as const;
+  }));
+  const collision = overwrite ? undefined : outputs.find((output) => {
+    const snapshot = outputSnapshots.get(output)!;
+    return snapshot.artifact !== null && !ownedMcpOutput(snapshot.artifact, stepId, server, tool);
   });
   if (collision !== undefined) {
     throw new AgentflowMcpCallError(
@@ -394,19 +451,76 @@ function preflightCollisions(
       "AGENTFLOW_MCP_OUTPUT_COLLISION"
     );
   }
+  return { request: requestSnapshot, outputs: outputSnapshots };
+}
+
+interface McpArtifactSnapshot {
+  artifact: AgentflowArtifactRecord | null;
+  required: NonNullable<WriteAgentflowArtifactInput["requiredCurrentArtifact"]>;
+}
+
+function ownedMcpRequest(
+  artifact: AgentflowArtifactRecord,
+  artifactId: string,
+  stepId: string,
+  server: string,
+  tool: string
+): boolean {
+  return artifact.kind === "mcp_request"
+    && artifact.id === artifactId
+    && artifact.producerStepId === stepId
+    && artifact.metadata.server === server
+    && artifact.metadata.tool === tool;
+}
+
+function currentArtifactSnapshot(
+  store: AgentflowRunStateStore,
+  runId: string,
+  artifactPath: string,
+  artifact: AgentflowArtifactRecord | null
+): McpArtifactSnapshot {
+  store.recoverArtifactBacking(runId, artifactPath);
+  const backing = store.getArtifactBackingSnapshot(runId, artifactPath);
+  const backingMatches = artifact?.checksum === null
+    ? !backing.exists
+    : artifact === null || (backing.exists && backing.checksum === artifact.checksum);
+  if (!backingMatches) {
+    throw new AgentflowMcpCallError(
+      `MCP artifact ${artifactPath} backing file does not match its registry record.`,
+      "AGENTFLOW_MCP_OUTPUT_COLLISION"
+    );
+  }
+  return {
+    artifact,
+    required: {
+      artifact: artifact === null ? null : {
+        id: artifact.id,
+        producerStepId: artifact.producerStepId,
+        kind: artifact.kind,
+        contentType: artifact.contentType,
+        checksum: artifact.checksum,
+        generation: artifact.generation,
+        metadata: artifact.metadata
+      },
+      backingExists: backing.exists,
+      backingChecksum: backing.checksum
+    }
+  };
 }
 
 function ownedMcpOutput(
   artifact: AgentflowArtifactRecord | null,
   stepId: string,
-  server: string
+  server: string,
+  tool: string
 ): boolean {
   return artifact?.kind === "mcp_output"
     && artifact.producerStepId === stepId
-    && artifact.metadata.server === server;
+    && artifact.metadata.server === server
+    && artifact.metadata.tool === tool;
 }
 
-function normalizedOutputPaths(value: unknown, stepId: string): string[] {
+export function validateAgentflowMcpOutputPaths(value: unknown, stepId: string): string[] {
   if (!Array.isArray(value) || value.length === 0 ||
       !value.every((entry) => typeof entry === "string" && entry.trim().length > 0)) {
     throw new AgentflowMcpCallError(
@@ -443,6 +557,54 @@ function normalizedOutputPaths(value: unknown, stepId: string): string[] {
   return outputs;
 }
 
+export function resolveAgentflowMcpArguments(
+  value: unknown,
+  inputs: Record<string, AgentflowRunStateValue>,
+  stepId: string
+): Record<string, AgentflowRunStateValue> {
+  const declaredArguments = mapping(value);
+  if (declaredArguments === undefined) {
+    throw new AgentflowMcpCallError(
+      `MCP call ${stepId} arguments must be a mapping.`,
+      "AGENTFLOW_MCP_CALL_INVALID"
+    );
+  }
+  validateAgentflowMcpArgumentExpressions(declaredArguments, stepId);
+  const argumentsValue = resolveValue(
+    declaredArguments as Record<string, AgentflowRunStateValue>,
+    inputs,
+    stepId
+  );
+  const resolvedArguments = runStateMapping(argumentsValue);
+  if (resolvedArguments === undefined) {
+    throw new AgentflowMcpCallError(
+      `MCP call ${stepId} arguments must resolve to a mapping.`,
+      "AGENTFLOW_MCP_ARGUMENTS_INVALID"
+    );
+  }
+  return normalizeJsonValue(resolvedArguments, new Set(), 0) as Record<string, AgentflowRunStateValue>;
+}
+
+export function validateAgentflowMcpArgumentExpressions(value: unknown, stepId: string): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) validateAgentflowMcpArgumentExpressions(entry, stepId);
+    return;
+  }
+  const record = runStateMapping(value);
+  if (record !== undefined) {
+    for (const entry of Object.values(record)) validateAgentflowMcpArgumentExpressions(entry, stepId);
+    return;
+  }
+  if (typeof value !== "string") return;
+  const remainder = value.replace(/(?<!\{)\{\{\s*inputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*}}(?!})/g, "");
+  if (remainder.includes("{{") || remainder.includes("}}")) {
+    throw new AgentflowMcpCallError(
+      `MCP call ${stepId} argument contains an unsupported input expression.`,
+      "AGENTFLOW_MCP_ARGUMENT_UNRESOLVED"
+    );
+  }
+}
+
 function resolveValue(
   value: AgentflowRunStateValue,
   inputs: Record<string, AgentflowRunStateValue>,
@@ -454,7 +616,7 @@ function resolveValue(
     return Object.fromEntries(Object.entries(record).map(([key, entry]) => [key, resolveValue(entry, inputs, stepId)]));
   }
   if (typeof value !== "string") return value;
-  const exact = /^\{\{\s*inputs\.([A-Za-z0-9_-]+)\s*}}$/.exec(value);
+  const exact = /^\{\{\s*inputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*}}$/.exec(value);
   if (exact !== null) {
     if (!Object.hasOwn(inputs, exact[1]!)) {
       throw new AgentflowMcpCallError(
@@ -464,7 +626,13 @@ function resolveValue(
     }
     return inputs[exact[1]!]!;
   }
-  return value.replace(/\{\{\s*inputs\.([A-Za-z0-9_-]+)\s*}}/g, (_match, name: string) => {
+  return value.replace(/(?<!\{)\{\{\s*inputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*}}(?!})/g, (_match, name: string) => {
+    if (!Object.hasOwn(inputs, name)) {
+      throw new AgentflowMcpCallError(
+        `MCP call ${stepId} inline argument reference inputs.${name} is missing from persisted inputs.`,
+        "AGENTFLOW_MCP_ARGUMENT_UNRESOLVED"
+      );
+    }
     const resolved = inputs[name];
     if (resolved === undefined || typeof resolved === "object") {
       throw new AgentflowMcpCallError(
@@ -506,7 +674,7 @@ function contentTypeFor(path: string, value: AgentflowRunStateValue | Uint8Array
 function stableJson(value: AgentflowRunStateValue): string {
   return JSON.stringify(value, (_key, entry) => {
     if (entry !== null && typeof entry === "object" && !Array.isArray(entry)) {
-      return Object.fromEntries(Object.entries(entry).sort(([left], [right]) => left.localeCompare(right)));
+      return Object.fromEntries(Object.keys(entry).sort().map((key) => [key, entry[key]]));
     }
     return entry;
   });
@@ -548,7 +716,9 @@ function mapping(value: unknown): AgentflowYamlMapping | undefined {
 }
 
 function plainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value) && !(value instanceof Uint8Array);
+  if (value === null || typeof value !== "object" || Array.isArray(value) || value instanceof Uint8Array) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function runStateMapping(value: unknown): Record<string, AgentflowRunStateValue> | undefined {
