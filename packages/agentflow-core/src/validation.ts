@@ -319,6 +319,9 @@ function validateRequiredStepFields(context: StepContext, errors: AgentflowWorkf
     const failureLabel = context.type === "command" ? "Command" : "Artifact transform";
     const failureCode = context.type === "command" ? "workflow.command" : "workflow.artifact_transform";
     const retry = context.step.on_failure.retry;
+    const failureThen = typeof context.step.on_failure.then === "string"
+      ? context.step.on_failure.then.trim()
+      : undefined;
     if (retry !== undefined && (!Number.isSafeInteger(retry) || Number(retry) < 0 || Number(retry) > MAX_AGENTFLOW_COMMAND_RETRIES)) {
       addStepIssue(
         errors,
@@ -328,7 +331,7 @@ function validateRequiredStepFields(context: StepContext, errors: AgentflowWorkf
         `${failureLabel} on_failure.retry must be an integer from 0 through ${MAX_AGENTFLOW_COMMAND_RETRIES}.`
       );
     }
-    if (["continue", "ignore"].includes(String(context.step.on_failure.then)) && context.step.on_failure.allowed !== true) {
+    if (["continue", "ignore"].includes(failureThen ?? "") && context.step.on_failure.allowed !== true) {
       addStepIssue(
         errors,
         context,

@@ -504,7 +504,7 @@ function validateCommandStep(
       message: `Command on_failure.retry must be an integer from 0 through ${MAX_AGENTFLOW_COMMAND_RETRIES}.`
     };
   }
-  if (["continue", "ignore"].includes(String(onFailure?.then)) && onFailure?.allowed !== true) {
+  if (["continue", "ignore"].includes(normalizedFailureThen(onFailure) ?? "") && onFailure?.allowed !== true) {
     return {
       status: "failed",
       message: "Command failures may continue or be ignored only when on_failure.allowed is true."
@@ -543,13 +543,11 @@ function validateTransformStep(step: AgentflowWorkflowStep): string | undefined 
       (!Number.isSafeInteger(retry) || Number(retry) < 0 || Number(retry) > MAX_AGENTFLOW_COMMAND_RETRIES)) {
     return `Artifact transform on_failure.retry must be an integer from 0 through ${MAX_AGENTFLOW_COMMAND_RETRIES}.`;
   }
-  if (["continue", "ignore"].includes(String(onFailure?.then)) && onFailure?.allowed !== true) {
+  if (["continue", "ignore"].includes(normalizedFailureThen(onFailure) ?? "") && onFailure?.allowed !== true) {
     return "Artifact transform failures may continue or be ignored only when on_failure.allowed is true.";
   }
   if (onFailure !== undefined) {
-    const then = typeof onFailure.then === "string" && onFailure.then.trim().length > 0
-      ? onFailure.then.trim()
-      : undefined;
+    const then = normalizedFailureThen(onFailure);
     if ((then !== undefined && !["continue", "ignore", "fail", "pause"].includes(then))
         || ["goto", "route_to", "on_remediated", "on_unresolved", "return_to"].some((field) => onFailure[field] !== undefined)) {
       return "Artifact transform runtime supports only retry and then: continue, ignore, fail, or pause.";
@@ -636,7 +634,11 @@ function failureRetries(step: AgentflowWorkflowStep): number {
 }
 
 function failureThen(step: AgentflowWorkflowStep): string | undefined {
-  const then = mapping(step.on_failure)?.then;
+  return normalizedFailureThen(mapping(step.on_failure));
+}
+
+function normalizedFailureThen(onFailure: AgentflowYamlMapping | undefined): string | undefined {
+  const then = onFailure?.then;
   return typeof then === "string" && then.trim().length > 0 ? then.trim() : undefined;
 }
 

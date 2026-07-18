@@ -126,7 +126,7 @@ steps:
     command: printf ok
     on_failure:
       retry: -1
-      then: continue
+      then: " continue "
 `);
 
     expect(validateAgentflowWorkflow(workflow).errors.map((issue) => issue.code)).toEqual([
@@ -148,7 +148,7 @@ steps:
     transform: jira_ticket_to_markdown
     on_failure:
       retry: 101
-      then: continue
+      then: " continue "
 `);
 
     expect(validateAgentflowWorkflow(workflow).errors.map((issue) => issue.code)).toEqual([
@@ -166,13 +166,13 @@ steps:
   - id: command
     type: command
     command: exit 1
-    on_failure: { then: ignore }
+    on_failure: { then: " ignore " }
   - id: transform
     type: artifact_transform
     input: ticket.json
     output: ticket.md
     transform: jira_ticket_to_markdown
-    on_failure: { then: ignore }
+    on_failure: { then: " ignore " }
 `);
 
     expect(validateAgentflowWorkflow(workflow).errors.map((issue) => issue.code)).toEqual([

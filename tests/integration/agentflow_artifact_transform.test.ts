@@ -274,7 +274,7 @@ steps:
     input: ticket.json
     output: ticket.md
     transform: never_run
-    on_failure: { then: ignore }
+    on_failure: { then: " ignore " }
 `);
     const temporaryRoot = temporaryRepo();
     const store = await openAgentflowRunState({ cwd: temporaryRoot });
