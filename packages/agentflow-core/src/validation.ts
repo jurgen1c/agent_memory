@@ -2887,5 +2887,5 @@ function isSessionInputReference(value: string): boolean {
 }
 
 function isRecord(value: unknown): value is AgentflowYamlMapping {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Uint8Array);
 }

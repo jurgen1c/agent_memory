@@ -45,6 +45,51 @@ steps:
     ]);
   });
 
+  test("rejects binary MCP arguments at static and pipeline preflight boundaries", async () => {
+    const root = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`name: binary-mcp-arguments
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - { id: fetch, type: mcp_call, server: fixture, tool: fetch, arguments: {}, outputs: [ticket.json] }
+`);
+    workflow.steps[0]!.arguments = new Uint8Array([1, 2, 3]) as never;
+
+    expect(validateAgentflowWorkflow(workflow).errors).toContainEqual(expect.objectContaining({
+      code: "workflow.step.field.required",
+      path: "steps[0].arguments"
+    }));
+
+    workflow.steps[0]!.arguments = {};
+    const store = await openAgentflowRunState({ cwd: root });
+    store.createRunWithEvent({
+      id: "binary-arguments",
+      workflow: { name: workflow.name, version: workflow.version, style: workflow.style, maturity: workflow.maturity },
+      context: { workflow: workflow as never }
+    }, { type: "run.created", payload: { status: "pending" } });
+    workflow.steps[0]!.arguments = new Uint8Array([1, 2, 3]) as never;
+    const persistedRun = store.getRun("binary-arguments")!;
+    const getRun = store.getRun.bind(store);
+    let initialRead = true;
+    store.getRun = (runId) => {
+      if (!initialRead) return getRun(runId);
+      initialRead = false;
+      return { ...persistedRun, context: { ...persistedRun.context, workflow: workflow as never } };
+    };
+
+    const result = await executeAgentflowCommandPipeline(store, "binary-arguments", workflow);
+
+    expect(result).toMatchObject({ status: "failed", failedStep: "fetch" });
+    expect(store.listEvents("binary-arguments").map((event) => event.type)).toEqual([
+      "run.created",
+      "run.started",
+      "step.rejected",
+      "run.failed"
+    ]);
+    store.close();
+  });
+
   test("classifies externally persisted contract failures as rejected MCP policy", async () => {
     const root = temporaryRepo();
     const workflow = parseAgentflowWorkflowOrThrow(`name: rejected-mcp-contract

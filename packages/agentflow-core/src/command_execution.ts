@@ -1053,5 +1053,7 @@ function stringList(value: unknown): string[] {
 }
 
 function mapping(value: unknown): AgentflowYamlMapping | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as AgentflowYamlMapping : undefined;
+  return value !== null && typeof value === "object" && !Array.isArray(value) && !(value instanceof Uint8Array)
+    ? value as AgentflowYamlMapping
+    : undefined;
 }
