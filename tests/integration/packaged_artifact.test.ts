@@ -18,7 +18,7 @@ describe("packaged artifact", () => {
 
     expect(runCommand(agentMemory, ["help"], appRoot).stdout).toContain("Repository-local agent memory");
     expect(runCommand(agentMemory, ["--version"], appRoot).stdout).toContain(`agent-memory ${rootPackage.version}`);
-    expect(runCommand(agentflow, ["help"], appRoot).stdout).toContain("Command-only pipeline execution");
+    expect(runCommand(agentflow, ["help"], appRoot).stdout).toContain("Command and artifact-transform pipeline execution");
     expect(runCommand(agentflow, ["--version"], appRoot).stdout).toContain(`agentflow ${rootPackage.version}`);
 
     const rootPack = packDryRun(["pack", "--dry-run", "--json", "--ignore-scripts"]);
@@ -49,7 +49,7 @@ describe("packaged artifact", () => {
 
     expect(runCommand(cliPath, ["--version"], appRoot).stdout).toContain(`agent-memory ${rootPackage.version}`);
     expect(runCommand(agentflowPath, ["--version"], appRoot).stdout).toContain(`agentflow ${rootPackage.version}`);
-    expect(runCommand(agentflowPath, ["help"], appRoot).stdout).toContain("Command-only pipeline execution");
+    expect(runCommand(agentflowPath, ["help"], appRoot).stdout).toContain("Command and artifact-transform pipeline execution");
     expect(runCommand(cliPath, ["upgrade", "--write"], appRoot).stdout).toContain("upgrade applied");
     expect(runCommand(cliPath, ["compile"], appRoot).stdout).toContain("Agent Memory compiled.");
 

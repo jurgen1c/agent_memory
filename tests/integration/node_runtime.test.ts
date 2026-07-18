@@ -56,7 +56,7 @@ steps:
     ], agentflowRepo, env);
 
     expect(agentflowHelp.exitCode).toBe(0);
-    expect(agentflowHelp.stdout).toContain("Command-only pipeline execution");
+    expect(agentflowHelp.stdout).toContain("Command and artifact-transform pipeline execution");
     expect(agentflowVersion.exitCode).toBe(0);
     expect(agentflowVersion.stdout).toContain("agentflow ");
     expect(agentflowRun.exitCode).toBe(0);
