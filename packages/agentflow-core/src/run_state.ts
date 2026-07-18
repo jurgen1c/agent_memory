@@ -1290,7 +1290,7 @@ export class AgentflowRunStateStore {
     try {
       const reservations = inputs.map((input) => {
         if (!Number.isFinite(input.limit) || input.limit < 0 || !Number.isFinite(input.amount) || input.amount <= 0) {
-          throw new AgentflowRunStateError("Budget limit and reservation amount must be non-negative finite numbers.", "AGENTFLOW_BUDGET_INVALID");
+          throw new AgentflowRunStateError("Budget limit must be a non-negative finite number and reservation amount must be a positive finite number.", "AGENTFLOW_BUDGET_INVALID");
         }
         const id = requiredString(input.id, "Budget ID");
         const used = this.database.get<{ used: number }>(
@@ -1319,7 +1319,7 @@ export class AgentflowRunStateStore {
         ]);
       }
       this.database.exec("COMMIT");
-      return reservations.map(({ input, used }) => ({ ...input, runId, used }));
+      return reservations.map(({ id }) => this.getBudget(runId, id)!);
     } catch (error) {
       rollback(this.database);
       throw error;

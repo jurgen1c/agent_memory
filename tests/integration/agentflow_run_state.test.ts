@@ -191,7 +191,7 @@ describe("Agentflow run-state SQLite store", () => {
     store.close();
   });
 
-  test("rejects duplicate IDs in an atomic budget reservation", async () => {
+  test("validates atomic budget reservations and returns persisted record shapes", async () => {
     const repoRoot = temporaryRepo();
     const store = await openAgentflowRunState({ cwd: repoRoot, now: () => FIXED_TIME });
     store.createRun({ id: "budget-duplicates", workflow: { name: "budget", version: 1, style: "pipeline", maturity: "stable" } });
@@ -199,6 +199,17 @@ describe("Agentflow run-state SQLite store", () => {
 
     expect(() => store.reserveBudgets([reservation, reservation])).toThrow(/duplicate IDs/);
     expect(store.getBudget("budget-duplicates", reservation.id)).toBeNull();
+    expect(() => store.reserveBudgets([{ ...reservation, id: "model:zero", amount: 0 }])).toThrow(/positive finite number/);
+    expect(store.getBudget("budget-duplicates", "model:zero")).toBeNull();
+    expect(store.reserveBudgets([reservation])).toEqual([{
+      id: "model:model_calls",
+      runId: "budget-duplicates",
+      scope: "workflow",
+      kind: "model_calls",
+      limit: 2,
+      used: 1,
+      unit: "calls"
+    }]);
     store.close();
   });
 
