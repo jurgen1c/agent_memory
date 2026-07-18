@@ -908,7 +908,18 @@ function validateArtifactPaths(contexts: StepContext[], errors: AgentflowWorkflo
         });
       });
       const seen = new Set<string>();
-      for (const [index, value] of stringList(context.step.outputs).entries()) {
+      const rawOutputs = Array.isArray(context.step.outputs) ? context.step.outputs : [];
+      for (const [index, value] of rawOutputs.entries()) {
+        if (typeof value !== "string" || value.trim().length === 0) {
+          addStepIssue(
+            errors,
+            context,
+            "workflow.mcp_call.output.invalid",
+            `outputs[${index}]`,
+            "MCP call outputs must contain non-empty normalized static repo-relative artifact paths."
+          );
+          continue;
+        }
         let normalized = "";
         try {
           normalized = normalizeAgentflowArtifactPath(value);

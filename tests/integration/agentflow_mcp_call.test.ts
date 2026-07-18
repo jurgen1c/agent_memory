@@ -139,6 +139,24 @@ steps:
       expect.objectContaining({ code: "workflow.mcp_call.output.invalid", path: "steps[0].outputs[2]" }),
       expect.objectContaining({ code: "workflow.mcp_call.output.invalid", path: "steps[0].outputs[3]" })
     ]));
+
+    const indexPreserving = parseAgentflowWorkflowOrThrow(`name: indexed-invalid-mcp-outputs
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - id: fetch
+    type: mcp_call
+    server: fixture
+    tool: fetch
+    arguments: {}
+    outputs: [ticket.json, null, ticket.json, ""]
+`);
+    expect(validateAgentflowWorkflow(indexPreserving).errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "workflow.mcp_call.output.invalid", path: "steps[0].outputs[1]" }),
+      expect.objectContaining({ code: "workflow.mcp_call.output.duplicate", path: "steps[0].outputs[2]" }),
+      expect.objectContaining({ code: "workflow.mcp_call.output.invalid", path: "steps[0].outputs[3]" })
+    ]));
   });
 
   test("rejects dynamic MCP server and tool declarations", () => {
