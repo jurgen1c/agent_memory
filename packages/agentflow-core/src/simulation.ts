@@ -352,12 +352,19 @@ function runStep(step: AgentflowWorkflowStep, state: SimulationState, insideLoop
     if (type === "artifact_transform") {
       return simulatedTransformFailure(step, stepFixture, id, state, "Fixture marks the artifact transform as failed.");
     }
+    if (type === "session_request") {
+      return simulatedSessionFailure(step, stepFixture, id, state, "Fixture marks the session request as failed.");
+    }
     return failureControl(step, stepFixture, id, state);
   }
 
   if (type === "artifact_transform") {
     const transformControl = simulateTransformStep(step, stepFixture, id, state);
     if (transformControl.kind !== "done") return transformControl;
+    state.retryAttempts.delete(id);
+  } else if (type === "session_request") {
+    const sessionControl = simulateSessionRequestStep(step, stepFixture, id, state);
+    if (sessionControl.kind !== "done") return sessionControl;
     state.retryAttempts.delete(id);
   } else {
     state.retryAttempts.delete(id);
@@ -390,6 +397,79 @@ function runStep(step: AgentflowWorkflowStep, state: SimulationState, insideLoop
 
   const target = nonEmptyString(step.then) ?? nonEmptyString(step.goto);
   return target === undefined ? { kind: "done" } : controlForTarget(target, id, state);
+}
+
+function simulateSessionRequestStep(
+  step: AgentflowWorkflowStep,
+  fixture: AgentflowSimulationStepFixture,
+  stepId: string,
+  state: SimulationState
+): SequenceControl {
+  const missingInput = (Array.isArray(step.inputs) ? step.inputs : [])
+    .flatMap((value) => artifactName(value, state))
+    .find((artifact) => !state.artifacts.has(artifact));
+  if (missingInput !== undefined) {
+    state.handledMissingArtifacts.add(missingArtifactKey({ stepId, artifact: missingInput, kind: "input" }));
+    return simulatedSessionFailure(
+      step,
+      fixture,
+      stepId,
+      state,
+      `Fixture does not provide declared session input ${missingInput}.`
+    );
+  }
+
+  const declaredOutputs = new Set(
+    (Array.isArray(step.outputs) ? step.outputs : [])
+      .flatMap((output) => nonEmptyString(output) ?? [])
+      .map(canonicalArtifactName)
+  );
+  const providedOutputs = Array.isArray(fixture.outputs)
+    ? canonicalFixtureArtifactNames(fixture.outputs)
+    : canonicalFixtureArtifacts(fixture.outputs ?? {});
+  const invalidOutput = providedOutputs.collisions.values().next().value
+    ?? [...declaredOutputs].find((output) => !providedOutputs.values.has(output))
+    ?? [...providedOutputs.values.keys()].find((output) => !declaredOutputs.has(output));
+  if (invalidOutput !== undefined) {
+    return simulatedSessionFailure(
+      step,
+      fixture,
+      stepId,
+      state,
+      `Session fixture outputs must match declared outputs exactly; invalid output ${invalidOutput}.`
+    );
+  }
+
+  for (const output of Array.isArray(step.outputs) ? step.outputs : []) {
+    const name = nonEmptyString(output);
+    if (name === undefined) continue;
+    const artifact = canonicalArtifactName(name);
+    if (state.artifacts.has(artifact) && step.overwrite !== true) {
+      return simulatedSessionFailure(
+        step,
+        fixture,
+        stepId,
+        state,
+        `Artifact ${artifact} already exists; declare overwrite: true to replace it during simulation.`
+      );
+    }
+  }
+  recordOutputs(step, fixture, stepId, state);
+  return { kind: "done" };
+}
+
+function simulatedSessionFailure(
+  step: AgentflowWorkflowStep,
+  fixture: AgentflowSimulationStepFixture,
+  stepId: string,
+  state: SimulationState,
+  message: string
+): SequenceControl {
+  if (isRecord(step.on_failure)) return simulatedTransformFailure(step, fixture, stepId, state, message);
+  const visit = state.visitedSteps.at(-1);
+  if (visit?.id === stepId && visit.outcome === "succeeded") visit.outcome = "failed";
+  state.terminalStates.push({ stepId, status: "paused" });
+  return { kind: "terminal", status: "paused" };
 }
 
 function conditionControl(
@@ -802,6 +882,24 @@ function canonicalFixtureArtifacts(artifacts: Record<string, AgentflowYamlValue>
       collisions.add(canonical);
     } else {
       values.set(canonical, value);
+    }
+  }
+  return { values, collisions };
+}
+
+function canonicalFixtureArtifactNames(artifacts: string[]): {
+  values: Map<string, AgentflowYamlValue>;
+  collisions: Set<string>;
+} {
+  const values = new Map<string, AgentflowYamlValue>();
+  const collisions = new Set<string>();
+  for (const artifact of artifacts) {
+    const canonical = canonicalArtifactName(artifact);
+    if (values.has(canonical) || collisions.has(canonical)) {
+      values.delete(canonical);
+      collisions.add(canonical);
+    } else {
+      values.set(canonical, null);
     }
   }
   return { values, collisions };
