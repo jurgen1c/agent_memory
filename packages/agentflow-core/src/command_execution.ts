@@ -102,7 +102,7 @@ export async function executeAgentflowCommandPipeline(
     const stepId = requiredStepId(step);
     routingBudget.visits.set(stepId, (routingBudget.visits.get(stepId) ?? 0) + 1);
     const stepType = normalizedTarget(step.type);
-    if (typeof step.type === "string" && step.type.trim() === "mcp_call") {
+    if (stepType === "mcp_call") {
       const firstAttempt = allocateStepAttempt(routingBudget, stepId);
       if (firstAttempt === undefined) return stepAttemptLimitResult(store, runId, completedSteps, stepId, routingBudget);
       const preflightError = validateMcpCallStep(step);
@@ -194,7 +194,7 @@ export async function executeAgentflowCommandPipeline(
         message: failure
       }, failureStatus(step));
     }
-    if (step.type === "artifact_transform") {
+    if (stepType === "artifact_transform") {
       const firstAttempt = allocateStepAttempt(routingBudget, stepId);
       if (firstAttempt === undefined) return stepAttemptLimitResult(store, runId, completedSteps, stepId, routingBudget);
       const preflightError = validateTransformStep(step);
@@ -239,7 +239,7 @@ export async function executeAgentflowCommandPipeline(
         message: failure
       }, failureStatus(step));
     }
-    if (typeof step.type === "string" && step.type.trim() === "session_request") {
+    if (stepType === "session_request") {
       const firstAttempt = allocateStepAttempt(routingBudget, stepId);
       if (firstAttempt === undefined) return stepAttemptLimitResult(store, runId, completedSteps, stepId, routingBudget);
       const preflightError = validateSessionRequestStep(step);
@@ -437,7 +437,7 @@ export async function executeAgentflowCommandPipeline(
         }, "failed");
       }
     }
-    if (step.type !== "command") {
+    if (stepType !== "command") {
       return finishFailure(store, runId, completedSteps, stepId, {
         exitCode: null,
         timedOut: false,

@@ -34,6 +34,36 @@ steps:
     store.close();
   });
 
+  test("normalizes padded executable step types during runtime dispatch", async () => {
+    const root = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`name: normalized-runtime-dispatch
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - { id: write, type: " command ", command: "printf source > source.txt", outputs: [source.txt] }
+  - { id: render, type: " artifact_transform ", input: source.txt, output: rendered.txt, transform: uppercase }
+`);
+    expect(validateAgentflowWorkflow(workflow)).toEqual({ valid: true, errors: [] });
+    const store = await openAgentflowRunState({ cwd: root });
+    createAgentflowLifecycleRun(store, { id: "normalized-runtime-dispatch", workflow });
+    const transforms = new AgentflowArtifactTransformRegistry().register("uppercase", (input) => ({
+      content: Buffer.from(input).toString("utf8").toUpperCase(),
+      contentType: "text/plain"
+    }));
+
+    const result = await executeAgentflowCommandPipeline(
+      store,
+      "normalized-runtime-dispatch",
+      workflow,
+      transforms
+    );
+
+    expect(result).toEqual({ status: "completed", completedSteps: ["write", "render"] });
+    expect(store.readArtifact("normalized-runtime-dispatch", "rendered.txt").content.toString()).toBe("SOURCE");
+    store.close();
+  });
+
   test("routes successful steps through an explicit then target", async () => {
     const root = temporaryRepo();
     const workflow = parseAgentflowWorkflowOrThrow(`name: explicit-success-route
