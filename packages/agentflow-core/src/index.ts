@@ -37,6 +37,12 @@ export {
 } from "./lifecycle";
 export { executeAgentflowCommandPipeline } from "./command_execution";
 export {
+  AgentflowConditionError,
+  agentflowConditionExpressionIsSimple,
+  evaluateAgentflowCondition,
+  selectAgentflowConditionTarget
+} from "./condition";
+export {
   AgentflowArtifactTransformError,
   AgentflowArtifactTransformRegistry,
   MAX_AGENTFLOW_TRANSFORM_INPUT_BYTES,
@@ -114,6 +120,7 @@ export type {
   CreateAgentflowLifecycleRunInput
 } from "./lifecycle";
 export type { AgentflowCommandPipelineResult } from "./command_execution";
+export type { AgentflowConditionSelection } from "./condition";
 export type {
   AgentflowBinaryArtifactValue,
   AgentflowArtifactTransform,
