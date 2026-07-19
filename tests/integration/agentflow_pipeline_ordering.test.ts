@@ -323,6 +323,41 @@ steps:
     store.close();
   });
 
+  test("ignores unpublished artifact reservations during condition lookup", async () => {
+    const root = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`name: published-condition-artifact
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - { id: route, type: condition, if: artifacts.ci.ready == true, then: complete, else: fail }
+`);
+    const store = await openAgentflowRunState({ cwd: root });
+    createAgentflowLifecycleRun(store, { id: "published-condition-artifact", workflow });
+    store.writeArtifact({
+      id: "published",
+      runId: "published-condition-artifact",
+      stepId: "fixture",
+      path: "ci.json",
+      kind: "fixture",
+      contentType: "application/json",
+      content: JSON.stringify({ ready: true })
+    });
+    store.upsertArtifact({
+      id: "reserved",
+      runId: "published-condition-artifact",
+      stepId: "future",
+      path: "ci/ready.json",
+      kind: "fixture",
+      contentType: "application/json"
+    });
+
+    const result = await executeAgentflowCommandPipeline(store, "published-condition-artifact", workflow);
+
+    expect(result).toMatchObject({ status: "completed", completedSteps: ["route"] });
+    store.close();
+  });
+
   test("resolves dotted artifact filenames and rejects ambiguous aliases", async () => {
     const workflow = parseAgentflowWorkflowOrThrow(`name: artifact-aliases
 version: 1
@@ -453,6 +488,36 @@ steps:
     store.close();
   });
 
+  test("rejects ambiguous step IDs before executing a directly persisted workflow", async () => {
+    const repo = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`name: ambiguous-runtime-route
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - { id: start, type: command, command: echo start, then: duplicate }
+  - { id: duplicate, type: command, command: echo first }
+  - { id: duplicate, type: command, command: echo second }
+`);
+    const store = await openAgentflowRunState({ cwd: repo });
+    store.createRunWithEvent({
+      id: "ambiguous-runtime-route",
+      workflow: {
+        name: workflow.name,
+        version: workflow.version,
+        style: workflow.style,
+        maturity: workflow.maturity
+      },
+      context: { workflow: workflow as unknown as AgentflowRunStateValue }
+    }, { type: "run.created", payload: { status: "pending" } });
+
+    await expect(executeAgentflowCommandPipeline(store, "ambiguous-runtime-route", workflow))
+      .rejects.toMatchObject({ code: "AGENTFLOW_STEP_AMBIGUOUS" });
+    expect(store.getRun("ambiguous-runtime-route")?.status).toBe("pending");
+    expect(store.listEvents("ambiguous-runtime-route").map((event) => event.type)).toEqual(["run.created"]);
+    store.close();
+  });
+
   test("rejects condition expressions that would require code evaluation", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`name: complex-condition
 version: 1
@@ -553,6 +618,76 @@ steps:
       path: "steps[0].outputs",
       stepId: "route"
     });
+  });
+
+  test("fails closed for missing compared values and malformed persisted branches", async () => {
+    const cases = [
+      {
+        id: "missing-compared-value",
+        source: `name: missing-compared-value
+version: 1
+style: pipeline
+maturity: experimental
+inputs: { status: {} }
+steps:
+  - { id: route, type: condition, if: status != "changes_requested", then: complete, else: fail }
+`,
+        message: "did not resolve to a value"
+      },
+      {
+        id: "malformed-condition-branches",
+        source: `name: malformed-condition-branches
+version: 1
+style: pipeline
+maturity: experimental
+inputs: { ready: {} }
+steps:
+  - id: route
+    type: condition
+    branches:
+      - true
+      - { if: ready, then: complete }
+`,
+        inputs: { ready: true },
+        message: "Condition branches must be a list of mappings"
+      },
+      {
+        id: "malformed-condition-else",
+        source: `name: malformed-condition-else
+version: 1
+style: pipeline
+maturity: experimental
+inputs: { ready: {} }
+steps:
+  - { id: route, type: condition, branches: [{ if: ready, then: complete }], else: 42 }
+`,
+        inputs: { ready: false },
+        message: "Condition else must be a non-empty string"
+      }
+    ] as const;
+
+    for (const entry of cases) {
+      const root = temporaryRepo();
+      const workflow = parseAgentflowWorkflowOrThrow(entry.source);
+      const store = await openAgentflowRunState({ cwd: root });
+      store.createRunWithEvent({
+        id: entry.id,
+        workflow: {
+          name: workflow.name,
+          version: workflow.version,
+          style: workflow.style,
+          maturity: workflow.maturity
+        },
+        context: { workflow: workflow as unknown as AgentflowRunStateValue },
+        ...(entry.inputs === undefined ? {} : { inputs: entry.inputs })
+      }, { type: "run.created", payload: { status: "pending" } });
+
+      const result = await executeAgentflowCommandPipeline(store, entry.id, workflow);
+
+      expect(result).toMatchObject({ status: "failed", failedStep: "route" });
+      expect(result.message).toContain(entry.message);
+      store.close();
+    }
   });
 
   test("enforces recovery cycle bounds before repeating successful routes", async () => {
@@ -697,6 +832,46 @@ steps:
     });
     expect(store.listEvents("retry-attempt-limit").filter((event) => event.type === "step.started").length).toBe(1);
     store.close();
+  });
+
+  test("enforces attempt limits before transform and session preflight rejection", async () => {
+    for (const [kind, step] of [
+      ["transform", "{ id: work, type: artifact_transform, transform: copy }"],
+      ["session", "{ id: work, type: session_request, session: '', prompt: '', inputs: [], outputs: [] }"]
+    ] as const) {
+      const repo = temporaryRepo();
+      const workflow = parseAgentflowWorkflowOrThrow(`name: bounded-${kind}-preflight
+version: 1
+style: recovery_pipeline
+maturity: experimental
+limits: { max_step_attempts: { work: 0.5 } }
+steps:
+  - ${step}
+`);
+      const store = await openAgentflowRunState({ cwd: repo });
+      store.createRunWithEvent({
+        id: `bounded-${kind}-preflight`,
+        workflow: {
+          name: workflow.name,
+          version: workflow.version,
+          style: workflow.style,
+          maturity: workflow.maturity
+        },
+        context: { workflow: workflow as never }
+      }, { type: "run.created", payload: { status: "pending" } });
+
+      const result = await executeAgentflowCommandPipeline(store, `bounded-${kind}-preflight`, workflow);
+
+      expect(result).toMatchObject({
+        status: "paused",
+        failedStep: "work",
+        message: "Step work cannot start because limits.max_step_attempts allows 0.5 attempt(s)."
+      });
+      expect(store.listEvents(`bounded-${kind}-preflight`).map((event) => event.type)).toEqual([
+        "run.created", "run.started", "run.paused"
+      ]);
+      store.close();
+    }
   });
 
   test("allows rerouted transforms to replace outputs they already own", async () => {

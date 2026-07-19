@@ -50,6 +50,41 @@ describe("Agentflow workflow inspection", () => {
     expect(first).toContain("rerun_ci -> terminal:pause [on_failure.on_unresolved.then]");
   });
 
+  test("renders continue and ignore success routes as listed-order fallthroughs", () => {
+    for (const target of ["continue", "ignore"]) {
+      const workflow = parseAgentflowWorkflowOrThrow(`name: ${target}-fallthrough
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - { id: first, type: command, command: echo first, then: ${target} }
+  - { id: second, type: command, command: echo second }
+`);
+
+      const graph = buildAgentflowWorkflowGraph(workflow);
+
+      expect(graph.edges).toContainEqual({ from: "first", to: "second", kind: "next" });
+      expect(graph.nodes.map((node) => node.id)).not.toContain(`terminal:${target}`);
+    }
+  });
+
+  test("gives declared continue and ignore step IDs precedence over fallthrough aliases", () => {
+    for (const target of ["continue", "ignore"]) {
+      const workflow = parseAgentflowWorkflowOrThrow(`name: declared-${target}
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - { id: first, type: command, command: echo first, then: ${target} }
+  - { id: skipped, type: command, command: echo skipped }
+  - { id: ${target}, type: command, command: echo target }
+`);
+      const graph = buildAgentflowWorkflowGraph(workflow);
+      expect(graph.edges).toContainEqual({ from: "first", to: target, kind: "then" });
+      expect(graph.edges).not.toContainEqual({ from: "first", to: "skipped", kind: "next" });
+    }
+  });
+
   test("includes parallel branch containers and collaboration metadata", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`
 name: collaborate

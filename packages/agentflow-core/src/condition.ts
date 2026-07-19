@@ -67,24 +67,39 @@ export function selectAgentflowConditionTargetWithResolver(
   step: AgentflowWorkflowStep,
   resolve: AgentflowConditionReferenceResolver
 ): AgentflowConditionSelection {
-  const branches = Array.isArray(step.branches)
-    ? step.branches.filter((branch): branch is AgentflowYamlMapping => isRecord(branch))
-    : [];
+  if (step.branches !== undefined && !Array.isArray(step.branches)) {
+    throw new AgentflowConditionError("Condition branches must be a list of mappings.");
+  }
+  const branches = step.branches ?? [];
+  if (branches.some((branch) => !isRecord(branch))) {
+    throw new AgentflowConditionError("Condition branches must be a list of mappings.");
+  }
 
   if (branches.length > 0) {
-    for (const branch of branches) {
-      const expression = requiredString(branch.if, "Condition branch if");
+    const normalizedBranches = branches.map((branch) => {
+      if (!isRecord(branch)) {
+        throw new AgentflowConditionError("Condition branches must be a list of mappings.");
+      }
+      return {
+        expression: requiredString(branch.if, "Condition branch if"),
+        target: requiredString(branch.then, "Condition branch then")
+      };
+    });
+    const elseTarget = step.else === undefined ? undefined : requiredString(step.else, "Condition else");
+    for (const { expression, target } of normalizedBranches) {
       if (evaluateAgentflowConditionWithResolver(expression, resolve)) {
-        return { target: requiredString(branch.then, "Condition branch then"), expression, matched: true };
+        return { target, expression, matched: true };
       }
     }
-    return { target: optionalString(step.else), matched: false };
+    return { target: elseTarget, matched: false };
   }
 
   const expression = requiredString(step.if, "Condition if");
+  const thenTarget = step.then === undefined ? undefined : requiredString(step.then, "Condition then");
+  const elseTarget = step.else === undefined ? undefined : requiredString(step.else, "Condition else");
   const matched = evaluateAgentflowConditionWithResolver(expression, resolve);
   return {
-    target: optionalString(matched ? step.then : step.else),
+    target: matched ? thenTarget : elseTarget,
     expression,
     matched
   };
@@ -183,6 +198,7 @@ function resolveArtifact(
   segments: string[]
 ): AgentflowYamlValue | undefined {
   const candidates = store.listArtifactMetadata(runId)
+    .filter((artifact) => artifact.writtenAt !== null)
     .map((artifact) => ({ artifact, alias: agentflowConditionArtifactAlias(artifact.declaredPath) }))
     .filter(({ alias }) => segments.slice(0, alias.length).join(".") === alias.join("."))
     .sort((left, right) => right.alias.length - left.alias.length);
@@ -284,6 +300,9 @@ function compare(
   right: AgentflowYamlValue,
   expression: string
 ): boolean {
+  if (left === undefined) {
+    throw new AgentflowConditionError(`Condition reference in ${JSON.stringify(expression)} did not resolve to a value.`);
+  }
   if (operator === "==") return left === right;
   if (operator === "!=") return left !== right;
   if ((typeof left !== "number" && typeof left !== "string") || typeof left !== typeof right) {

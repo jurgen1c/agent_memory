@@ -448,6 +448,48 @@ steps:
     ]);
   });
 
+  test("fails closed for missing compared values and malformed branch entries", () => {
+    const missingValue = parseAgentflowWorkflowOrThrow(`name: simulated-missing-comparison
+version: 1
+style: pipeline
+maturity: draft
+inputs: { status: {} }
+steps:
+  - { id: route, type: condition, if: status != "changes_requested", then: complete, else: fail }
+`);
+    const missingResult = simulateAgentflowWorkflow(missingValue, {});
+    expect(missingResult.status).toBe("unresolved");
+    expect(missingResult.unresolvedBranches[0]?.reason).toContain("did not resolve to a value");
+
+    const malformedBranches = parseAgentflowWorkflowOrThrow(`name: simulated-malformed-branches
+version: 1
+style: pipeline
+maturity: draft
+inputs: { ready: {} }
+steps:
+  - id: route
+    type: condition
+    branches:
+      - true
+      - { if: ready, then: complete }
+`);
+    const malformedResult = simulateAgentflowWorkflow(malformedBranches, { inputs: { ready: true } });
+    expect(malformedResult.status).toBe("unresolved");
+    expect(malformedResult.unresolvedBranches[0]?.reason).toContain("Condition branches must be a list of mappings");
+
+    const malformedElse = parseAgentflowWorkflowOrThrow(`name: simulated-malformed-else
+version: 1
+style: pipeline
+maturity: draft
+inputs: { ready: {} }
+steps:
+  - { id: route, type: condition, branches: [{ if: ready, then: complete }], else: 42 }
+`);
+    const malformedElseResult = simulateAgentflowWorkflow(malformedElse, { inputs: { ready: false } });
+    expect(malformedElseResult.status).toBe("unresolved");
+    expect(malformedElseResult.unresolvedBranches[0]?.reason).toContain("Condition else must be a non-empty string");
+  });
+
   test("stops conditions before routing when any required input is absent", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`name: unrelated-required-input
 version: 1
@@ -703,6 +745,47 @@ steps:
       "first:succeeded", "second:succeeded", "first:failed"
     ]);
     expect(result.artifactValues["shared.txt"]).toBe("second");
+  });
+
+  test("allows commands to idempotently publish identical fixture output", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: simulated-idempotent-output
+version: 1
+style: recovery_pipeline
+maturity: experimental
+steps:
+  - { id: first, type: command, command: echo same, outputs: [shared.txt] }
+  - { id: second, type: command, command: echo same, outputs: [shared.txt] }
+`);
+
+    const result = simulateAgentflowWorkflow(workflow, {
+      steps: {
+        first: { outputs: { "shared.txt": "same" } },
+        second: { outputs: { "shared.txt": "same" } }
+      }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.visitedSteps.map((step) => step.id)).toEqual(["first", "second"]);
+    expect(result.artifactValues["shared.txt"]).toBe("same");
+  });
+
+  test("does not claim identical fixture-owned output as a command artifact", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: simulated-fixture-output-owner
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - { id: write, type: command, command: echo same, outputs: [shared.txt] }
+`);
+
+    const result = simulateAgentflowWorkflow(workflow, {
+      artifacts: { "shared.txt": "same" },
+      steps: { write: { outputs: { "shared.txt": "same" } } }
+    });
+
+    expect(result.status).toBe("unresolved");
+    expect(result.visitedSteps).toEqual([{ id: "write", type: "command", outcome: "failed" }]);
+    expect(result.artifactValues["shared.txt"]).toBe("same");
   });
 
   test("reports overlapping availability-only parallel outputs as unresolved", () => {

@@ -83,6 +83,7 @@ export async function executeAgentflowCommandPipeline(
   if (existing.status !== "pending") {
     throw new Error(`Agentflow run ${runId} cannot execute while its status is ${existing.status}.`);
   }
+  const stepLocations = collectRuntimeStepLocations(workflow.steps);
 
   store.transitionRunWithEvent(runId, {
     status: "running",
@@ -91,7 +92,6 @@ export async function executeAgentflowCommandPipeline(
   });
 
   const completedSteps: string[] = [];
-  const stepLocations = collectRuntimeStepLocations(workflow.steps);
   const routingBudget = createSuccessfulRoutingBudget(workflow);
   let currentSteps = workflow.steps;
   let stepIndex = 0;
@@ -103,9 +103,11 @@ export async function executeAgentflowCommandPipeline(
     routingBudget.visits.set(stepId, (routingBudget.visits.get(stepId) ?? 0) + 1);
     const stepType = normalizedTarget(step.type);
     if (typeof step.type === "string" && step.type.trim() === "mcp_call") {
+      const firstAttempt = allocateStepAttempt(routingBudget, stepId);
+      if (firstAttempt === undefined) return stepAttemptLimitResult(store, runId, completedSteps, stepId, routingBudget);
       const preflightError = validateMcpCallStep(step);
       if (preflightError !== undefined) {
-        persistMcpCallFailure(store, runId, stepId, preflightError, false, 1, true);
+        persistMcpCallFailure(store, runId, stepId, preflightError, false, firstAttempt, true);
         return finishFailure(store, runId, completedSteps, stepId, {
           exitCode: null,
           timedOut: false,
@@ -115,7 +117,7 @@ export async function executeAgentflowCommandPipeline(
       const retries = failureRetries(step);
       let failure: string | undefined;
       for (let attemptIndex = 1; attemptIndex <= retries + 1; attemptIndex += 1) {
-        const attempt = allocateStepAttempt(routingBudget, stepId);
+        const attempt = attemptIndex === 1 ? firstAttempt : allocateStepAttempt(routingBudget, stepId);
         if (attempt === undefined) return stepAttemptLimitResult(store, runId, completedSteps, stepId, routingBudget);
         const stopped = activeStopStatus(store, runId);
         if (stopped !== undefined) return stoppedPipelineResult(store, runId, completedSteps)!;
@@ -193,9 +195,11 @@ export async function executeAgentflowCommandPipeline(
       }, failureStatus(step));
     }
     if (step.type === "artifact_transform") {
+      const firstAttempt = allocateStepAttempt(routingBudget, stepId);
+      if (firstAttempt === undefined) return stepAttemptLimitResult(store, runId, completedSteps, stepId, routingBudget);
       const preflightError = validateTransformStep(step);
       if (preflightError !== undefined) {
-        persistTransformPreflightFailure(store, runId, stepId, preflightError);
+        persistTransformPreflightFailure(store, runId, stepId, firstAttempt, preflightError);
         return finishFailure(store, runId, completedSteps, stepId, {
           exitCode: null,
           timedOut: false,
@@ -205,7 +209,7 @@ export async function executeAgentflowCommandPipeline(
       const retries = failureRetries(step);
       let failure: string | undefined;
       for (let attemptIndex = 1; attemptIndex <= retries + 1; attemptIndex += 1) {
-        const attempt = allocateStepAttempt(routingBudget, stepId);
+        const attempt = attemptIndex === 1 ? firstAttempt : allocateStepAttempt(routingBudget, stepId);
         if (attempt === undefined) return stepAttemptLimitResult(store, runId, completedSteps, stepId, routingBudget);
         const outcome = executeTransformStep(store, runId, stepId, step, transforms, attempt, attemptIndex <= retries);
         if (outcome.stopped !== undefined) {
@@ -236,12 +240,14 @@ export async function executeAgentflowCommandPipeline(
       }, failureStatus(step));
     }
     if (typeof step.type === "string" && step.type.trim() === "session_request") {
+      const firstAttempt = allocateStepAttempt(routingBudget, stepId);
+      if (firstAttempt === undefined) return stepAttemptLimitResult(store, runId, completedSteps, stepId, routingBudget);
       const preflightError = validateSessionRequestStep(step);
       if (preflightError !== undefined) {
         const sessionId = typeof step.session === "string" && step.session.trim().length > 0
           ? step.session.trim()
           : undefined;
-        persistSessionRequestFailure(store, runId, stepId, sessionId, preflightError, false, true);
+        persistSessionRequestFailure(store, runId, stepId, sessionId, preflightError, false, true, firstAttempt);
         return finishFailure(store, runId, completedSteps, stepId, {
           exitCode: null,
           timedOut: false,
@@ -251,7 +257,7 @@ export async function executeAgentflowCommandPipeline(
       const retries = failureRetries(step);
       let failure: string | undefined;
       for (let attemptIndex = 1; attemptIndex <= retries + 1; attemptIndex += 1) {
-        const attempt = allocateStepAttempt(routingBudget, stepId);
+        const attempt = attemptIndex === 1 ? firstAttempt : allocateStepAttempt(routingBudget, stepId);
         if (attempt === undefined) return stepAttemptLimitResult(store, runId, completedSteps, stepId, routingBudget);
         const stopped = activeStopStatus(store, runId);
         if (stopped !== undefined) return stoppedPipelineResult(store, runId, completedSteps)!;
@@ -705,7 +711,14 @@ function collectRuntimeStepLocations(
 ): Map<string, RuntimeStepLocation> {
   steps.forEach((step, index) => {
     if (normalizedTarget(step.type) !== undefined) {
-      locations.set(requiredStepId(step), { steps, index });
+      const stepId = requiredStepId(step);
+      if (locations.has(stepId)) {
+        throw new AgentflowRunStateError(
+          `Agentflow workflow has multiple executable steps with ID ${JSON.stringify(stepId)}; runtime routing is ambiguous.`,
+          "AGENTFLOW_STEP_AMBIGUOUS"
+        );
+      }
+      locations.set(stepId, { steps, index });
     }
 
     for (const field of ["body", "steps"] as const) {
@@ -1279,12 +1292,13 @@ function persistTransformPreflightFailure(
   store: AgentflowRunStateStore,
   runId: string,
   stepId: string,
+  attempt: number,
   message: string
 ): void {
-  const error = { attempt: 1, message };
-  store.upsertStep({ runId, stepId, attempt: 1, status: "failed", error });
+  const error = { attempt, message };
+  store.upsertStep({ runId, stepId, attempt, status: "failed", error });
   store.recordFailure({
-    id: `artifact-transform:${safeId(stepId)}:preflight`,
+    id: `artifact-transform:${safeId(stepId)}:attempt-${attempt}:preflight`,
     runId,
     stepId,
     classification: "artifact_transform_policy",

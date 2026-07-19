@@ -386,9 +386,11 @@ function runStep(step: AgentflowWorkflowStep, state: SimulationState, insideLoop
     if (mcpControl.kind !== "done") return mcpControl;
     state.retryAttempts.delete(id);
   } else if (type === "command") {
+    const fixtureOutputs = canonicalFixtureOutputValues(stepFixture);
     const collision = declaredOutputArtifacts(step).find((artifact) =>
       state.artifacts.has(artifact)
       && state.artifactProducers.get(artifact) !== id
+      && !sameCommandOutputArtifact(state, artifact, fixtureOutputs.get(artifact))
       && step.overwrite !== true
     );
     if (collision !== undefined) {
@@ -430,6 +432,30 @@ function runStep(step: AgentflowWorkflowStep, state: SimulationState, insideLoop
 
   const target = staticTarget(step.then) ?? staticTarget(step.goto);
   return target === undefined ? { kind: "done" } : controlForTarget(target, id, state);
+}
+
+function canonicalFixtureOutputValues(
+  fixture: AgentflowSimulationStepFixture
+): Map<string, AgentflowYamlValue | undefined> {
+  if (Array.isArray(fixture.outputs)) {
+    return new Map(fixture.outputs.map((artifact) => [canonicalArtifactName(artifact), undefined]));
+  }
+  return new Map(canonicalFixtureArtifacts(fixture.outputs ?? {}).values);
+}
+
+function sameCommandOutputArtifact(
+  state: SimulationState,
+  artifact: string,
+  proposed: AgentflowYamlValue | undefined
+): boolean {
+  const producerId = state.artifactProducers.get(artifact);
+  const location = producerId === undefined ? undefined : state.stepLocations.get(producerId);
+  const producer = location === undefined ? undefined : location.steps[location.index];
+  const existing = state.artifactValues.get(artifact);
+  return nonEmptyString(producer?.type) === "command"
+    && existing !== undefined
+    && proposed !== undefined
+    && isDeepEqualArtifactValue(existing, proposed);
 }
 
 function declaredOutputArtifacts(step: AgentflowWorkflowStep): string[] {
