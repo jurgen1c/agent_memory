@@ -527,7 +527,11 @@ maturity: experimental
 steps:
   - { id: start, type: command, command: echo start, then: duplicate }
   - { id: duplicate, type: command, command: echo first }
-  - { id: duplicate, type: command, command: echo second }
+  - id: duplicate
+    type: loop
+    max_iterations: 1
+    body:
+      - { id: nested, type: command, command: echo nested }
 `);
     const store = await openAgentflowRunState({ cwd: repo });
     store.createRunWithEvent({
@@ -542,7 +546,10 @@ steps:
     }, { type: "run.created", payload: { status: "pending" } });
 
     await expect(executeAgentflowCommandPipeline(store, "ambiguous-runtime-route", workflow))
-      .rejects.toMatchObject({ code: "AGENTFLOW_STEP_AMBIGUOUS" });
+      .rejects.toMatchObject({
+        code: "AGENTFLOW_STEP_AMBIGUOUS",
+        message: 'Agentflow workflow has multiple steps with ID "duplicate"; runtime routing is ambiguous.'
+      });
     expect(store.getRun("ambiguous-runtime-route")?.status).toBe("pending");
     expect(store.listEvents("ambiguous-runtime-route").map((event) => event.type)).toEqual(["run.created"]);
     store.close();
@@ -623,6 +630,22 @@ steps:
       code: "workflow.condition.on_failure.unsupported",
       message: "Condition steps do not support on_failure policies in this runtime phase.",
       path: "steps[0].on_failure",
+      stepId: "route"
+    });
+
+    const gotoTarget = parseAgentflowWorkflowOrThrow(`name: condition-goto
+version: 1
+style: pipeline
+maturity: experimental
+inputs: { ready: {} }
+steps:
+  - { id: route, type: condition, if: ready, then: complete, else: fail, goto: skipped }
+  - { id: skipped, type: command, command: echo skipped }
+`);
+    expect(validateAgentflowWorkflow(gotoTarget).errors).toContainEqual({
+      code: "workflow.condition.goto.unsupported",
+      message: "Condition steps route through branches or if/then/else and do not support goto.",
+      path: "steps[0].goto",
       stepId: "route"
     });
 

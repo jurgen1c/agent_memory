@@ -714,7 +714,7 @@ function collectRuntimeStepLocations(
       const stepId = requiredStepId(step);
       if (locations.has(stepId)) {
         throw new AgentflowRunStateError(
-          `Agentflow workflow has multiple executable steps with ID ${JSON.stringify(stepId)}; runtime routing is ambiguous.`,
+          `Agentflow workflow has multiple steps with ID ${JSON.stringify(stepId)}; runtime routing is ambiguous.`,
           "AGENTFLOW_STEP_AMBIGUOUS"
         );
       }

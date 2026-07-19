@@ -206,6 +206,15 @@ function validateConditionExpressions(
       });
     }
 
+    if (context.step.goto !== undefined) {
+      errors.push({
+        code: "workflow.condition.goto.unsupported",
+        message: "Condition steps route through branches or if/then/else and do not support goto.",
+        path: `${context.path}.goto`,
+        ...(context.id === undefined ? {} : { stepId: context.id })
+      });
+    }
+
     if (context.step.outputs !== undefined || context.step.output !== undefined) {
       errors.push({
         code: "workflow.condition.outputs.unsupported",
