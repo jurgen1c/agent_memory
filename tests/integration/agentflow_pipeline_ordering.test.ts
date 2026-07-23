@@ -735,6 +735,20 @@ steps:
 `,
         inputs: { ready: true },
         message: "Condition steps must use either branches with an optional else target or top-level if/then fields, not both"
+      },
+      {
+        id: "missing-inline-condition-then",
+        source: `name: missing-inline-condition-then
+version: 1
+style: pipeline
+maturity: experimental
+inputs: { ready: {} }
+steps:
+  - { id: route, type: condition, if: ready, else: fail }
+  - { id: next, type: command, command: echo next }
+`,
+        inputs: { ready: true },
+        message: "Condition then must be a non-empty string"
       }
     ] as const;
 

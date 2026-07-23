@@ -100,7 +100,7 @@ export function selectAgentflowConditionTargetWithResolver(
   }
 
   const expression = requiredString(step.if, "Condition if");
-  const thenTarget = step.then === undefined ? undefined : requiredString(step.then, "Condition then");
+  const thenTarget = requiredString(step.then, "Condition then");
   const elseTarget = step.else === undefined ? undefined : requiredString(step.else, "Condition else");
   const matched = evaluateAgentflowConditionWithResolver(expression, resolve);
   return {
