@@ -74,6 +74,11 @@ export function selectAgentflowConditionTargetWithResolver(
   if (branches.some((branch) => !isRecord(branch))) {
     throw new AgentflowConditionError("Condition branches must be a list of mappings.");
   }
+  if (branches.length > 0 && (step.if !== undefined || step.then !== undefined)) {
+    throw new AgentflowConditionError(
+      "Condition steps must use either branches with an optional else target or top-level if/then fields, not both."
+    );
+  }
 
   if (branches.length > 0) {
     const normalizedBranches = branches.map((branch) => {

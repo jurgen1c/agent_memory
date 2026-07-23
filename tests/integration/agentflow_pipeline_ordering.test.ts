@@ -716,6 +716,25 @@ steps:
 `,
         inputs: { ready: false },
         message: "Condition else must be a non-empty string"
+      },
+      {
+        id: "mixed-condition-form",
+        source: `name: mixed-condition-form
+version: 1
+style: pipeline
+maturity: experimental
+inputs: { ready: {} }
+steps:
+  - id: route
+    type: condition
+    if: ready
+    then: fail
+    branches:
+      - { if: ready, then: complete }
+    else: fail
+`,
+        inputs: { ready: true },
+        message: "Condition steps must use either branches with an optional else target or top-level if/then fields, not both"
       }
     ] as const;
 
