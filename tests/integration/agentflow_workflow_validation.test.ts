@@ -1760,6 +1760,25 @@ steps:
     expect(validateAgentflowWorkflow(workflow)).toEqual({ valid: true, errors: [] });
   });
 
+  test("rejects simultaneous then and goto success targets", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: ambiguous-success-target
+version: 1
+style: pipeline
+maturity: draft
+steps:
+  - { id: start, type: command, command: echo start, then: second, goto: third }
+  - { id: second, type: command, command: echo second }
+  - { id: third, type: command, command: echo third }
+`);
+
+    expect(validateAgentflowWorkflow(workflow).errors).toContainEqual({
+      code: "workflow.step.success_target.ambiguous",
+      message: 'Step "start" cannot declare both then and goto success targets.',
+      path: "steps[0].goto",
+      stepId: "start"
+    });
+  });
+
   test("rejects malformed dynamic reference delimiters", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`name: malformed-reference
 version: 1

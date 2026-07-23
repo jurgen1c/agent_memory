@@ -5,6 +5,7 @@ import type {
   AgentflowYamlMapping,
   AgentflowYamlValue
 } from "./workflow";
+import { assertAgentflowSuccessTargetsAreUnambiguous } from "./success_routing";
 
 export interface AgentflowWorkflowGraphNode {
   id: string;
@@ -116,6 +117,7 @@ export function explainAgentflowWorkflow(workflow: AgentflowWorkflow): string {
 }
 
 export function buildAgentflowWorkflowGraph(workflow: AgentflowWorkflow): AgentflowWorkflowGraph {
+  assertAgentflowSuccessTargetsAreUnambiguous(workflow.steps);
   const nodes: AgentflowWorkflowGraphNode[] = [];
   const edges: AgentflowWorkflowGraphEdge[] = [];
   const locatedSteps: LocatedStep[] = [];

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  AgentflowAmbiguousSuccessTargetError,
   AgentflowWorkflowGraphError,
   buildAgentflowWorkflowGraph,
   explainAgentflowWorkflow,
@@ -66,6 +67,23 @@ steps:
       expect(graph.edges).toContainEqual({ from: "first", to: "second", kind: "next" });
       expect(graph.nodes.map((node) => node.id)).not.toContain(`terminal:${target}`);
     }
+  });
+
+  test("rejects graphs with ambiguous success targets", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: ambiguous-graph-success-target
+version: 1
+style: pipeline
+maturity: draft
+steps:
+  - { id: start, type: command, command: echo start, then: second, goto: third }
+  - { id: second, type: command, command: echo second }
+  - { id: third, type: command, command: echo third }
+`);
+
+    expect(() => buildAgentflowWorkflowGraph(workflow)).toThrow(AgentflowAmbiguousSuccessTargetError);
+    expect(() => buildAgentflowWorkflowGraph(workflow)).toThrow(
+      'Step "start" cannot declare both then and goto success targets.'
+    );
   });
 
   test("gives declared continue and ignore step IDs precedence over fallthrough aliases", () => {

@@ -27,6 +27,10 @@ export {
   renderAgentflowWorkflowGraph
 } from "./inspection";
 export {
+  AGENTFLOW_AMBIGUOUS_SUCCESS_TARGET_CODE,
+  AgentflowAmbiguousSuccessTargetError
+} from "./success_routing";
+export {
   parseAgentflowSimulationFixture,
   renderAgentflowSimulationSummary,
   simulateAgentflowWorkflow

@@ -14,6 +14,11 @@ import {
   agentflowConditionExpressionIsSimple,
   agentflowConditionReference
 } from "./condition";
+import {
+  AGENTFLOW_AMBIGUOUS_SUCCESS_TARGET_CODE,
+  agentflowAmbiguousSuccessTargetMessage,
+  agentflowStepHasAmbiguousSuccessTarget
+} from "./success_routing";
 
 export const MAX_AGENTFLOW_COMMAND_TIMEOUT_SECONDS = 2_147_483.647;
 
@@ -641,6 +646,16 @@ function validateTargets(contexts: StepContext[], ids: Set<string>, errors: Agen
 function validateTargetShapes(contexts: StepContext[], errors: AgentflowWorkflowIssue[]): void {
   for (const context of contexts) {
     validateTargetMapping(context.step, context.path, context, errors);
+
+    if (context.type !== "condition" && agentflowStepHasAmbiguousSuccessTarget(context.step)) {
+      addStepIssue(
+        errors,
+        context,
+        AGENTFLOW_AMBIGUOUS_SUCCESS_TARGET_CODE,
+        "goto",
+        agentflowAmbiguousSuccessTargetMessage(context.id)
+      );
+    }
 
     if (context.type === "condition" && Array.isArray(context.step.branches)) {
       context.step.branches.forEach((branch, index) => {

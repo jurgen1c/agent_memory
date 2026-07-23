@@ -14,6 +14,10 @@ import {
 import { normalizeAgentflowArtifactPath, type AgentflowRunStateValue } from "./run_state";
 import { resolveAgentflowMcpArguments } from "./mcp_call";
 import { selectAgentflowConditionTargetFromValues } from "./condition";
+import {
+  agentflowAmbiguousSuccessTargetMessage,
+  collectAgentflowAmbiguousSuccessTargets
+} from "./success_routing";
 
 export type AgentflowSimulationStatus = "completed" | "failed" | "paused" | "cancelled" | "unresolved";
 export type AgentflowSimulationStepOutcome = "succeeded" | "failed";
@@ -208,6 +212,7 @@ export function simulateAgentflowWorkflow(
 
   const workflowStepIdCounts = collectSimulationStepIdCounts(workflow.steps);
   const workflowStepIds = new Set(workflowStepIdCounts.keys());
+  const ambiguousSuccessTargets = collectAgentflowAmbiguousSuccessTargets(workflow.steps);
   const ambiguousStepIds = [...workflowStepIdCounts]
     .filter(([, count]) => count > 1)
     .map(([id]) => id)
@@ -215,13 +220,20 @@ export function simulateAgentflowWorkflow(
   for (const stepId of ambiguousStepIds) {
     addUnresolved(state, stepId, "Workflow step ID is ambiguous in simulation fixtures and targets.");
   }
+  for (const conflict of ambiguousSuccessTargets) {
+    addUnresolved(
+      state,
+      conflict.stepId ?? "(workflow)",
+      agentflowAmbiguousSuccessTargetMessage(conflict.stepId)
+    );
+  }
   for (const stepId of Object.keys(fixture.steps ?? {}).sort()) {
     if (!workflowStepIds.has(stepId)) {
       addUnresolved(state, stepId, "Fixture references an unknown workflow step ID.");
     }
   }
 
-  let control: SequenceControl = ambiguousStepIds.length > 0
+  let control: SequenceControl = ambiguousStepIds.length > 0 || ambiguousSuccessTargets.length > 0
     ? { kind: "terminal", status: "unresolved" }
     : runSequence(workflow.steps, state, false);
   while (control.kind === "target") {

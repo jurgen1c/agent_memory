@@ -1247,6 +1247,29 @@ steps:
     ]);
   });
 
+  test("rejects ambiguous success targets before traversal", () => {
+    const workflow = parseAgentflowWorkflowOrThrow(`name: ambiguous-simulation-success-target
+version: 1
+style: pipeline
+maturity: draft
+steps:
+  - { id: start, type: command, command: echo start, then: second, goto: third }
+  - { id: second, type: command, command: echo second }
+  - { id: third, type: command, command: echo third }
+`);
+
+    const result = simulateAgentflowWorkflow(workflow, {});
+
+    expect(result.status).toBe("unresolved");
+    expect(result.visitedSteps).toEqual([]);
+    expect(result.unresolvedBranches).toEqual([
+      {
+        stepId: "start",
+        reason: 'Step "start" cannot declare both then and goto success targets.'
+      }
+    ]);
+  });
+
   test("honors goto targets in failure handlers", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`name: failure-goto
 version: 1

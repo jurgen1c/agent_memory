@@ -38,6 +38,7 @@ import {
   validateAgentflowMcpOutputPaths
 } from "./mcp_call";
 import { selectAgentflowConditionTarget } from "./condition";
+import { assertAgentflowSuccessTargetsAreUnambiguous } from "./success_routing";
 
 const MAX_CAPTURE_BYTES = 10 * 1024 * 1024;
 
@@ -83,6 +84,7 @@ export async function executeAgentflowCommandPipeline(
   if (existing.status !== "pending") {
     throw new Error(`Agentflow run ${runId} cannot execute while its status is ${existing.status}.`);
   }
+  assertAgentflowSuccessTargetsAreUnambiguous(workflow.steps);
   const stepLocations = collectRuntimeStepLocations(workflow.steps);
 
   store.transitionRunWithEvent(runId, {

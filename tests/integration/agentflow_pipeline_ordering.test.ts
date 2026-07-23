@@ -555,6 +555,40 @@ steps:
     store.close();
   });
 
+  test("rejects ambiguous success targets before executing a directly persisted workflow", async () => {
+    const repo = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`name: ambiguous-runtime-success-target
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - { id: start, type: command, command: echo start, then: second, goto: third }
+  - { id: second, type: command, command: echo second }
+  - { id: third, type: command, command: echo third }
+`);
+    const store = await openAgentflowRunState({ cwd: repo });
+    store.createRunWithEvent({
+      id: "ambiguous-runtime-success-target",
+      workflow: {
+        name: workflow.name,
+        version: workflow.version,
+        style: workflow.style,
+        maturity: workflow.maturity
+      },
+      context: { workflow: workflow as unknown as AgentflowRunStateValue }
+    }, { type: "run.created", payload: { status: "pending" } });
+
+    await expect(executeAgentflowCommandPipeline(store, "ambiguous-runtime-success-target", workflow))
+      .rejects.toMatchObject({
+        code: "workflow.step.success_target.ambiguous",
+        message: 'Step "start" cannot declare both then and goto success targets.',
+        stepId: "start"
+      });
+    expect(store.getRun("ambiguous-runtime-success-target")?.status).toBe("pending");
+    expect(store.listEvents("ambiguous-runtime-success-target").map((event) => event.type)).toEqual(["run.created"]);
+    store.close();
+  });
+
   test("rejects condition expressions that would require code evaluation", () => {
     const workflow = parseAgentflowWorkflowOrThrow(`name: complex-condition
 version: 1
