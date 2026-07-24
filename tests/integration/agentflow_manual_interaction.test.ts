@@ -16,7 +16,8 @@ import {
 describe("Agentflow manual gates and input requests", () => {
   test("pauses at a manual gate, rejects invalid outcomes, and resumes from that step", async () => {
     const repoRoot = temporaryRepo();
-    const store = await openAgentflowRunState({ cwd: repoRoot });
+    let now = "2026-07-23T12:00:00.000Z";
+    const store = await openAgentflowRunState({ cwd: repoRoot, now: () => now });
     const workflow = parseAgentflowWorkflowOrThrow(`
 name: guarded-pipeline
 version: 1
@@ -78,6 +79,8 @@ steps:
     ).get("manual-run")).toEqual({ status: "requested" });
     pendingApprovalDatabase.close();
 
+    const initiallyPausedAt = store.getRun("manual-run")!.updatedAt;
+    now = "2026-07-23T12:01:00.000Z";
     const stillPaused = await resumeAgentflowCommandPipeline(
       store,
       "manual-run",
@@ -86,6 +89,8 @@ steps:
     );
     expect(stillPaused.status).toBe("paused");
     expect(store.getRun("manual-run")?.context.waiting).toBeDefined();
+    expect(store.getRun("manual-run")?.updatedAt).not.toBe(initiallyPausedAt);
+    expect(store.getRun("manual-run")?.updatedAt).toBe(now);
 
     const completed = await resumeAgentflowCommandPipeline(
       store,
@@ -171,6 +176,38 @@ steps:
 
     expect(failed).toMatchObject({ status: "failed", completedSteps: ["gate"] });
     expect(fs.existsSync(path.join(repoRoot, "unexpected.txt"))).toBe(false);
+    store.close();
+  });
+
+  test("restores fractional step-attempt limits when resuming", async () => {
+    const repoRoot = temporaryRepo();
+    const store = await openAgentflowRunState({ cwd: repoRoot });
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: fractional-resume-budget
+version: 1
+style: pipeline
+maturity: experimental
+limits: { max_step_attempts: { after: 0.5 } }
+steps:
+  - { id: gate, type: manual_gate, message: Continue?, options: [approve, cancel] }
+  - { id: after, type: command, command: echo after }
+`);
+    createAgentflowLifecycleRun(store, { id: "fractional-resume-run", workflow });
+    expect((await executeAgentflowCommandPipeline(store, "fractional-resume-run", workflow)).status).toBe("paused");
+
+    const resumed = await resumeAgentflowCommandPipeline(
+      store,
+      "fractional-resume-run",
+      workflow,
+      { outcome: "approve" }
+    );
+
+    expect(resumed).toMatchObject({
+      status: "paused",
+      failedStep: "gate",
+      message: "Step gate cannot route to after because limits.max_step_attempts allows 0.5 attempt(s)."
+    });
+    expect(store.getRun("fractional-resume-run")?.status).toBe("paused");
     store.close();
   });
 

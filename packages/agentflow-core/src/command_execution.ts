@@ -785,6 +785,7 @@ function resumeWaitingStep(
       );
     }
     if (outcome === "pause" || outcome === "paused") {
+      store.updateRun(runId, { context: store.getRun(runId)!.context });
       store.appendRunEvent(runId, {
         type: "manual_gate.paused",
         stepId: waiting.stepId,
@@ -997,8 +998,10 @@ function parseWaitingState(value: AgentflowRunStateValue | undefined): Agentflow
 }
 
 function parseSerializedRoutingBudget(value: AgentflowYamlMapping): SerializedSuccessfulRoutingBudget {
-  const maps = ["stepAttemptLimits", "visits", "recoveryCycles", "attempts"] as const;
-  const parsed = Object.fromEntries(maps.map((field) => {
+  const parseMap = (
+    field: "stepAttemptLimits" | "visits" | "recoveryCycles" | "attempts",
+    valid: (value: unknown) => boolean
+  ): Record<string, number> => {
     const candidate = mapping(value[field]);
     if (candidate === undefined) {
       throw new AgentflowRunStateError(
@@ -1007,14 +1010,26 @@ function parseSerializedRoutingBudget(value: AgentflowYamlMapping): SerializedSu
       );
     }
     const entries = Object.entries(candidate);
-    if (entries.some(([, count]) => !Number.isSafeInteger(count) || (count as number) < 0)) {
+    if (entries.some(([, count]) => !valid(count))) {
       throw new AgentflowRunStateError(
         "Paused Agentflow run has invalid persisted routing counters.",
         "AGENTFLOW_RESUME_STATE"
       );
     }
-    return [field, Object.fromEntries(entries) as Record<string, number>];
-  })) as Pick<SerializedSuccessfulRoutingBudget, typeof maps[number]>;
+    return Object.fromEntries(entries) as Record<string, number>;
+  };
+  const parsed: Pick<
+    SerializedSuccessfulRoutingBudget,
+    "stepAttemptLimits" | "visits" | "recoveryCycles" | "attempts"
+  > = {
+    stepAttemptLimits: parseMap(
+      "stepAttemptLimits",
+      (entry) => typeof entry === "number" && Number.isFinite(entry) && entry > 0
+    ),
+    visits: parseMap("visits", (entry) => Number.isSafeInteger(entry) && (entry as number) >= 0),
+    recoveryCycles: parseMap("recoveryCycles", (entry) => Number.isSafeInteger(entry) && (entry as number) >= 0),
+    attempts: parseMap("attempts", (entry) => Number.isSafeInteger(entry) && (entry as number) >= 0)
+  };
   return {
     ...parsed,
     ...(Number.isSafeInteger(value.maxRecoveryCycles) && (value.maxRecoveryCycles as number) > 0
