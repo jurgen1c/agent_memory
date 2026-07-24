@@ -8,6 +8,7 @@ import {
   normalizeAgentflowArtifactPath,
   type AgentflowRunStateValue,
   type AgentflowRunStateStore,
+  type AgentflowRunStopStatus,
   type AgentflowRunStatus,
   type AgentflowFailureOutcome
 } from "./run_state";
@@ -1747,7 +1748,7 @@ function persistSessionRequestInterruption(
   workflow: AgentflowWorkflow,
   stepId: string,
   sessionId: string,
-  status: "paused" | "cancelled"
+  status: AgentflowRunStopStatus
 ): void {
   const previousSession = store.getSession(runId, sessionId);
   const sessionDefinition = mapping(workflow.sessions?.[sessionId]);
@@ -1773,7 +1774,7 @@ function executeTransformStep(
   transforms: AgentflowArtifactTransformRegistry,
   attempt: number,
   retryable: boolean
-): { failure?: string; stopped?: "paused" | "cancelled" } {
+): { failure?: string; stopped?: AgentflowRunStopStatus } {
   const input = {
     transform: typeof step.transform === "string" ? step.transform : null,
     input: typeof step.input === "string" ? step.input : null,
@@ -1846,7 +1847,7 @@ function executeTransformStep(
 }
 
 class TransformInterruptedError extends Error {
-  constructor(readonly status: "paused" | "cancelled") {
+  constructor(readonly status: AgentflowRunStopStatus) {
     super(`Artifact transform was interrupted because the run was ${status}.`);
   }
 }
@@ -1856,7 +1857,7 @@ function persistMcpCallInterruption(
   runId: string,
   stepId: string,
   attempt: number,
-  status: "paused" | "cancelled"
+  status: AgentflowRunStopStatus
 ): void {
   const output = { attempt, status };
   store.upsertStep({ runId, stepId, attempt, status, output });
@@ -1914,7 +1915,7 @@ function interruptedPipelineResult(
   store: AgentflowRunStateStore,
   runId: string,
   completedSteps: string[],
-  interruptedStatus: "paused" | "cancelled"
+  interruptedStatus: AgentflowRunStopStatus
 ): AgentflowCommandPipelineResult {
   return stoppedPipelineResult(store, runId, completedSteps) ?? {
     status: interruptedStatus,
@@ -1923,11 +1924,10 @@ function interruptedPipelineResult(
   };
 }
 
-function activeStopStatus(store: AgentflowRunStateStore, runId: string): "paused" | "cancelled" | undefined {
+function activeStopStatus(store: AgentflowRunStateStore, runId: string): AgentflowRunStopStatus | undefined {
   const run = store.getRun(runId);
   const status = run?.status;
-  if (status === "failed") return "cancelled";
-  return status === "paused" || status === "cancelled" ? status : undefined;
+  return status === "paused" || status === "failed" || status === "cancelled" ? status : undefined;
 }
 
 function notificationFinalizationFailed(error: AgentflowRunStateValue | null | undefined): boolean {
@@ -1978,7 +1978,7 @@ function runCommand(
   repoRoot: string,
   command: string,
   timeoutMs: number | undefined,
-  stopStatus: () => "paused" | "cancelled" | undefined
+  stopStatus: () => AgentflowRunStopStatus | undefined
 ): Promise<CommandAttemptResult> {
   return new Promise((resolve) => {
     const stdout: Buffer[] = [];

@@ -185,6 +185,7 @@ export type {
   AgentflowRunRecord,
   AgentflowSessionRecord,
   AgentflowRunStateValue,
+  AgentflowRunStopStatus,
   AgentflowRunStatus,
   AgentflowSessionStatus,
   AgentflowStepStatus,

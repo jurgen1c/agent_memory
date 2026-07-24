@@ -12,6 +12,7 @@ export const DEFAULT_AGENTFLOW_DATABASE_PATH = ".agentflow/agentflow.sqlite";
 export const AGENTFLOW_FINAL_SUMMARY_PATH = "final-summary.md";
 
 export type AgentflowRunStatus = "pending" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled";
+export type AgentflowRunStopStatus = Extract<AgentflowRunStatus, "paused" | "failed" | "cancelled">;
 export type AgentflowStepStatus = AgentflowRunStatus | "skipped";
 export type AgentflowSessionStatus = AgentflowRunStatus;
 export type AgentflowApprovalStatus = "requested" | "approved" | "rejected" | "cancelled";

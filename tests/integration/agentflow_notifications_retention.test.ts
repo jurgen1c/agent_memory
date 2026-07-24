@@ -1290,7 +1290,7 @@ notify:
       context: { workflow: workflow as unknown as AgentflowRunStateValue }
     }, { type: "run.created", payload: { status: "pending" } });
 
-    expect(executeAgentflowCommandPipeline(
+    await expect(executeAgentflowCommandPipeline(
       store,
       "persisted-invalid-notification",
       workflow
@@ -1491,7 +1491,7 @@ retention:
       context: { workflow: workflow as unknown as AgentflowRunStateValue }
     }, { type: "run.created", payload: { status: "pending" } });
 
-    expect(executeAgentflowCommandPipeline(
+    await expect(executeAgentflowCommandPipeline(
       store,
       "persisted-invalid-retention",
       workflow

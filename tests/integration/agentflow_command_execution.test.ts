@@ -392,6 +392,58 @@ steps:
     store.close();
   });
 
+  test("preserves failed status when a running command is interrupted by terminal finalization", async () => {
+    const repoRoot = temporaryRepo();
+    const marker = path.join(repoRoot, "second-step-started");
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: failed-run
+version: 1
+style: pipeline
+maturity: experimental
+steps:
+  - id: wait
+    type: command
+    command: sleep 2
+  - id: mutate
+    type: command
+    command: touch second-step-started
+`);
+    const store = await openAgentflowRunState({ cwd: repoRoot });
+    createAgentflowLifecycleRun(store, { id: "run-failed", workflow });
+
+    const startedAt = Date.now();
+    const execution = executeAgentflowCommandPipeline(store, "run-failed", workflow);
+    setTimeout(() => {
+      store.updateRun("run-failed", {
+        error: {
+          code: "notification.required.failed",
+          message: "Required lifecycle notification failed."
+        }
+      });
+      store.transitionRunWithEvent("run-failed", {
+        status: "failed",
+        allowedFrom: ["running"],
+        event: {
+          type: "run.failed",
+          payload: { code: "notification.required.failed" }
+        }
+      });
+    }, 25);
+    const result = await execution;
+
+    expect(result).toMatchObject({
+      status: "failed",
+      message: "Required lifecycle notification failed."
+    });
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(fs.existsSync(marker)).toBe(false);
+    expect(store.listEvents("run-failed")).toContainEqual(expect.objectContaining({
+      type: "step.interrupted",
+      payload: expect.objectContaining({ status: "failed" })
+    }));
+    store.close();
+  });
+
   test("pauses unsafe commands that require approval before starting them", async () => {
     const repoRoot = temporaryRepo();
     fs.mkdirSync(path.join(repoRoot, "protected"));
