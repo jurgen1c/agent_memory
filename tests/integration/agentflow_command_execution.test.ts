@@ -130,7 +130,12 @@ steps:
       "run.completed"
     ]);
     const artifacts = store.listArtifacts("run-safe");
-    expect(artifacts.map((artifact) => artifact.declaredPath)).toHaveLength(3);
+    expect(artifacts.map((artifact) => artifact.declaredPath)).toHaveLength(4);
+    expect(artifacts).toContainEqual(expect.objectContaining({
+      declaredPath: "final-summary.md",
+      kind: "run_summary",
+      status: "available"
+    }));
     expect(artifacts.map((artifact) => artifact.declaredPath)).toContain("ci/result.txt");
     expect(readArtifact(repoRoot, artifacts.find((artifact) => artifact.declaredPath === "ci/result.txt")!.storagePath))
       .toBe("artifact output\n");
@@ -332,6 +337,10 @@ steps:
   - id: mutate
     type: command
     command: touch second-step-started
+retention:
+  on_cancelled:
+    delete: [logs/**]
+    after_days: 7
 `);
     const store = await openAgentflowRunState({ cwd: repoRoot });
     createAgentflowLifecycleRun(store, { id: "run-cancelled", workflow });
@@ -345,6 +354,9 @@ steps:
     expect(Date.now() - startedAt).toBeLessThan(1_000);
     expect(fs.existsSync(marker)).toBe(false);
     expect(store.listEvents("run-cancelled").map((event) => event.type)).toContain("step.interrupted");
+    expect(store.listEvents("run-cancelled").filter((event) => event.type === "retention.deferred"))
+      .toHaveLength(1);
+    expect(store.getArtifact("run-cancelled", "final-summary.md")?.generation).toBe(1);
     const stdout = store.listArtifacts("run-cancelled").find((artifact) => artifact.declaredPath.endsWith("stdout.log"))!;
     expect(readArtifact(repoRoot, stdout.storagePath)).toBe("before cancellation\n");
     store.close();
