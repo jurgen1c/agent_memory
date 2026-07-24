@@ -17,7 +17,7 @@ export interface AgentflowNotification {
   required: boolean;
 }
 
-export type AgentflowNotificationAdapter = (notification: AgentflowNotification) => void | Promise<void>;
+export type AgentflowNotificationAdapter = (notification: AgentflowNotification) => undefined;
 
 export interface AgentflowNotificationDeliveryResult {
   requiredFailure?: {
@@ -137,9 +137,9 @@ export function deliverAgentflowNotifications(
       try {
         const adapter = registry.get(channel);
         if (adapter === undefined) throw new Error(`No notification adapter is registered for channel "${channel}".`);
-        const result = adapter(notification);
+        const result: unknown = adapter(notification);
         if (isPromiseLike(result)) {
-          void result.catch(() => {});
+          void Promise.resolve(result).catch(() => {});
           throw new Error(
             `Notification adapter for channel "${channel}" returned a promise; asynchronous adapters are not supported.`
           );
@@ -200,11 +200,12 @@ function buildNotification(
   };
 }
 
-function terminalNotificationAdapter(notification: AgentflowNotification): void {
+function terminalNotificationAdapter(notification: AgentflowNotification): undefined {
   process.stderr.write(`${notification.message}\n`);
+  return undefined;
 }
 
-function systemNotificationAdapter(notification: AgentflowNotification): void {
+function systemNotificationAdapter(notification: AgentflowNotification): undefined {
   let command: string;
   let args: string[];
   if (process.platform === "darwin") {
@@ -226,6 +227,7 @@ function systemNotificationAdapter(notification: AgentflowNotification): void {
     const detail = result.stderr.trim();
     throw new Error(`${command} exited with status ${String(result.status)}${detail.length === 0 ? "" : `: ${detail}`}.`);
   }
+  return undefined;
 }
 
 function mapping(value: AgentflowYamlValue | undefined): AgentflowYamlMapping | undefined {
@@ -255,6 +257,8 @@ function issue(code: string, path: string, message: string): AgentflowNotificati
   return { code, path, message };
 }
 
-function isPromiseLike(value: void | Promise<void>): value is Promise<void> {
-  return value !== undefined && typeof value.then === "function";
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (typeof value === "object" || typeof value === "function")
+    && value !== null
+    && typeof (value as PromiseLike<unknown>).then === "function";
 }

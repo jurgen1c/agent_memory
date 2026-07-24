@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +12,7 @@ import {
   parseAgentflowWorkflowOrThrow,
   resumeAgentflowCommandPipeline,
   transitionAgentflowLifecycleRun,
+  type AgentflowNotificationAdapter,
   type AgentflowRunStateValue,
   validateAgentflowWorkflow,
   writeAgentflowFinalSummary
@@ -197,9 +199,9 @@ notify:
   - { on: workflow.completed, channels: [system], required: true }
 `);
     const notifications = createAgentflowNotificationRegistry({
-      system: async () => {
+      system: (async () => {
         await Promise.resolve();
-      }
+      }) as unknown as AgentflowNotificationAdapter
     });
     const store = await openAgentflowRunState({ cwd: repoRoot });
     createAgentflowLifecycleRun(store, { id: "asynchronous-notification", workflow });
@@ -216,6 +218,49 @@ notify:
 
     expect(result.status).toBe("failed");
     expect(store.listEvents("asynchronous-notification")).toContainEqual(expect.objectContaining({
+      type: "notification.failed",
+      payload: expect.objectContaining({
+        message: expect.stringContaining("asynchronous adapters are not supported"),
+        required: true
+      })
+    }));
+    store.close();
+  });
+
+  test("rejects callable thenables returned by unchecked notification adapters", async () => {
+    const repoRoot = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: callable-thenable-notification
+version: 1
+style: pipeline
+maturity: experimental
+steps: []
+notify:
+  - { on: workflow.completed, channels: [system], required: true }
+`);
+    const callableThenable = Object.assign(() => {}, {
+      then(resolve: () => void): void {
+        queueMicrotask(resolve);
+      }
+    });
+    const notifications = createAgentflowNotificationRegistry({
+      system: (() => callableThenable) as unknown as AgentflowNotificationAdapter
+    });
+    const store = await openAgentflowRunState({ cwd: repoRoot });
+    createAgentflowLifecycleRun(store, { id: "callable-thenable-notification", workflow });
+
+    const result = await executeAgentflowCommandPipeline(
+      store,
+      "callable-thenable-notification",
+      workflow,
+      undefined,
+      undefined,
+      undefined,
+      notifications
+    );
+
+    expect(result.status).toBe("failed");
+    expect(store.listEvents("callable-thenable-notification")).toContainEqual(expect.objectContaining({
       type: "notification.failed",
       payload: expect.objectContaining({
         message: expect.stringContaining("asynchronous adapters are not supported"),
@@ -1222,6 +1267,234 @@ retention:
       .toBe("available");
     expect(store.readArtifact("rolled-back-retention", "temporary/output.log").content.toString("utf8"))
       .toBe("temporary");
+    store.close();
+  });
+
+  test("keeps repeated retention deletion rollback idempotent", async () => {
+    const repoRoot = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: repeated-retention-rollback
+version: 1
+style: pipeline
+maturity: experimental
+steps: []
+`);
+    const store = await openAgentflowRunState({ cwd: repoRoot });
+    createAgentflowLifecycleRun(store, { id: "repeated-retention-rollback", workflow });
+    store.writeArtifact({
+      id: "temporary-output",
+      runId: "repeated-retention-rollback",
+      path: "temporary/output.log",
+      kind: "fixture",
+      contentType: "text/plain",
+      content: "temporary"
+    });
+
+    expect(() => store.withRunFinalizationTransaction("repeated-retention-rollback", () => {
+      store.deleteArtifactBacking("repeated-retention-rollback", "temporary/output.log");
+      store.deleteArtifactBacking("repeated-retention-rollback", "temporary/output.log");
+      throw new Error("roll back repeated retention");
+    })).toThrow("roll back repeated retention");
+
+    expect(store.getArtifact("repeated-retention-rollback", "temporary/output.log")?.status)
+      .toBe("available");
+    expect(store.readArtifact(
+      "repeated-retention-rollback",
+      "temporary/output.log"
+    ).content.toString("utf8")).toBe("temporary");
+    store.close();
+  });
+
+  test("restores the original backing when finalization writes and then deletes an artifact", async () => {
+    const repoRoot = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: write-delete-retention-rollback
+version: 1
+style: pipeline
+maturity: experimental
+steps: []
+`);
+    const store = await openAgentflowRunState({ cwd: repoRoot });
+    createAgentflowLifecycleRun(store, { id: "write-delete-retention-rollback", workflow });
+    store.writeArtifact({
+      id: "temporary-output",
+      runId: "write-delete-retention-rollback",
+      path: "temporary/output.log",
+      kind: "fixture",
+      contentType: "text/plain",
+      content: "original"
+    });
+
+    expect(() => store.withRunFinalizationTransaction("write-delete-retention-rollback", () => {
+      store.writeArtifact({
+        id: "temporary-output",
+        runId: "write-delete-retention-rollback",
+        path: "temporary/output.log",
+        kind: "fixture",
+        contentType: "text/plain",
+        content: "replacement",
+        overwrite: true
+      });
+      store.deleteArtifactBacking("write-delete-retention-rollback", "temporary/output.log");
+      throw new Error("roll back write and deletion");
+    })).toThrow("roll back write and deletion");
+
+    expect(store.getArtifact("write-delete-retention-rollback", "temporary/output.log")?.status)
+      .toBe("available");
+    expect(store.readArtifact(
+      "write-delete-retention-rollback",
+      "temporary/output.log"
+    ).content.toString("utf8")).toBe("original");
+    store.close();
+  });
+
+  test("does not recover deletion-specific retention staging as an interrupted write", async () => {
+    const repoRoot = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: retained-deletion-recovery
+version: 1
+style: pipeline
+maturity: experimental
+steps: []
+`);
+    const store = await openAgentflowRunState({ cwd: repoRoot });
+    createAgentflowLifecycleRun(store, { id: "retained-deletion-recovery", workflow });
+    const artifact = store.writeArtifact({
+      id: "temporary-output",
+      runId: "retained-deletion-recovery",
+      path: "temporary/output.log",
+      kind: "fixture",
+      contentType: "text/plain",
+      content: "temporary"
+    });
+    const target = path.join(repoRoot, artifact.storagePath);
+    const originalRemove = fs.rmSync.bind(fs);
+    let deletionCleanupAttempts = 0;
+    const remove = spyOn(fs, "rmSync").mockImplementation((candidate, options) => {
+      if (String(candidate).endsWith(".deleted")) {
+        deletionCleanupAttempts += 1;
+        if (deletionCleanupAttempts === 1) return;
+      }
+      originalRemove(candidate, options);
+    });
+
+    try {
+      expect(store.deleteArtifactBacking("retained-deletion-recovery", "temporary/output.log").status)
+        .toBe("missing");
+    } finally {
+      remove.mockRestore();
+    }
+
+    const deletionBackup = path.join(
+      repoRoot,
+      ".agentflow/runs",
+      `r-${createHash("sha256").update("retained-deletion-recovery").digest("hex")}`,
+      ".staging",
+      `${createHash("sha256").update("temporary/output.log").digest("hex")}.deleted`
+    );
+    expect(deletionCleanupAttempts).toBe(1);
+    expect(fs.existsSync(target)).toBe(false);
+    expect(fs.readFileSync(deletionBackup, "utf8")).toBe("temporary");
+
+    store.recoverArtifactBacking("retained-deletion-recovery", "temporary/output.log");
+
+    expect(fs.existsSync(target)).toBe(false);
+    expect(fs.existsSync(deletionBackup)).toBe(false);
+    expect(store.getArtifact("retained-deletion-recovery", "temporary/output.log")?.status)
+      .toBe("missing");
+    store.close();
+  });
+
+  test("restores deletion-specific staging when retention did not commit", async () => {
+    const repoRoot = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: interrupted-retention-deletion
+version: 1
+style: pipeline
+maturity: experimental
+steps: []
+`);
+    const store = await openAgentflowRunState({ cwd: repoRoot });
+    createAgentflowLifecycleRun(store, { id: "interrupted-retention-deletion", workflow });
+    const artifact = store.writeArtifact({
+      id: "temporary-output",
+      runId: "interrupted-retention-deletion",
+      path: "temporary/output.log",
+      kind: "fixture",
+      contentType: "text/plain",
+      content: "temporary"
+    });
+    const target = path.join(repoRoot, artifact.storagePath);
+    const deletionBackup = path.join(
+      repoRoot,
+      ".agentflow/runs",
+      `r-${createHash("sha256").update("interrupted-retention-deletion").digest("hex")}`,
+      ".staging",
+      `${createHash("sha256").update("temporary/output.log").digest("hex")}.deleted`
+    );
+    fs.renameSync(target, deletionBackup);
+
+    expect(store.getArtifact("interrupted-retention-deletion", "temporary/output.log")?.status)
+      .toBe("available");
+    store.recoverArtifactBacking("interrupted-retention-deletion", "temporary/output.log");
+
+    expect(fs.readFileSync(target, "utf8")).toBe("temporary");
+    expect(fs.existsSync(deletionBackup)).toBe(false);
+    expect(store.getArtifact("interrupted-retention-deletion", "temporary/output.log")?.status)
+      .toBe("available");
+    store.close();
+  });
+
+  test("prevents concurrent inspection from committing a missing status during deletion", async () => {
+    const repoRoot = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: concurrent-retention-inspection
+version: 1
+style: pipeline
+maturity: experimental
+steps: []
+`);
+    const store = await openAgentflowRunState({ cwd: repoRoot });
+    createAgentflowLifecycleRun(store, { id: "concurrent-retention-inspection", workflow });
+    const artifact = store.writeArtifact({
+      id: "temporary-output",
+      runId: "concurrent-retention-inspection",
+      path: "temporary/output.log",
+      kind: "fixture",
+      contentType: "text/plain",
+      content: "temporary"
+    });
+    const observer = await openAgentflowRunState({ cwd: repoRoot, busyTimeoutMs: 1 });
+    const originalRename = fs.renameSync.bind(fs);
+    const rename = spyOn(fs, "renameSync").mockImplementation((source, destination) => {
+      originalRename(source, destination);
+      if (String(destination).endsWith(".deleted")) {
+        expect(observer.getArtifact("concurrent-retention-inspection", "temporary/output.log")?.status)
+          .toBe("available");
+        throw new Error("simulated crash after deletion rename");
+      }
+    });
+
+    try {
+      expect(() => store.deleteArtifactBacking(
+        "concurrent-retention-inspection",
+        "temporary/output.log"
+      )).toThrow("simulated crash after deletion rename");
+    } finally {
+      rename.mockRestore();
+    }
+
+    const database = new Database(store.databasePath, { readonly: true });
+    expect(database.query(
+      "SELECT status FROM artifacts WHERE run_id = ? AND path = ?"
+    ).get("concurrent-retention-inspection", "temporary/output.log")).toEqual({
+      status: "available"
+    });
+    database.close();
+
+    store.recoverArtifactBacking("concurrent-retention-inspection", "temporary/output.log");
+    expect(fs.readFileSync(path.join(repoRoot, artifact.storagePath), "utf8")).toBe("temporary");
+    observer.close();
     store.close();
   });
 

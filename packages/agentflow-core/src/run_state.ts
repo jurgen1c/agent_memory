@@ -371,6 +371,7 @@ export class AgentflowRunStateStore {
   private finalizationCommitActions: Array<() => void> = [];
   private finalizationRollbackActions: Array<() => void> = [];
   private finalizationArtifactWrites = new Set<string>();
+  private finalizationArtifactDeletions = new Set<string>();
   readonly repoRoot: string;
   readonly databasePath: string;
   private readonly database: SqliteDatabase;
@@ -466,6 +467,7 @@ export class AgentflowRunStateStore {
     this.finalizationCommitActions = [];
     this.finalizationRollbackActions = [];
     this.finalizationArtifactWrites = new Set();
+    this.finalizationArtifactDeletions = new Set();
     let databaseCommitted = false;
     try {
       const result = callback();
@@ -484,6 +486,7 @@ export class AgentflowRunStateStore {
       this.finalizationCommitActions = [];
       this.finalizationRollbackActions = [];
       this.finalizationArtifactWrites = new Set();
+      this.finalizationArtifactDeletions = new Set();
     }
   }
 
@@ -749,7 +752,11 @@ export class AgentflowRunStateStore {
     const checksum = `sha256:${createHash("sha256").update(content).digest("hex")}`;
     const target = artifactStoragePath(this.repoRoot, runId, declaredPath, true);
     const timestamp = currentTimestamp(this.now);
-    const { temporaryPath, backupPath } = artifactStagingPaths(this.repoRoot, runId, declaredPath);
+    const { temporaryPath, backupPath, deletionBackupPath } = artifactStagingPaths(
+      this.repoRoot,
+      runId,
+      declaredPath
+    );
     const alreadyWrittenInFinalization = !manageTransaction
       && this.finalizationTransactionActive
       && this.finalizationArtifactWrites.has(target);
@@ -789,6 +796,28 @@ export class AgentflowRunStateStore {
       }
       const existing = this.database.get<ArtifactRow>("SELECT * FROM artifacts WHERE run_id = ? AND id = ?", [runId, id]);
       const pathOwner = this.database.get<ArtifactRow>("SELECT * FROM artifacts WHERE run_id = ? AND path = ?", [runId, declaredPath]);
+      if (pathOwner !== null && pathOwner.id !== id) {
+        throw new AgentflowRunStateError(
+          `Artifact path ${declaredPath} is already registered as ${pathOwner.id} for run ${runId}.`,
+          "AGENTFLOW_ARTIFACT_COLLISION"
+        );
+      }
+      if (existing !== null && existing.path !== declaredPath) {
+        throw new AgentflowRunStateError(
+          `Artifact ${id} is already registered at ${existing.path}; artifact paths cannot be reassigned.`,
+          "AGENTFLOW_ARTIFACT_COLLISION"
+        );
+      }
+      if (this.finalizationTransactionActive && this.finalizationArtifactDeletions.has(target)) {
+        throw new AgentflowRunStateError(
+          `Artifact ${declaredPath} is pending retention deletion and cannot be republished in the same finalization.`,
+          "AGENTFLOW_ARTIFACT_STALE"
+        );
+      }
+      if (!alreadyWrittenInFinalization) {
+        recoverArtifactStaging(target, temporaryPath, backupPath, pathOwner?.checksum ?? null);
+        recoverArtifactDeletionStaging(target, deletionBackupPath, pathOwner);
+      }
       if (input.requiredCurrentArtifact !== undefined) {
         const required = input.requiredCurrentArtifact;
         const requiredArtifact = required?.artifact;
@@ -815,21 +844,6 @@ export class AgentflowRunStateStore {
             "AGENTFLOW_ARTIFACT_STALE"
           );
         }
-      }
-      if (pathOwner !== null && pathOwner.id !== id) {
-        throw new AgentflowRunStateError(
-          `Artifact path ${declaredPath} is already registered as ${pathOwner.id} for run ${runId}.`,
-          "AGENTFLOW_ARTIFACT_COLLISION"
-        );
-      }
-      if (existing !== null && existing.path !== declaredPath) {
-        throw new AgentflowRunStateError(
-          `Artifact ${id} is already registered at ${existing.path}; artifact paths cannot be reassigned.`,
-          "AGENTFLOW_ARTIFACT_COLLISION"
-        );
-      }
-      if (!alreadyWrittenInFinalization) {
-        recoverArtifactStaging(target, temporaryPath, backupPath, pathOwner?.checksum ?? null);
       }
 
       targetExistedBeforeWrite = fs.existsSync(target);
@@ -1102,24 +1116,37 @@ export class AgentflowRunStateStore {
     const normalizedRunId = artifactRunId(runId);
     this.requireRun(normalizedRunId);
     const normalizedPath = normalizeAgentflowArtifactPath(declaredPath);
-    const row = this.database.get<ArtifactRow>(
-      "SELECT * FROM artifacts WHERE run_id = ? AND path = ?",
-      [normalizedRunId, normalizedPath]
-    );
-    if (row === null) {
-      throw new AgentflowRunStateError(
-        `Declared artifact ${normalizedPath} was not found for run ${normalizedRunId}.`,
-        "AGENTFLOW_ARTIFACT_NOT_FOUND"
-      );
-    }
-
-    const target = artifactStoragePath(this.repoRoot, normalizedRunId, normalizedPath, false);
-    const { temporaryPath, backupPath } = artifactStagingPaths(this.repoRoot, normalizedRunId, normalizedPath);
-    recoverArtifactStaging(target, temporaryPath, backupPath, row.checksum);
+    const manageTransaction = !this.finalizationTransactionActive;
     let targetMoved = false;
+    let databaseCommitted = false;
+    if (manageTransaction) this.database.exec("BEGIN IMMEDIATE");
     try {
+      const row = this.database.get<ArtifactRow>(
+        "SELECT * FROM artifacts WHERE run_id = ? AND path = ?",
+        [normalizedRunId, normalizedPath]
+      );
+      if (row === null) {
+        throw new AgentflowRunStateError(
+          `Declared artifact ${normalizedPath} was not found for run ${normalizedRunId}.`,
+          "AGENTFLOW_ARTIFACT_NOT_FOUND"
+        );
+      }
+
+      const target = artifactStoragePath(this.repoRoot, normalizedRunId, normalizedPath, false);
+      const { temporaryPath, backupPath, deletionBackupPath } = artifactStagingPaths(
+        this.repoRoot,
+        normalizedRunId,
+        normalizedPath
+      );
+      if (!manageTransaction && this.finalizationArtifactDeletions.has(target)) {
+        return this.requireArtifact(normalizedRunId, row.id);
+      }
+      if (manageTransaction || !this.finalizationArtifactWrites.has(target)) {
+        recoverArtifactStaging(target, temporaryPath, backupPath, row.checksum);
+      }
+      recoverArtifactDeletionStaging(target, deletionBackupPath, row);
       if (artifactTargetExists(target)) {
-        fs.renameSync(target, backupPath);
+        fs.renameSync(target, deletionBackupPath);
         targetMoved = true;
       }
       const timestamp = currentTimestamp(this.now);
@@ -1128,16 +1155,30 @@ export class AgentflowRunStateStore {
         "UPDATE artifacts SET status = 'missing', checked_at = ?, updated_at = ? WHERE run_id = ? AND path = ?",
         [timestamp, timestamp, normalizedRunId, normalizedPath]
       );
-      if (targetMoved && this.finalizationTransactionActive) {
-        this.finalizationCommitActions.push(() => removeArtifactStagingEntry(backupPath));
+      const artifact = this.requireArtifact(normalizedRunId, row.id);
+      if (manageTransaction) {
+        this.database.exec("COMMIT");
+        databaseCommitted = true;
+        removeArtifactStagingEntry(deletionBackupPath);
+      } else if (targetMoved) {
+        this.finalizationArtifactDeletions.add(target);
+        this.finalizationCommitActions.push(() => removeArtifactStagingEntry(deletionBackupPath));
         this.finalizationRollbackActions.push(() => {
-          restoreArtifactWrite(target, temporaryPath, backupPath, true);
+          restoreArtifactWrite(target, temporaryPath, deletionBackupPath, true);
         });
-      } else {
-        removeArtifactStagingEntry(backupPath);
       }
+      return artifact;
     } catch (error) {
-      if (targetMoved) restoreArtifactWrite(target, temporaryPath, backupPath, true);
+      if (manageTransaction && !databaseCommitted) rollback(this.database);
+      if (targetMoved && !databaseCommitted) {
+        const target = artifactStoragePath(this.repoRoot, normalizedRunId, normalizedPath, false);
+        const { temporaryPath, deletionBackupPath } = artifactStagingPaths(
+          this.repoRoot,
+          normalizedRunId,
+          normalizedPath
+        );
+        restoreArtifactWrite(target, temporaryPath, deletionBackupPath, true);
+      }
       if (error instanceof AgentflowRunStateError) throw error;
       throw new AgentflowRunStateError(
         `Could not delete artifact backing ${normalizedPath} for run ${normalizedRunId}: ${errorMessage(error)}`,
@@ -1145,7 +1186,6 @@ export class AgentflowRunStateStore {
         { cause: error }
       );
     }
-    return this.requireArtifact(normalizedRunId, row.id);
   }
 
   recoverArtifactBacking(runId: string, declaredPath: string): void {
@@ -1155,13 +1195,18 @@ export class AgentflowRunStateStore {
     const normalizedPath = normalizeAgentflowArtifactPath(declaredPath);
     this.database.exec("BEGIN IMMEDIATE");
     try {
-      const row = this.database.get<Pick<ArtifactRow, "checksum">>(
-        "SELECT checksum FROM artifacts WHERE run_id = ? AND path = ?",
+      const row = this.database.get<Pick<ArtifactRow, "checksum" | "status">>(
+        "SELECT checksum, status FROM artifacts WHERE run_id = ? AND path = ?",
         [normalizedRunId, normalizedPath]
       );
       const target = artifactStoragePath(this.repoRoot, normalizedRunId, normalizedPath, false);
-      const { temporaryPath, backupPath } = artifactStagingPaths(this.repoRoot, normalizedRunId, normalizedPath);
+      const { temporaryPath, backupPath, deletionBackupPath } = artifactStagingPaths(
+        this.repoRoot,
+        normalizedRunId,
+        normalizedPath
+      );
       recoverArtifactStaging(target, temporaryPath, backupPath, row?.checksum ?? null);
+      recoverArtifactDeletionStaging(target, deletionBackupPath, row);
       this.database.exec("COMMIT");
     } catch (error) {
       rollback(this.database);
@@ -1675,7 +1720,12 @@ export class AgentflowRunStateStore {
       if ((error instanceof AgentflowRunStateError && error.code === "AGENTFLOW_ARTIFACT_PATH") || code === "ELOOP") {
         status = "stale";
       } else if (["ENOENT", "ENOTDIR"].includes(code)) {
-        status = "missing";
+        const { deletionBackupPath } = artifactStagingPaths(this.repoRoot, row.run_id, row.path);
+        status = isSymbolicLink(deletionBackupPath)
+          ? "stale"
+          : fs.existsSync(deletionBackupPath) && fs.statSync(deletionBackupPath).isFile()
+            ? row.status
+            : "missing";
       } else {
         throw error;
       }
@@ -2061,7 +2111,11 @@ function artifactFileName(declaredPath: string): string {
   return `a-${createHash("sha256").update(declaredPath).digest("hex")}`;
 }
 
-function artifactStagingPaths(repoRoot: string, runId: string, declaredPath: string): { temporaryPath: string; backupPath: string } {
+function artifactStagingPaths(
+  repoRoot: string,
+  runId: string,
+  declaredPath: string
+): { temporaryPath: string; backupPath: string; deletionBackupPath: string } {
   const stagingDirectory = path.join(repoRoot, ".agentflow", "runs", artifactRunDirectory(runId), ".staging");
   assertInsideRepository(
     repoRoot,
@@ -2073,7 +2127,8 @@ function artifactStagingPaths(repoRoot: string, runId: string, declaredPath: str
   const key = createHash("sha256").update(declaredPath).digest("hex");
   return {
     temporaryPath: path.join(stagingDirectory, `${key}.new`),
-    backupPath: path.join(stagingDirectory, `${key}.old`)
+    backupPath: path.join(stagingDirectory, `${key}.old`),
+    deletionBackupPath: path.join(stagingDirectory, `${key}.deleted`)
   };
 }
 
@@ -2140,6 +2195,44 @@ function recoverArtifactStaging(target: string, temporaryPath: string, backupPat
     }
   }
   removeArtifactStagingEntry(temporaryPath);
+}
+
+function recoverArtifactDeletionStaging(
+  target: string,
+  deletionBackupPath: string,
+  registeredArtifact: Pick<ArtifactRow, "checksum" | "status"> | null
+): void {
+  if (isSymbolicLink(deletionBackupPath)) {
+    throw new AgentflowRunStateError(
+      `Artifact deletion recovery backup cannot be a symbolic link: ${deletionBackupPath}`,
+      "AGENTFLOW_ARTIFACT_PATH"
+    );
+  }
+  if (!fs.existsSync(deletionBackupPath)) return;
+  if (!fs.statSync(deletionBackupPath).isFile()
+      || registeredArtifact === null
+      || registeredArtifact.status === "missing") {
+    removeArtifactStagingEntry(deletionBackupPath);
+    return;
+  }
+
+  const targetMatchesRegistry = artifactTargetExists(target)
+    && registeredArtifact.checksum !== null
+    && artifactChecksum(target) === registeredArtifact.checksum;
+  if (targetMatchesRegistry) {
+    removeArtifactStagingEntry(deletionBackupPath);
+    return;
+  }
+  if (registeredArtifact.checksum !== null
+      && artifactChecksum(deletionBackupPath) !== registeredArtifact.checksum) {
+    throw new AgentflowRunStateError(
+      `Artifact deletion recovery backup does not match the registered checksum: ${deletionBackupPath}`,
+      "AGENTFLOW_ARTIFACT_RECOVERY"
+    );
+  }
+
+  fs.rmSync(target, { force: true, recursive: true });
+  fs.renameSync(deletionBackupPath, target);
 }
 
 function removeArtifactStagingEntry(candidate: string): void {
