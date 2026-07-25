@@ -40,6 +40,21 @@ describe("Agentflow run-state SQLite store", () => {
     });
 
     expect(store.listFailures("failure-backing")[0]?.payloadPath).toBe("failures/check.json");
+    const database = new Database(path.join(repoRoot, ".agentflow/agentflow.sqlite"));
+    const updateMetadata = database.query(
+      "UPDATE artifacts SET metadata_json = ? WHERE run_id = ? AND path = ?"
+    );
+    for (const invalidMetadata of ["null", "[]", "\"failure-1\""]) {
+      updateMetadata.run(invalidMetadata, "failure-backing", "failures/check.json");
+      expect(store.listFailures("failure-backing")[0]?.payloadPath).toBeNull();
+    }
+    updateMetadata.run(
+      JSON.stringify({ failureId: "failure-1" }),
+      "failure-backing",
+      "failures/check.json"
+    );
+    database.close();
+    expect(store.listFailures("failure-backing")[0]?.payloadPath).toBe("failures/check.json");
     fs.unlinkSync(path.join(repoRoot, artifact.storagePath));
     expect(store.listFailures("failure-backing")[0]?.payloadPath).toBeNull();
     store.close();

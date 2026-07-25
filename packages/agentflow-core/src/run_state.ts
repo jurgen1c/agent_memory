@@ -1500,9 +1500,13 @@ export class AgentflowRunStateStore {
       } catch {
         artifact = null;
       }
+      const metadata = artifact?.metadata;
       return artifact?.kind === "failure_payload"
           && ["available", "overwritten"].includes(artifact.status)
-          && artifact.metadata.failureId === failure.id
+          && metadata !== null
+          && typeof metadata === "object"
+          && !Array.isArray(metadata)
+          && metadata.failureId === failure.id
         ? failure
         : { ...failure, payloadPath: null };
     });

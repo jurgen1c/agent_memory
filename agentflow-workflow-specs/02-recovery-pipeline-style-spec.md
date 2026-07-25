@@ -49,7 +49,7 @@ Every failed step writes a failure payload.
   },
   "classification": "command_failure",
   "remediation_status": null,
-  "path": "failures/command-ci-attempt-1.json",
+  "path": "failures/command-ci-attempt-1-<sha256-12>.json",
   "redactions": {
     "applied": false,
     "marker": "[REDACTED]",
@@ -62,7 +62,7 @@ Every failed step writes a failure payload.
 The payload is registered as a run artifact at:
 
 ```text
-failures/<failure-id>.json
+failures/<failure-id-slug>-<sha256-12>.json
 ```
 
 The artifact registry stores its backing bytes under the run's generated
