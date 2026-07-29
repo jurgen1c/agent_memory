@@ -84,12 +84,6 @@ describe("CLI", () => {
 
   test("keeps CLI version metadata aligned with package metadata", () => {
     const workspacePackagePaths = [
-      "packages/agent-tools/package.json",
-      "packages/agentflow/package.json",
-      "packages/agentflow-agent-memory-adapter/package.json",
-      "packages/agentflow-cli/package.json",
-      "packages/agentflow-core/package.json",
-      "packages/agentflow-schemas/package.json",
       "packages/cli/package.json",
       "packages/core/package.json",
       "packages/schemas/package.json",

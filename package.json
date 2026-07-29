@@ -1,9 +1,8 @@
 {
   "name": "@jurgen1c/agent-memory-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Repository-local agent memory CLI based on atomic claims and generated indexes.",
   "license": "MIT",
-  "main": "dist/agent-memory.js",
   "repository": {
     "type": "git",
     "url": "https://github.com/jurgen1c/agent_memory"
@@ -16,11 +15,21 @@
     "repository"
   ],
   "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "bin": {
-    "agent-memory": "dist/agent-memory.js",
-    "agentflow": "dist/agentflow.js"
+    "agent-memory": "./dist/agent-memory.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "dependencies": {
+    "@jurgen1c/agent-core": "^0.1.0",
     "@xyflow/react": "^12.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -45,7 +54,8 @@
   },
   "files": [
     "dist/",
-    "packages/",
+    "packages/schemas/*.schema.json",
+    "dist/web/",
     "README.md",
     "LICENSE"
   ],
@@ -56,25 +66,23 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "node scripts/run-root-verification.mjs build",
-    "build:agent-memory": "bun build packages/cli/src/index.ts --target=node --outfile=dist/agent-memory.js",
-    "build:agentflow": "bun build packages/agentflow-cli/src/index.ts --target=node --outfile=dist/agentflow.js",
-    "build:agentflow-cli-package": "bun run --cwd packages/agentflow-cli build",
-    "build:agent-tools": "bun run --cwd packages/agent-tools build",
+    "build": "bun run build:web && bun run build:library && bun run build:types && bun run build:agent-memory",
+    "build:agent-memory": "bun build packages/cli/src/index.ts --target=node --packages=external --outfile=dist/agent-memory.js",
+    "build:library": "bun build packages/core/src/index.ts --target=node --packages=external --outfile=dist/index.js",
+    "build:types": "tsc -p tsconfig.build.json",
     "build:web": "bun run --cwd packages/web build",
-    "typecheck": "node scripts/run-root-verification.mjs typecheck",
+    "typecheck": "bun run typecheck:packages && bun run typecheck:web",
     "typecheck:packages": "tsc --noEmit -p tsconfig.json",
     "typecheck:web": "tsc --noEmit -p packages/web/tsconfig.json",
     "audit": "bun audit --audit-level moderate",
-    "ci": "bun run version:check && bun run audit && bun test && bun run lint && bun run typecheck && bun run build",
+    "ci": "bun run audit && bun test && bun run lint && bun run typecheck && bun run build",
     "lint": "eslint .",
     "test": "bun test",
     "test:coverage": "bun test --coverage",
-    "version": "node scripts/sync-workspace-versions.mjs --stage",
-    "version:check": "node scripts/sync-workspace-versions.mjs --check",
     "dev": "bun packages/cli/src/index.ts",
     "ui:mock": "scripts/run-mock-ui.sh",
-    "prepack": "bun run build"
+    "prepack": "bun run build",
+    "verify:package": "node scripts/verify-package.mjs"
   },
   "engines": {
     "node": ">=25"

@@ -162,7 +162,12 @@ describe("profiles command", () => {
   });
 
   test("context includes selected and dropped profile traits with caps", async () => {
-    const cwd = await compiledMockAppWithProfiles((config) => `${config}\ncontext:\n  default_budget: medium\n  default_depth: 1\n  include_inferred_edges_by_default: false\n  profile_trait_limit: 1\n`);
+    const cwd = await compiledMockAppWithProfiles((config) =>
+      config.replace(
+        "  include_inferred_edges_by_default: false",
+        "  include_inferred_edges_by_default: false\n  profile_trait_limit: 1"
+      )
+    );
     const result = await dispatch(["context", "--task", "review auth changes", "--recipe", "recipe.auth.modify_student_oauth", "--profile", "review", "--json"], {
       cwd
     });
@@ -193,7 +198,12 @@ describe("profiles command", () => {
   });
 
   test("context suppresses profile diagnostics when configured", async () => {
-    const cwd = await compiledMockAppWithProfiles((config) => `${config}\ncontext:\n  include_profile_diagnostics: false\n`);
+    const cwd = await compiledMockAppWithProfiles((config) =>
+      config.replace(
+        "  include_inferred_edges_by_default: false",
+        "  include_inferred_edges_by_default: false\n  include_profile_diagnostics: false"
+      )
+    );
     const result = await dispatch(["context", "--profile-trait", "profile_trait.implementer.keep_scope_tight", "--json"], { cwd });
     const parsed = JSON.parse(result.stdout);
 

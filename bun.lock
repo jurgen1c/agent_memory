@@ -5,6 +5,7 @@
     "": {
       "name": "@jurgen1c/agent-memory-cli",
       "dependencies": {
+        "@jurgen1c/agent-core": "^0.1.0",
         "@xyflow/react": "^12.0.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
@@ -25,60 +26,21 @@
         "vite": "^7.3.6",
       },
     },
-    "packages/agent-tools": {
-      "name": "@jurgen1c/agent-tools",
-      "version": "0.2.0",
-    },
-    "packages/agentflow": {
-      "name": "@jurgen1c/agentflow",
-      "version": "0.2.0",
-      "dependencies": {
-        "@jurgen1c/agentflow-core": "workspace:*",
-      },
-    },
-    "packages/agentflow-agent-memory-adapter": {
-      "name": "@jurgen1c/agentflow-agent-memory-adapter",
-      "version": "0.2.0",
-      "dependencies": {
-        "@jurgen1c/agent-memory-core": "workspace:*",
-        "@jurgen1c/agentflow-core": "workspace:*",
-      },
-    },
-    "packages/agentflow-cli": {
-      "name": "@jurgen1c/agentflow-cli",
-      "version": "0.2.0",
-      "bin": {
-        "agentflow": "./dist/index.js",
-      },
-    },
-    "packages/agentflow-core": {
-      "name": "@jurgen1c/agentflow-core",
-      "version": "0.2.0",
-      "dependencies": {
-        "@jurgen1c/agent-tools": "workspace:*",
-        "@jurgen1c/agentflow-schemas": "workspace:*",
-        "yaml": "^2.9.0",
-      },
-    },
-    "packages/agentflow-schemas": {
-      "name": "@jurgen1c/agentflow-schemas",
-      "version": "0.2.0",
-    },
     "packages/cli": {
       "name": "@jurgen1c/agent-memory-cli-workspace",
-      "version": "0.2.0",
+      "version": "0.3.0",
     },
     "packages/core": {
       "name": "@jurgen1c/agent-memory-core",
-      "version": "0.2.0",
+      "version": "0.3.0",
     },
     "packages/schemas": {
       "name": "@jurgen1c/agent-memory-schemas",
-      "version": "0.2.0",
+      "version": "0.3.0",
     },
     "packages/web": {
       "name": "@jurgen1c/agent-memory-web",
-      "version": "0.2.0",
+      "version": "0.3.0",
     },
   },
   "overrides": {
@@ -211,6 +173,8 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
+    "@jurgen1c/agent-core": ["@jurgen1c/agent-core@0.1.0", "", { "dependencies": { "is-path-inside": "^4.0.0", "yaml": "^2.9.0" } }, "sha512-3RgtljYD8PxKFwLhjgM0H6paYpAvw5Ji85ZFYA7QiASjCAp4jne3i7EWsrB3aaKZkJd38c5+AurT6h+Ev7zDTA=="],
+
     "@jurgen1c/agent-memory-cli-workspace": ["@jurgen1c/agent-memory-cli-workspace@workspace:packages/cli"],
 
     "@jurgen1c/agent-memory-core": ["@jurgen1c/agent-memory-core@workspace:packages/core"],
@@ -218,18 +182,6 @@
     "@jurgen1c/agent-memory-schemas": ["@jurgen1c/agent-memory-schemas@workspace:packages/schemas"],
 
     "@jurgen1c/agent-memory-web": ["@jurgen1c/agent-memory-web@workspace:packages/web"],
-
-    "@jurgen1c/agent-tools": ["@jurgen1c/agent-tools@workspace:packages/agent-tools"],
-
-    "@jurgen1c/agentflow": ["@jurgen1c/agentflow@workspace:packages/agentflow"],
-
-    "@jurgen1c/agentflow-agent-memory-adapter": ["@jurgen1c/agentflow-agent-memory-adapter@workspace:packages/agentflow-agent-memory-adapter"],
-
-    "@jurgen1c/agentflow-cli": ["@jurgen1c/agentflow-cli@workspace:packages/agentflow-cli"],
-
-    "@jurgen1c/agentflow-core": ["@jurgen1c/agentflow-core@workspace:packages/agentflow-core"],
-
-    "@jurgen1c/agentflow-schemas": ["@jurgen1c/agentflow-schemas@workspace:packages/agentflow-schemas"],
 
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.0-rc.3", "", {}, "sha512-eybk3TjzzzV97Dlj5c+XrBFW57eTNhzod66y9HrBlzJ6NsCrWCp/2kaPS3K9wJmurBC0Tdw4yPjXKZqlznim3Q=="],
 
@@ -522,6 +474,8 @@
     "is-glob": ["is-glob@4.0.3", "", { "dependencies": { "is-extglob": "^2.1.1" } }, "sha512-xelSayHH36ZgE7ZWhli7pW34hNbNl8Ojv5KVmkJD4hBdD3th8Tfk9vYasLM+mXWOZhFkgZfxhLSnrwRr4elSSg=="],
 
     "is-hexadecimal": ["is-hexadecimal@2.0.1", "", {}, "sha512-DgZQp241c8oO6cA1SbTEWiXeoxV42vlcJxgH+B3hi1AiqqKruZR3ZGF8In3fj4+/y/7rHvlOZLZtgJ/4ttYGZg=="],
+
+    "is-path-inside": ["is-path-inside@4.0.0", "", {}, "sha512-lJJV/5dYS+RcL8uQdBDW9c9uWFLLBNRyFhnAKXw5tVqLlKZ4RMGZKv+YQ/IA3OhD+RpbJa1LLFM1FQPGyIXvOA=="],
 
     "is-plain-obj": ["is-plain-obj@4.1.0", "", {}, "sha512-+Pgi+vMuUNkJyExiMBt5IlFoMyKnr5zhJ4Uspz58WOhBF5QoIZkFyNHIbBAtHwzVAgk5RtndVNsDRN61/mmDqg=="],
 

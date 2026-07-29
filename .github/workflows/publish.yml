@@ -22,10 +22,7 @@ jobs:
           node-version: 25
           registry-url: https://registry.npmjs.org
       - run: bun install --frozen-lockfile
-      - name: Verify release tag and public package versions
-        run: node scripts/release-packages.mjs verify-tag
-      - name: Verify workspace package versions
-        run: bun run version:check
+      - run: node scripts/verify-release.mjs
       - run: bun run ci
-      - run: node scripts/release-packages.mjs pack-dry-run
-      - run: node scripts/release-packages.mjs publish
+      - run: bun run verify:package
+      - run: npm publish --provenance --access public

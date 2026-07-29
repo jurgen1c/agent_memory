@@ -1,7 +1,0 @@
-{
-  "steps": {
-    "install": { "outcome": "succeeded" },
-    "lint": { "outputs": ["ci/rubocop.log"] },
-    "test": { "outputs": ["ci/test.log"] }
-  }
-}

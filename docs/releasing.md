@@ -1,120 +1,46 @@
-# Releasing
+# Releasing Agent Memory
 
-Use this checklist to publish a coordinated Agent Memory and Agentflow release.
+Agent Memory is versioned and released independently from Agent Core, Agent
+Flow, and Agentic Development.
 
-Publishing is triggered by a published GitHub Release. Pushing a `vX.Y.Z` tag by itself does not run `.github/workflows/publish.yml`.
+Publishing is triggered by a published GitHub Release. Pushing a `vX.Y.Z` tag
+alone does not run `.github/workflows/publish.yml`.
 
-## Prerequisites
+## Release checklist
 
-- Work from `main` after the release changes have been merged.
-- Make sure `package.json` contains the version you intend to publish.
-- Make sure private workspace package versions match the root package version.
-  The `npm version` lifecycle runs `scripts/sync-workspace-versions.mjs --stage`
-  for future bumps, but manual edits should keep `packages/*/package.json`
-  aligned.
-- Make sure npm Trusted Publishing is configured for every public package:
-  `@jurgen1c/agent-memory-cli`, `@jurgen1c/agentflow-cli`, and
-  `@jurgen1c/agent-tools`.
-- Make sure the GitHub workflow named `Publish package` is active.
+1. Work from a clean, current `main` branch.
+2. Confirm the chosen version does not already exist:
 
-## Choose the Version
+   ```bash
+   npm view @jurgen1c/agent-memory-cli versions --json
+   ```
 
-This package follows semantic versioning:
+3. Update the root version, retained private workspace versions, and
+   `packages/core/src/generated_version.ts`.
+4. Run:
 
-- Patch: bug fixes, docs, and backward-compatible validation or retrieval corrections.
-- Minor: backward-compatible commands, templates, schema fields, UI features, or retrieval behavior.
-- Major: incompatible CLI, config, schema, or memory format changes.
+   ```bash
+   bun install --frozen-lockfile
+   bun run ci
+   bun run verify:package
+   dist/agent-memory.js help
+   dist/agent-memory.js --version
+   ```
 
-## Local Verification
+5. Commit and push `main`.
+6. Create and push the matching annotated `vX.Y.Z` tag.
+7. Publish a GitHub Release for that tag.
+8. Wait for the `Publish package` workflow.
+9. Verify:
 
-Run the release gate before tagging:
+   ```bash
+   npm view @jurgen1c/agent-memory-cli version
+   ```
 
-```bash
-bun run audit
-bun run lint
-bun test
-bun run build
-dist/agent-memory.js help
-dist/agent-memory.js --version
-npm pack --dry-run
-npm pack --workspace @jurgen1c/agentflow-cli --dry-run
-npm pack --workspace @jurgen1c/agent-tools --dry-run
-```
+The workflow validates tag and package versions, performs a frozen install,
+runs the complete gate, installs the tarball in a clean consumer, and
+publishes with public access and npm provenance.
 
-## Create the Version Commit and Tag
-
-From `main`, create the version commit and matching tag:
-
-```bash
-npm version patch
-```
-
-Use `minor` or `major` instead of `patch` when appropriate.
-The version lifecycle syncs `packages/*/package.json` to the root package
-version and stages those workspace files before npm creates the release commit.
-
-Push both the version commit and tag:
-
-```bash
-git push origin main
-git push origin vX.Y.Z
-```
-
-Replace `vX.Y.Z` with the tag that `npm version` created, such as `v0.1.1`.
-
-## Publish the GitHub Release
-
-Create a GitHub Release for the pushed tag:
-
-```bash
-gh release create vX.Y.Z --title "vX.Y.Z" --notes "Release vX.Y.Z"
-```
-
-This `release: published` event starts `.github/workflows/publish.yml`.
-
-The workflow verifies that the release tag matches `package.json`, verifies all
-public release package versions, installs dependencies, runs audit/lint/tests/build,
-dry-runs each public package tarball, and publishes the packages with npm Trusted
-Publishing provenance in this deterministic order:
-
-```bash
-npm publish --provenance --access public
-npm publish --workspace @jurgen1c/agentflow-cli --provenance --access public
-npm publish --workspace @jurgen1c/agent-tools --provenance --access public
-```
-
-## Monitor the Publish
-
-Watch the workflow:
-
-```bash
-gh run list --workflow "Publish package" --limit 5
-gh run watch
-```
-
-Check npm after it completes:
-
-```bash
-npm view @jurgen1c/agent-memory-cli version
-npm view @jurgen1c/agentflow-cli version
-npm view @jurgen1c/agent-tools version
-```
-
-## If You Pushed a Tag but Nothing Ran
-
-That is expected unless a GitHub Release was also published. Create the release for the existing tag:
-
-```bash
-gh release create vX.Y.Z --title "vX.Y.Z" --notes "Release vX.Y.Z"
-```
-
-## If the Version Is Wrong
-
-If the tag was pushed but the release was not published yet, delete the bad tag locally and remotely, then create the correct version:
-
-```bash
-git tag -d vX.Y.Z
-git push origin :refs/tags/vX.Y.Z
-```
-
-Only delete or replace a tag before it has been published to npm. Once a version is on npm, publish a new version instead.
+Trusted Publishing must authorize repository `jurgen1c/agent_memory`,
+workflow `.github/workflows/publish.yml`, with no environment unless the
+workflow is updated to use one.

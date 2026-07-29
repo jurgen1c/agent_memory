@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config";
 import { canonicalMemoryFileInventory, discoverCanonicalMemoryFiles, resolveConfiguredPath } from "./files";
-import { openSqliteDatabase } from "./sqlite";
+import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
 import { PACKAGE_VERSION } from "./version";
 import { parseYaml } from "./yaml";
 
@@ -130,12 +130,12 @@ export async function doctorMemory(options: DoctorOptions = {}): Promise<DoctorR
   return result(checks.every((check) => check.status === "ok"), databasePath, repoRoot, checks);
 }
 
-function readMetadata(database: { all<T>(sql: string, params?: unknown[]): T[] }): Map<string, string> {
+function readMetadata(database: Pick<SqliteDatabase, "all">): Map<string, string> {
   const rows = database.all<{ key: string; value: string }>("SELECT key, value FROM compile_metadata");
   return new Map(rows.map((row) => [row.key, row.value]));
 }
 
-function tableExists(database: { get<T>(sql: string, params?: unknown[]): T | null }, tableName: string): boolean {
+function tableExists(database: Pick<SqliteDatabase, "get">, tableName: string): boolean {
   const row = database.get<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [tableName]);
   return Boolean(row);
 }

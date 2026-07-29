@@ -15,6 +15,25 @@ The source of truth stays in the consuming repository:
 The generated cache lives at `.agent-memory/memory.sqlite` by default and should not be committed.
 Generated one-off plan runs live under `.agent-memory/plans/` and should not be committed unless they are explicitly promoted into reusable plan templates.
 
+## API and Architecture
+
+The package exports Agent Memory's public library API with generated TypeScript
+declarations:
+
+```ts
+import {
+  buildContext,
+  loadConfig,
+  openSqliteDatabase
+} from "@jurgen1c/agent-memory-cli";
+```
+
+Agent Memory depends on `@jurgen1c/agent-core` for strict YAML parsing,
+repository and path safety, and portable SQLite. It contains no Agent Flow
+runtime, CLI, schemas, fixtures, examples, tests, release logic, or adapter.
+Generic recipes and plan templates remain part of Agent Memory's own
+contextual-memory model.
+
 ## Requirements
 
 - Node.js 25 or newer for the published CLI.
@@ -47,18 +66,6 @@ For a global CLI install:
 ```bash
 npm install -g @jurgen1c/agent-memory-cli
 agent-memory --help
-```
-
-Agent Memory and Agentflow are also listed through the lightweight
-`@jurgen1c/agent-tools` meta package. The meta package is for discovery and
-install guidance; it does not replace the individual CLIs or couple their
-runtimes. The `agent-memory` and `agentflow` binaries are published by their
-own CLI packages:
-
-```bash
-npm install --save-dev @jurgen1c/agent-tools
-npm install --save-dev @jurgen1c/agent-memory-cli
-npm install --save-dev @jurgen1c/agentflow-cli
 ```
 
 ### What `init` Creates
