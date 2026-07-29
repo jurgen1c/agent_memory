@@ -41,6 +41,6 @@ The workflow validates tag and package versions, performs a frozen install,
 runs the complete gate, installs the tarball in a clean consumer, and
 publishes with public access and npm provenance.
 
-Trusted Publishing must authorize repository `jurgen1c/agent_memory`,
-workflow `.github/workflows/publish.yml`, with no environment unless the
-workflow is updated to use one.
+Configure npm Trusted Publishing for GitHub user `jurgen1c`, repository
+`agent_memory`, workflow `publish.yml`, allowed action `npm publish`, and no
+environment.

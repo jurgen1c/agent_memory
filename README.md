@@ -560,4 +560,4 @@ The first manual publish for the scoped package must use public access:
 npm publish --access public
 ```
 
-The workflow verifies that the release tag matches the package version, then tests, builds, dry-runs the package, and runs `npm publish --provenance --access public`. Configure npm Trusted Publishing for the `@jurgen1c/agent-memory-cli` package so the workflow can publish without an `NPM_TOKEN` secret.
+The workflow verifies that the release tag matches the package version, then tests, builds, dry-runs the package, and runs `npm publish --provenance --access public`. Configure npm Trusted Publishing for the `@jurgen1c/agent-memory-cli` package with GitHub user `jurgen1c`, repository `agent_memory`, workflow `publish.yml`, allowed action `npm publish`, and no environment.
