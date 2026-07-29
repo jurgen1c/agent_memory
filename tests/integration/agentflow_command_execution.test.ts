@@ -831,7 +831,7 @@ steps:
   - id: secret-check
     type: command
     command: |
-      AWS_SECRET_ACCESS_KEY=aws-secret-value MY_API_TOKEN=super-secret-value sh -c "printf 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz\\nProxy-Authorization: Basic dXNlcjpwYXNzd29yZA==\\nAuthorization: ApiKey opaque-api-key-value\\nMY_API_TOKEN=log-secret-value\\n-----BEGIN ENCRYPTED PRIVATE KEY-----\\ncHJpdmF0ZS1rZXk=\\n-----END ENCRYPTED PRIVATE KEY-----\\n' >&2; exit 12" --password cli-password-value --api-token "quoted-cli-token" --verbose
+      AWS_SECRET_ACCESS_KEY=aws-secret-value MY_API_TOKEN=super-secret-value sh -c "printf 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz\\nProxy-Authorization: Basic dXNlcjpwYXNzd29yZA==\\nAuthorization: ApiKey opaque-api-key-value\\nMY_API_TOKEN=log-secret-value\\n-----BEGIN PGP PRIVATE KEY BLOCK-----\\ncHJpdmF0ZS1rZXk=\\n-----END PGP PRIVATE KEY BLOCK-----\\n' >&2; exit 12" --password cli-password-value --api-token "quoted-cli-token" --verbose
     on_failure: { then: pause }
 `);
     const store = await openAgentflowRunState({ cwd: repoRoot });
@@ -911,6 +911,8 @@ steps:
               "GitLab glpat-12345678901234567890",
               `Slack ${slackLikeToken}`,
               "JWT eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature123456789",
+              "aws configure set aws_secret_access_key attachment-aws-secret",
+              "npm config set //registry.npmjs.org/:_authToken attachment-npm-secret",
               ""
             ].join("\n")
           : artifactPath,
@@ -1108,6 +1110,8 @@ steps:
     expect(serialized).not.toContain("npm_zyxwvutsrqponmlkjihgfedcba0987654321");
     expect(serialized).not.toContain("horse battery staple");
     expect(serialized).not.toContain("spaced-api-secret");
+    expect(serialized).not.toContain("attachment-aws-secret");
+    expect(serialized).not.toContain("attachment-npm-secret");
     expect(persisted.indexPayload).toEqual({
       api_token: "[REDACTED]",
       nested: { AWS_SECRET_ACCESS_KEY: "[REDACTED]" }
@@ -1159,6 +1163,8 @@ steps:
         "GitLab [REDACTED]",
         "Slack [REDACTED]",
         "JWT [REDACTED]",
+        "aws configure set aws_secret_access_key [REDACTED]",
+        "npm config set //registry.npmjs.org/:_authToken [REDACTED]",
         ""
       ].join("\n"));
     expect(store.readArtifact("attempt-scoped-failure", markdownSnapshot).content.toString())

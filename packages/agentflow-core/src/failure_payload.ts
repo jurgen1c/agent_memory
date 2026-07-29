@@ -440,7 +440,7 @@ function redactSensitiveText(
   };
 
   replace(
-    /-----BEGIN ([A-Z0-9 ]*PRIVATE KEY)-----[\s\S]*?-----END \1-----/g,
+    /-----BEGIN ([A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?)-----[\s\S]*?-----END \1-----/g,
     "private_key",
     AGENTFLOW_FAILURE_REDACTION_MARKER
   );
@@ -636,19 +636,19 @@ function redactSensitiveText(
     (_match: string, keyQuote: string, key: string, separator: string, valueQuote: string) =>
       `${keyQuote}${key}${keyQuote}${separator}${valueQuote}${AGENTFLOW_FAILURE_REDACTION_MARKER}${valueQuote}`
   );
+  replace(
+    /(\b(?:aws\s+configure|(?:git|npm|pnpm|yarn)\s+config)\s+set\s+)((?:(?:\/\/[^\s"'\\]*\/:)?_?(?:[A-Za-z0-9]+[_.-])*(?:api[_.-]?(?:key|token)|access[_.-]?(?:key|token)|auth[_.-]?token|client[_.-]?secret|private[_.-]?key|password|passwd|secret|token)(?:[_.-][A-Za-z0-9]+)*))(\s+)(\$?)(["'])((?:\\[\s\S]|(?!\5)[\s\S])*)\5/gi,
+    "positional_secret_argument",
+    (_match: string, prefix: string, key: string, separator: string, shellPrefix: string, quote: string) =>
+      `${prefix}${key}${separator}${shellPrefix}${quote}${AGENTFLOW_FAILURE_REDACTION_MARKER}${quote}`
+  );
+  replace(
+    /(\b(?:aws\s+configure|(?:git|npm|pnpm|yarn)\s+config)\s+set\s+)((?:(?:\/\/[^\s"'\\]*\/:)?_?(?:[A-Za-z0-9]+[_.-])*(?:api[_.-]?(?:key|token)|access[_.-]?(?:key|token)|auth[_.-]?token|client[_.-]?secret|private[_.-]?key|password|passwd|secret|token)(?:[_.-][A-Za-z0-9]+)*))(\s+)(?!-)((?:\\[^\r\n]|[^\s$"',;\\])+)/gi,
+    "positional_secret_argument",
+    (_match: string, prefix: string, key: string, separator: string) =>
+      `${prefix}${key}${separator}${AGENTFLOW_FAILURE_REDACTION_MARKER}`
+  );
   if (assignmentMode === "shell") {
-    replace(
-      /(\b(?:aws\s+configure|(?:git|npm|pnpm|yarn)\s+config)\s+set\s+)((?:[A-Za-z0-9]+[_.-])*(?:api[_.-]?(?:key|token)|access[_.-]?(?:key|token)|auth[_.-]?token|client[_.-]?secret|private[_.-]?key|password|passwd|secret|token)(?:[_.-][A-Za-z0-9]+)*)(\s+)(\$?)(["'])((?:\\[\s\S]|(?!\5)[\s\S])*)\5/gi,
-      "positional_secret_argument",
-      (_match: string, prefix: string, key: string, separator: string, shellPrefix: string, quote: string) =>
-        `${prefix}${key}${separator}${shellPrefix}${quote}${AGENTFLOW_FAILURE_REDACTION_MARKER}${quote}`
-    );
-    replace(
-      /(\b(?:aws\s+configure|(?:git|npm|pnpm|yarn)\s+config)\s+set\s+)((?:[A-Za-z0-9]+[_.-])*(?:api[_.-]?(?:key|token)|access[_.-]?(?:key|token)|auth[_.-]?token|client[_.-]?secret|private[_.-]?key|password|passwd|secret|token)(?:[_.-][A-Za-z0-9]+)*)(\s+)(?!-)((?:\\[^\r\n]|[^\s$"',;\\])+)/gi,
-      "positional_secret_argument",
-      (_match: string, prefix: string, key: string, separator: string) =>
-        `${prefix}${key}${separator}${AGENTFLOW_FAILURE_REDACTION_MARKER}`
-    );
     replace(
       /\b(PGPASSWORD|MYSQL_PWD)(\s*=\s*)(\$?)(["'])((?:\\[\s\S]|(?!\4)[\s\S])*)\4/gi,
       "credential_environment",
