@@ -820,6 +820,55 @@ steps:
     store.close();
   });
 
+  test("persists repeated deterministic failures idempotently", async () => {
+    const repoRoot = temporaryRepo();
+    const workflow = parseAgentflowWorkflowOrThrow(`
+name: idempotent-failure-payload
+version: 1
+style: recovery_pipeline
+maturity: experimental
+steps:
+  - { id: check, type: command, command: exit 1 }
+`);
+    const store = await openAgentflowRunState({ cwd: repoRoot });
+    createAgentflowLifecycleRun(store, { id: "idempotent-failure-payload", workflow });
+    const input = {
+      id: "routing:check:attempt-2:limit",
+      runId: "idempotent-failure-payload",
+      stepId: "check",
+      stepType: "routing",
+      attempt: 2,
+      summary: "Step check cannot start because limits.max_step_attempts allows 1 attempt(s).",
+      classification: "step_attempt_limit",
+      retryable: false,
+      outcome: "pause" as const,
+      indexPayload: { attempt: 2, limit: 1, token: "replayed-secret" }
+    };
+
+    const first = persistAgentflowFailurePayload(store, input);
+    const replay = persistAgentflowFailurePayload(store, input);
+
+    expect(replay).toEqual(first);
+    expect(store.listFailures(input.runId)).toHaveLength(1);
+    expect(store.listArtifactMetadata(input.runId).filter((artifact) => artifact.kind === "failure_payload"))
+      .toHaveLength(1);
+    for (const changed of [
+      { stepType: "command" },
+      { exitCode: 1 },
+      { command: "exit 9" },
+      { logs: { stderr: "different.log" } },
+      { indexPayload: { attempt: 2, limit: 2, token: "replayed-secret" } },
+      { classification: "different_failure" }
+    ]) {
+      expect(() => persistAgentflowFailurePayload(store, {
+        ...input,
+        ...changed
+      })).toThrow("already exists with different failure data");
+    }
+    expect(store.listFailures(input.runId)).toHaveLength(1);
+    store.close();
+  });
+
   test("redacts secret-like command and log content in recovery-facing failure artifacts", async () => {
     const repoRoot = temporaryRepo();
     const workflow = parseAgentflowWorkflowOrThrow(`

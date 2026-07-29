@@ -87,6 +87,44 @@ export function persistAgentflowFailurePayload(
     "run_state",
     redactionFields
   );
+  const replayFingerprint = failureReplayFingerprint({
+    stepId: input.stepId,
+    sessionId: input.sessionId ?? null,
+    stepType: input.stepType,
+    attempt: input.attempt,
+    exitCode: input.exitCode ?? null,
+    command,
+    summary,
+    classification: input.classification,
+    retryable: input.retryable,
+    outcome: input.outcome,
+    stdout: input.logs?.stdout ?? null,
+    stderr: input.logs?.stderr ?? null,
+    indexPayload
+  });
+  const existingFailure = store.listFailures(input.runId).find((failure) => failure.id === input.id);
+  if (existingFailure !== undefined) {
+    const existingPayload = runStateMapping(existingFailure.payload);
+    const sameFailure = existingFailure.stepId === input.stepId
+      && existingFailure.sessionId === (input.sessionId ?? null)
+      && existingFailure.classification === input.classification
+      && existingFailure.message === summary
+      && existingFailure.retryable === input.retryable
+      && existingFailure.attempt === input.attempt
+      && existingFailure.outcome === input.outcome
+      && existingPayload?.failureReplayFingerprint === replayFingerprint;
+    if (!sameFailure) {
+      throw new Error(`Agentflow failure ${input.id} already exists with different failure data.`);
+    }
+    return {
+      path: existingFailure.payloadPath,
+      persistenceError: typeof existingPayload?.payloadPersistenceError === "string"
+        ? existingPayload.payloadPersistenceError
+        : null,
+      redacted: existingPayload?.redacted === true,
+      indexPayload
+    };
+  }
 
   let attachmentScanError: string | null = null;
   let attachmentScanCount = 0;
@@ -271,6 +309,7 @@ export function persistAgentflowFailurePayload(
       outcome: input.outcome,
       failurePayloadPath: persistedPath,
       redacted: payload.redactions.applied,
+      failureReplayFingerprint: replayFingerprint,
       ...(persistenceError === null ? {} : { payloadPersistenceError: persistenceError })
     }
   });
@@ -309,6 +348,24 @@ function safeSegment(value: string): string {
 
 function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 12);
+}
+
+function failureReplayFingerprint(
+  value: Record<string, AgentflowRunStateValue>
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalRunStateValue(value)))
+    .digest("hex");
+}
+
+function canonicalRunStateValue(value: AgentflowRunStateValue): AgentflowRunStateValue {
+  if (Array.isArray(value)) return value.map(canonicalRunStateValue);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, canonicalRunStateValue(value[key]!)])
+    );
+  }
+  return value;
 }
 
 function textContentType(contentType: string): boolean {
@@ -425,6 +482,14 @@ function redactRunStateValue(
     return redactRunStateMapping(value, field, redactionFields);
   }
   return value;
+}
+
+function runStateMapping(
+  value: AgentflowRunStateValue | null
+): Record<string, AgentflowRunStateValue> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : undefined;
 }
 
 function redactSensitiveText(
