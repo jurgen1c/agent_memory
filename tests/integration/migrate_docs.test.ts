@@ -332,6 +332,21 @@ mappings:
     expect(externalAutomatic).toBe(1);
     expect(stderr).toContain("Automatic migration requires --from to point inside the repository");
 
+    const linkedExternalRoot = path.join(repoRoot, "docs/linked-external");
+    fs.mkdirSync(path.dirname(linkedExternalRoot), { recursive: true });
+    fs.symlinkSync(externalRoot, linkedExternalRoot, "dir");
+    stderr = "";
+    const linkedExternalAutomatic = await runCli(
+      ["migrate-docs", "--from", "docs/linked-external", "--system", "auth", "--automatic"],
+      quietStreams((chunk) => {
+        stderr += chunk;
+      }),
+      { cwd: repoRoot }
+    );
+
+    expect(linkedExternalAutomatic).toBe(1);
+    expect(stderr).toContain("Automatic migration requires --from to point inside the repository");
+
     const mapPath = path.join(repoRoot, ".agent-memory/migrations/external.yaml");
     fs.mkdirSync(path.dirname(mapPath), { recursive: true });
     fs.writeFileSync(

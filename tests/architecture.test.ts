@@ -49,6 +49,17 @@ describe("standalone Agent Memory architecture", () => {
     expect(coreSource).toContain("@jurgen1c/agent-core/yaml");
     expect(coreSource).toContain("@jurgen1c/agent-core/repository");
     expect(coreSource).toContain("@jurgen1c/agent-core/sqlite");
+
+    for (const relativePath of [
+      "packages/core/src/files.ts",
+      "packages/core/src/migration.ts",
+      "packages/core/src/repo.ts",
+      "packages/core/src/ui_server.ts",
+      "packages/core/src/validator.ts"
+    ]) {
+      expect(fs.readFileSync(path.join(repositoryRoot, relativePath), "utf8"))
+        .toContain("@jurgen1c/agent-core/repository");
+    }
   });
 });
 

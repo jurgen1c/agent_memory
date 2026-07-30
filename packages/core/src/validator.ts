@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import { resolveContainedPath } from "@jurgen1c/agent-core/repository";
 import { normalizeChangedFiles } from "./changes";
 import { ConfigError } from "./errors";
 import { loadConfig } from "./config";
 import { discoverFiles, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
 import { parseMarkdownFile, extractMarkdownSection } from "./markdown";
-import { isPathInside } from "./repo";
 import type { AgentMemoryConfig } from "./types";
 import { parseYaml } from "./yaml";
 import { CLAIM_TYPES } from "./templates";
@@ -94,7 +94,6 @@ interface LoadedProfileTrait {
 
 interface RepoPathValidationContext {
   repoRoot: string;
-  repoRootRealPath: string | null;
 }
 
 type ValidationConfig = AgentMemoryConfig["validation"];
@@ -1232,10 +1231,7 @@ function changedCanonicalFileWasDeleted(changedFiles: Set<string>, repoRoot: str
 }
 
 function createRepoPathValidationContext(repoRoot: string): RepoPathValidationContext {
-  return {
-    repoRoot,
-    repoRootRealPath: safeRealpath(repoRoot)
-  };
+  return { repoRoot };
 }
 
 function validateRepoPathReferences(
@@ -1250,7 +1246,7 @@ function validateRepoPathReferences(
   for (const reference of references) {
     const resolved = resolveRepoReference(pathContext.repoRoot, reference);
 
-    if (!isPathInside(pathContext.repoRoot, resolved) || existingParentEscapesRepo(pathContext, resolved)) {
+    if (resolved === null) {
       addError(issues, `${fieldCode}.outside_repo`, `Referenced path escapes repository root or cannot be validated safely: ${reference}`, relativePath, id);
       continue;
     }
@@ -1277,42 +1273,11 @@ function referenceLabel(fieldCode: string): string {
   return "path";
 }
 
-function resolveRepoReference(repoRoot: string, reference: string): string {
+function resolveRepoReference(repoRoot: string, reference: string): string | null {
   const normalizedReference = reference.replaceAll("\\", "/");
-  return path.isAbsolute(normalizedReference) ? path.normalize(normalizedReference) : path.resolve(repoRoot, normalizedReference);
-}
-
-function existingParentEscapesRepo(pathContext: RepoPathValidationContext, resolvedPath: string): boolean {
-  const existingParent = nearestExistingParent(resolvedPath);
-  const existingParentRealPath = safeRealpath(existingParent);
-
-  if (!pathContext.repoRootRealPath || !existingParentRealPath) {
-    return true;
-  }
-
-  return !isPathInside(pathContext.repoRootRealPath, existingParentRealPath);
-}
-
-function safeRealpath(filePath: string): string | null {
   try {
-    return fs.realpathSync(filePath);
+    return resolveContainedPath(repoRoot, normalizedReference).absolutePath;
   } catch {
     return null;
   }
-}
-
-function nearestExistingParent(targetPath: string): string {
-  let candidate = fs.existsSync(targetPath) ? targetPath : path.dirname(targetPath);
-
-  while (!fs.existsSync(candidate)) {
-    const parent = path.dirname(candidate);
-
-    if (parent === candidate) {
-      return candidate;
-    }
-
-    candidate = parent;
-  }
-
-  return candidate;
 }

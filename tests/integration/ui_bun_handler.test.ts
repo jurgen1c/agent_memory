@@ -171,6 +171,28 @@ describe("Bun UI request handler", () => {
     }
   });
 
+  test("rejects static assets that escape through symlinks", async () => {
+    const staticRoot = makeStaticRoot();
+    const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-bun-static-outside-"));
+    fs.writeFileSync(path.join(outsideRoot, "secret.txt"), "not public");
+    fs.symlinkSync(outsideRoot, path.join(staticRoot, "external"), "dir");
+    const runtime = fakeBunRuntime();
+    const server = await startBunUiServer(runtime.bun, {
+      cwd: copyFixture(),
+      port: 4317,
+      staticRoot,
+      token: "test-token"
+    });
+
+    try {
+      const response = await request(runtime, "/external/secret.txt");
+      expect(response.status).toBe(403);
+      expect(await response.text()).toBe("Forbidden");
+    } finally {
+      await server.close();
+    }
+  });
+
   test("falls through occupied ports and closes the selected Bun server", async () => {
     let attempts = 0;
     let stopped = false;
