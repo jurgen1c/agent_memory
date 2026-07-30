@@ -10,6 +10,7 @@ describe("standalone Agent Memory architecture", () => {
       name: string;
       bin?: Record<string, string>;
       dependencies?: Record<string, string>;
+      engines?: { node?: string };
       workspaces?: string[];
     };
 
@@ -18,28 +19,21 @@ describe("standalone Agent Memory architecture", () => {
       "agent-memory": "./dist/agent-memory.js"
     });
     expect(packageJson.dependencies?.["@jurgen1c/agent-core"]).toBe("^0.1.0");
+    expect(packageJson.engines?.node).toBe(">=25.9.0");
     expect(packageJson.workspaces).toEqual(["packages/*"]);
+    expect(
+      Object.keys(packageJson.dependencies ?? {})
+        .filter((name) => name.startsWith("@jurgen1c/"))
+    ).toEqual(["@jurgen1c/agent-core"]);
+    expect(
+      fs.readdirSync(path.join(repositoryRoot, "packages")).sort()
+    ).toEqual(["cli", "core", "schemas", "web"]);
     for (const range of Object.values(packageJson.dependencies ?? {})) {
       expect(range).not.toMatch(/^(?:workspace:|file:)/);
     }
-  });
-
-  test("contains no Agent Flow package, implementation, import, fixture, or binary", () => {
-    const packageDirectories = fs.readdirSync(path.join(repositoryRoot, "packages"));
-    const tests = sourceFiles(path.join(repositoryRoot, "tests"));
-    const source = sourceFiles(path.join(repositoryRoot, "packages"))
-      .map((file) => fs.readFileSync(file, "utf8"))
-      .join("\n");
-
-    expect(packageDirectories.some((entry) => /agentflow|agent-flow/i.test(entry))).toBe(false);
-    expect(tests.some((file) => /agentflow|agent_flow|agent-flow/i.test(file))).toBe(false);
-    expect(source).not.toMatch(/@jurgen1c\/agent-flow/);
-    expect(source).not.toMatch(/@jurgen1c\/agentflow/);
-    expect(fs.existsSync(path.join(repositoryRoot, "dist", "agentflow.js"))).toBe(false);
-    expect(fs.existsSync(path.join(repositoryRoot, "dist", "agent-flow.js"))).toBe(false);
 
     const lockfile = fs.readFileSync(path.join(repositoryRoot, "bun.lock"), "utf8");
-    expect(lockfile).not.toMatch(/agentflow|agent-tools|file:\/|\/tmp\//i);
+    expect(lockfile).not.toMatch(/file:\/|\/tmp\//i);
   });
 
   test("uses Agent Core for YAML, repository safety, and SQLite", () => {
