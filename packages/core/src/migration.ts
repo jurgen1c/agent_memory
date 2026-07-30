@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { resolveContainedPath } from "@jurgen1c/agent-core/repository";
+import {
+  isPathInside,
+  nearestExistingAncestor,
+  resolveContainedPath
+} from "@jurgen1c/agent-core/repository";
 import { loadConfig, renderYamlScalar } from "./config";
 import { AgentMemoryError } from "./errors";
 import { resolveConfiguredPath, toPosix } from "./files";
@@ -638,7 +642,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function assertInsideMemoryRoot(memoryRoot: string, absoluteTarget: string): void {
-  if (!isContainedPath(memoryRoot, absoluteTarget)) {
+  const resolvedMemoryRoot = path.resolve(memoryRoot);
+  const resolvedTarget = path.resolve(absoluteTarget);
+  const containmentRoot = nearestExistingAncestor(resolvedMemoryRoot);
+
+  if (
+    !isPathInside(resolvedMemoryRoot, resolvedTarget)
+    || containmentRoot === null
+    || !isContainedPath(containmentRoot, resolvedTarget)
+  ) {
     throw new AgentMemoryError("Migration target must stay inside the configured memory root.");
   }
 }
