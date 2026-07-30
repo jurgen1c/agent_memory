@@ -85,6 +85,6 @@
     "verify:package": "node scripts/verify-package.mjs"
   },
   "engines": {
-    "node": ">=25"
+    "node": ">=25.9.0"
   }
 }

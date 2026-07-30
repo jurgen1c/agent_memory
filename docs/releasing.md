@@ -1,7 +1,7 @@
 # Releasing Agent Memory
 
-Agent Memory is versioned and released independently from Agent Core, Agent
-Flow, and Agentic Development.
+Agent Memory is versioned and released independently from the other packages in
+the toolchain.
 
 Publishing is triggered by a published GitHub Release. Pushing a `vX.Y.Z` tag
 alone does not run `.github/workflows/publish.yml`.

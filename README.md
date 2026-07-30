@@ -29,14 +29,12 @@ import {
 ```
 
 Agent Memory depends on `@jurgen1c/agent-core` for strict YAML parsing,
-repository and path safety, and portable SQLite. It contains no Agent Flow
-runtime, CLI, schemas, fixtures, examples, tests, release logic, or adapter.
-Generic recipes and plan templates remain part of Agent Memory's own
-contextual-memory model.
+repository and path safety, and portable SQLite. Generic recipes and plan
+templates remain part of Agent Memory's own contextual-memory model.
 
 ## Requirements
 
-- Node.js 25 or newer for the published CLI.
+- Node.js 25.9.0 or newer for the published CLI.
 - Bun for developing this package repository.
 - Git for repository root detection and diff-based commands.
 
@@ -416,7 +414,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 25
+          node-version: 25.9.0
       - run: npm install
       - run: npx agent-memory sync
       - run: npx agent-memory coverage --git-diff --base origin/main

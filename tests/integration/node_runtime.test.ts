@@ -6,24 +6,32 @@ import path from "node:path";
 const repoRoot = path.resolve(".");
 const mockApp = path.join(repoRoot, "examples/mock-app");
 const builtCli = path.join(repoRoot, "dist/agent-memory.js");
+const nodeExecutable = process.env.AGENT_TEST_NODE ?? "node";
 
 describe("built Node CLI", () => {
   test("compiles and queries through the Agent Core Node SQLite adapter", () => {
     const build = run(["bun", "run", "build"], repoRoot, process.env);
     expect(build.exitCode).toBe(0);
+    expect(fs.readFileSync(builtCli, "utf8").split(/\r?\n/, 1)[0]).toBe(
+      "#!/usr/bin/env node"
+    );
 
     const cwd = copyFixture(mockApp);
     const env = {
       ...process.env,
       ASDF_NODEJS_VERSION: process.env.ASDF_NODEJS_VERSION ?? localNodeVersion()
     };
-    const compile = run([builtCli, "compile"], cwd, env);
+    const compile = run([nodeExecutable, builtCli, "compile"], cwd, env);
 
     expect(compile.exitCode).toBe(0);
     expect(compile.stdout).toContain("Agent Memory compiled.");
     expect(compile.stderr).not.toContain("ExperimentalWarning");
 
-    const query = run([builtCli, "query", "oauth", "--json"], cwd, env);
+    const query = run(
+      [nodeExecutable, builtCli, "query", "oauth", "--json"],
+      cwd,
+      env
+    );
     const parsed = JSON.parse(query.stdout);
 
     expect(query.exitCode).toBe(0);
@@ -35,8 +43,8 @@ describe("built Node CLI", () => {
     ).toBe(true);
     expect(query.stderr).not.toContain("ExperimentalWarning");
 
-    const help = run([builtCli, "help"], cwd, env);
-    const version = run([builtCli, "--version"], cwd, env);
+    const help = run([nodeExecutable, builtCli, "help"], cwd, env);
+    const version = run([nodeExecutable, builtCli, "--version"], cwd, env);
     expect(help.exitCode).toBe(0);
     expect(help.stdout).toContain("agent-memory");
     expect(version.exitCode).toBe(0);
