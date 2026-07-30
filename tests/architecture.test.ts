@@ -11,12 +11,17 @@ describe("standalone Agent Memory architecture", () => {
       bin?: Record<string, string>;
       dependencies?: Record<string, string>;
       engines?: { node?: string };
+      repository?: { type?: string; url?: string };
       workspaces?: string[];
     };
 
     expect(packageJson.name).toBe("@jurgen1c/agent-memory-cli");
     expect(packageJson.bin).toEqual({
-      "agent-memory": "./dist/agent-memory.js"
+      "agent-memory": "dist/agent-memory.js"
+    });
+    expect(packageJson.repository).toEqual({
+      type: "git",
+      url: "git+https://github.com/jurgen1c/agent_memory.git"
     });
     expect(packageJson.dependencies?.["@jurgen1c/agent-core"]).toBe("^0.1.0");
     expect(packageJson.engines?.node).toBe(">=25.9.0");

@@ -120,6 +120,24 @@ console.log("Agent Memory tarball smoke test passed.");
     "--ignore-scripts",
     ...installTargets
   ], consumerRoot);
+  const installedManifest = JSON.parse(
+    fs.readFileSync(
+      path.join(
+        consumerRoot,
+        "node_modules",
+        "@jurgen1c",
+        "agent-memory-cli",
+        "package.json"
+      ),
+      "utf8"
+    )
+  );
+  if (installedManifest.bin?.["agent-memory"] !== "dist/agent-memory.js") {
+    fail("Installed package manifest is missing the agent-memory binary.");
+  }
+  if (!fs.existsSync(path.join(consumerRoot, "node_modules", ".bin", "agent-memory"))) {
+    fail("Installed package did not link the agent-memory binary.");
+  }
   run("npm", ["audit", "--audit-level", "moderate"], consumerRoot);
   run(process.execPath, ["smoke.mjs"], consumerRoot);
 
