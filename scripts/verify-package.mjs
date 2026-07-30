@@ -102,7 +102,7 @@ const binary = path.join(
 );
 for (const args of [["help"], ["--version"]]) {
   const result = spawnSync(process.execPath, [binary, ...args], { encoding: "utf8" });
-  if (result.status !== 0 || !result.stdout.includes(args[0] === "help" ? "agent-memory" : "0.3.0")) {
+  if (result.status !== 0 || !result.stdout.includes(args[0] === "help" ? "agent-memory" : ${JSON.stringify(`agent-memory ${packedPackage.version}`)})) {
     throw new Error(\`Agent Memory binary smoke test failed for \${args.join(" ")}: \${result.stderr}\`);
   }
 }

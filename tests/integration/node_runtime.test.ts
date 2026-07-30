@@ -7,6 +7,11 @@ const repoRoot = path.resolve(".");
 const mockApp = path.join(repoRoot, "examples/mock-app");
 const builtCli = path.join(repoRoot, "dist/agent-memory.js");
 const nodeExecutable = process.env.AGENT_TEST_NODE ?? "node";
+const packageVersion = (
+  JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")) as {
+    version: string;
+  }
+).version;
 
 describe("built Node CLI", () => {
   test("compiles and queries through the Agent Core Node SQLite adapter", () => {
@@ -48,7 +53,7 @@ describe("built Node CLI", () => {
     expect(help.exitCode).toBe(0);
     expect(help.stdout).toContain("agent-memory");
     expect(version.exitCode).toBe(0);
-    expect(version.stdout).toContain("agent-memory 0.3.0");
+    expect(version.stdout).toBe(`agent-memory ${packageVersion}\n`);
   }, 120000);
 });
 
