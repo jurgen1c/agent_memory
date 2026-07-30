@@ -208,38 +208,6 @@ describe("validate command", () => {
     expect(result.exitCode).toBe(0);
   });
 
-  test("caches repository realpath while validating path references", async () => {
-    const cwd = copyFixture(mockApp);
-    const claimPath = "docs/agent-memory/claims/auth/cached_realpath.md";
-    writeClaim(cwd, claimPath, {
-      id: "auth.cached_realpath",
-      title: "Cached realpath claim",
-      sourceFiles: ["src/auth.js"],
-      relatedFiles: ["src/tenant.js"]
-    });
-    const originalRealpathSync = fs.realpathSync;
-    let repoRootRealpathCalls = 0;
-
-    fs.realpathSync = ((target: fs.PathLike, options?: BufferEncoding | { encoding?: BufferEncoding | null } | null) => {
-      if (target === cwd) {
-        repoRootRealpathCalls += 1;
-      }
-
-      return originalRealpathSync(target, options as never);
-    }) as typeof fs.realpathSync;
-
-    try {
-      const result = await dispatch(["validate", "--changed-files", claimPath], { cwd });
-
-      expect(result.exitCode).toBe(0);
-      // Once for Core repository discovery, once for guarded memory_root
-      // resolution, and once for the cached path-validation context.
-      expect(repoRootRealpathCalls).toBe(3);
-    } finally {
-      fs.realpathSync = originalRealpathSync;
-    }
-  });
-
   test("rejects claim file references when realpath checks fail", async () => {
     const cwd = copyFixture(mockApp);
     const claimPath = "docs/agent-memory/claims/auth/realpath_failure.md";

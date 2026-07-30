@@ -36,6 +36,69 @@ describe("migrate-docs command", () => {
     expect(validate.exitCode).toBe(0);
   });
 
+  test("plans and creates drafts when a repo-local memory root does not exist yet", async () => {
+    const repoRoot = await initializedRepoWithLegacyDocs();
+    const memoryRoot = path.join(repoRoot, "custom/memory");
+    updateMemoryRoot(repoRoot, "custom/memory");
+
+    const plan = await dispatch(["migrate-docs", "--from", "docs/legacy", "--system", "auth"], {
+      cwd: repoRoot
+    });
+
+    expect(plan.exitCode).toBe(0);
+    expect(fs.existsSync(memoryRoot)).toBe(false);
+
+    const automatic = await dispatch(
+      ["migrate-docs", "--from", "docs/legacy", "--system", "auth", "--automatic"],
+      { cwd: repoRoot }
+    );
+
+    expect(automatic.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(memoryRoot, "claims/auth/migrated_student_oauth_legacy_behavior.md"))).toBe(true);
+  });
+
+  test("plans and creates drafts when an absolute external memory root does not exist yet", async () => {
+    const repoRoot = await initializedRepoWithLegacyDocs();
+    const externalParent = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-external-root-"));
+    const memoryRoot = path.join(externalParent, "not-created");
+    updateMemoryRoot(repoRoot, memoryRoot);
+
+    const plan = await dispatch(["migrate-docs", "--from", "docs/legacy", "--system", "auth"], {
+      cwd: repoRoot
+    });
+
+    expect(plan.exitCode).toBe(0);
+    expect(fs.existsSync(memoryRoot)).toBe(false);
+
+    const automatic = await dispatch(
+      ["migrate-docs", "--from", "docs/legacy", "--system", "auth", "--automatic"],
+      { cwd: repoRoot }
+    );
+
+    expect(automatic.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(memoryRoot, "claims/auth/migrated_student_oauth_legacy_behavior.md"))).toBe(true);
+  });
+
+  test("rejects draft targets that escape an existing memory root through a symlink", async () => {
+    const repoRoot = await initializedRepoWithLegacyDocs();
+    const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-draft-outside-"));
+    const linkedSystemRoot = path.join(repoRoot, "docs/agent-memory/claims/auth");
+    fs.symlinkSync(outsideRoot, linkedSystemRoot, "dir");
+    let stderr = "";
+
+    const result = await runCli(
+      ["migrate-docs", "--from", "docs/legacy", "--system", "auth", "--automatic"],
+      quietStreams((chunk) => {
+        stderr += chunk;
+      }),
+      { cwd: repoRoot }
+    );
+
+    expect(result).toBe(1);
+    expect(stderr).toContain("Migration target must stay inside the configured memory root");
+    expect(fs.readdirSync(outsideRoot)).toEqual([]);
+  });
+
   test("deduplicates migrated docs with the same heading", async () => {
     const repoRoot = makeGitRepo();
     const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
@@ -332,6 +395,21 @@ mappings:
     expect(externalAutomatic).toBe(1);
     expect(stderr).toContain("Automatic migration requires --from to point inside the repository");
 
+    const linkedExternalRoot = path.join(repoRoot, "docs/linked-external");
+    fs.mkdirSync(path.dirname(linkedExternalRoot), { recursive: true });
+    fs.symlinkSync(externalRoot, linkedExternalRoot, "dir");
+    stderr = "";
+    const linkedExternalAutomatic = await runCli(
+      ["migrate-docs", "--from", "docs/linked-external", "--system", "auth", "--automatic"],
+      quietStreams((chunk) => {
+        stderr += chunk;
+      }),
+      { cwd: repoRoot }
+    );
+
+    expect(linkedExternalAutomatic).toBe(1);
+    expect(stderr).toContain("Automatic migration requires --from to point inside the repository");
+
     const mapPath = path.join(repoRoot, ".agent-memory/migrations/external.yaml");
     fs.mkdirSync(path.dirname(mapPath), { recursive: true });
     fs.writeFileSync(
@@ -373,6 +451,15 @@ Student OAuth identity resolution historically depended on tenant context and pr
 `
   );
   return repoRoot;
+}
+
+function updateMemoryRoot(repoRoot: string, memoryRoot: string): void {
+  const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+  const config = fs.readFileSync(configPath, "utf8");
+  fs.writeFileSync(
+    configPath,
+    config.replace(/^memory_root:.*$/m, `memory_root: ${JSON.stringify(memoryRoot)}`)
+  );
 }
 
 function makeGitRepo(): string {

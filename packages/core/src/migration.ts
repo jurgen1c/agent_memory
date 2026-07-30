@@ -1,9 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
+import {
+  isPathInside,
+  nearestExistingAncestor,
+  resolveContainedPath
+} from "@jurgen1c/agent-core/repository";
 import { loadConfig, renderYamlScalar } from "./config";
 import { AgentMemoryError } from "./errors";
 import { resolveConfiguredPath, toPosix } from "./files";
-import { isPathInside, resolveRepoOutputPath } from "./repo";
+import { resolveRepoOutputPath } from "./repo";
 import { parseYaml } from "./yaml";
 
 export type MigrationMode = "plan" | "automatic";
@@ -142,7 +147,7 @@ export function migrateDocs(options: MigrateDocsOptions): MigrateDocsResult {
     throw new AgentMemoryError(`Migration source does not exist: ${sourceRoot}`);
   }
 
-  if (mode === "automatic" && !isPathInside(repoRoot, sourceRoot)) {
+  if (mode === "automatic" && !isContainedPath(repoRoot, sourceRoot)) {
     throw new AgentMemoryError("Automatic migration requires --from to point inside the repository.", {
       details: ["Use plan mode for external docs, then copy source docs into the repo before automatic migration."]
     });
@@ -237,7 +242,7 @@ export function migrateDocsFromSystemMap(options: MigrateDocsSystemMapOptions): 
   if (mode === "automatic") {
     for (const mapping of systemMap.mappings) {
       const absoluteSource = resolveSourceRoot(repoRoot, mapping.source);
-      if (!isPathInside(repoRoot, absoluteSource)) {
+      if (!isContainedPath(repoRoot, absoluteSource)) {
         throw new AgentMemoryError("Automatic migration requires system-map sources to point inside the repository.", {
           details: [`Move or copy external source before migrating automatically: ${mapping.source}`]
         });
@@ -637,10 +642,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function assertInsideMemoryRoot(memoryRoot: string, absoluteTarget: string): void {
-  const relativePath = path.relative(path.resolve(memoryRoot), path.resolve(absoluteTarget));
+  const resolvedMemoryRoot = path.resolve(memoryRoot);
+  const resolvedTarget = path.resolve(absoluteTarget);
+  const containmentRoot = nearestExistingAncestor(resolvedMemoryRoot);
 
-  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+  if (
+    !isPathInside(resolvedMemoryRoot, resolvedTarget)
+    || containmentRoot === null
+    || !isContainedPath(containmentRoot, resolvedTarget)
+  ) {
     throw new AgentMemoryError("Migration target must stay inside the configured memory root.");
+  }
+}
+
+function isContainedPath(rootPath: string, candidatePath: string): boolean {
+  try {
+    resolveContainedPath(rootPath, candidatePath);
+    return true;
+  } catch {
+    return false;
   }
 }
 

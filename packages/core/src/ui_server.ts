@@ -3,6 +3,10 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  PathContainmentError,
+  resolveContainedPath
+} from "@jurgen1c/agent-core/repository";
 import { AgentMemoryError, formatError, toAgentMemoryError } from "./errors";
 import {
   buildUiMemoryModel,
@@ -506,21 +510,32 @@ function resolveStaticFile(
 ): { status: 200; filePath: string } | { status: 403 | 404 } {
   const root = path.resolve(staticRoot);
   const safePath = requestPath === "/" ? "index.html" : requestPath.replace(/^\/+/, "");
-  const absolutePath = path.resolve(root, safePath);
-  const relative = path.relative(root, absolutePath);
-  const fallbackPath = path.join(root, "index.html");
+  let absolutePath: string;
 
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    return { status: 403 };
+  try {
+    absolutePath = resolveContainedPath(root, safePath, {
+      rejectFinalSymlink: true
+    }).absolutePath;
+  } catch (error) {
+    if (!(error instanceof PathContainmentError)) throw error;
+    return { status: error.reason === "root_missing" ? 404 : 403 };
   }
 
-  const filePath = fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile() ? absolutePath : fallbackPath;
-
-  if (!fs.existsSync(filePath)) {
-    return { status: 404 };
+  if (fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile()) {
+    return { status: 200, filePath: absolutePath };
   }
 
-  return { status: 200, filePath };
+  try {
+    const fallbackPath = resolveContainedPath(root, "index.html", {
+      rejectFinalSymlink: true
+    }).absolutePath;
+    return fs.existsSync(fallbackPath)
+      ? { status: 200, filePath: fallbackPath }
+      : { status: 404 };
+  } catch (error) {
+    if (!(error instanceof PathContainmentError)) throw error;
+    return { status: error.reason === "root_missing" ? 404 : 403 };
+  }
 }
 
 function contentType(filePath: string): string {
