@@ -29,6 +29,7 @@ describe("init command", () => {
       "AGENTS.md",
       ".codex/skills/repo-memory/SKILL.md",
       ".codex/skills/repo-memory/references/claims.md",
+      ".codex/skills/repo-memory/references/memory-worthiness.md",
       ".codex/skills/repo-memory/references/contextual-workflows.md",
       ".codex/skills/repo-memory/references/recipes.md",
       ".codex/skills/repo-memory/references/plans.md",
@@ -61,6 +62,10 @@ describe("init command", () => {
     expect(agents).toContain("Plan templates for reusable multi-stage workflows");
     expect(agents).toContain("Profile traits for reusable retrieval/output/verification/risk/scope guidance.");
     expect(agents).toContain("Waivers for intentional coverage exceptions with a reason and expiration.");
+    expect(agents).toContain("### Memory-Worthiness Gate");
+    expect(agents).toContain("A new claim should normally satisfy at least four");
+    expect(agents).toContain("Do not create a claim merely because code changed or coverage reported a gap");
+    expect(agents).toContain("Allowed claim sources: all repository paths");
     const wrapper = fs.readFileSync(path.join(repoRoot, "bin/memory"), "utf8");
     expect(wrapper).toContain('LOCAL_CLI="${REPO_ROOT}/node_modules/.bin/agent-memory"');
     expect(wrapper).toContain("exec npx -y @jurgen1c/agent-memory-cli");
@@ -99,6 +104,98 @@ Keep this footer too.
     expect(agents).toContain("Keep this footer too.");
     expect(agents).toContain("## Agent Memory Knowledge Base");
     expect(agents).not.toContain("## Old Agent Memory Section");
+  });
+
+  test("writes the managed section to a configured instruction file", async () => {
+    const repoRoot = makeGitRepo();
+    const instructionsPath = path.join(repoRoot, "CLAUDE.md");
+    fs.writeFileSync(instructionsPath, "# Claude Instructions\n\nKeep local Claude guidance.\n");
+
+    const first = await dispatch(["init", "--yes", "--instructions-file", "CLAUDE.md"], { cwd: repoRoot });
+    const firstInstructions = fs.readFileSync(instructionsPath, "utf8");
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(first.exitCode).toBe(0);
+    expect(first.stdout).toContain("CLAUDE.md");
+    expect(config.agent_instructions.paths).toEqual(["CLAUDE.md"]);
+    expect(firstInstructions).toContain("Keep local Claude guidance.");
+    expect(firstInstructions).toContain("<!-- agent-memory:start -->");
+    expect(fs.existsSync(path.join(repoRoot, "AGENTS.md"))).toBe(false);
+
+    const second = await dispatch(["init", "--yes"], { cwd: repoRoot });
+
+    expect(second.exitCode).toBe(0);
+    expect(fs.readFileSync(instructionsPath, "utf8")).toBe(firstInstructions);
+    expect(fs.existsSync(path.join(repoRoot, "AGENTS.md"))).toBe(false);
+  });
+
+  test("writes the managed section to multiple configured instruction files", async () => {
+    const repoRoot = makeGitRepo();
+    fs.writeFileSync(path.join(repoRoot, "AGENTS.md"), "# Agent Instructions\n\nKeep shared guidance.\n");
+    fs.writeFileSync(path.join(repoRoot, "CLAUDE.md"), "# Claude Instructions\n\nKeep Claude guidance.\n");
+
+    const result = await dispatch(
+      ["init", "--yes", "--instructions-file", "AGENTS.md", "--instructions-file=CLAUDE.md"],
+      { cwd: repoRoot }
+    );
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(result.exitCode).toBe(0);
+    expect(config.agent_instructions.paths).toEqual(["AGENTS.md", "CLAUDE.md"]);
+    expect(fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")).toContain("Keep shared guidance.");
+    expect(fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")).toContain("<!-- agent-memory:start -->");
+    expect(fs.readFileSync(path.join(repoRoot, "CLAUDE.md"), "utf8")).toContain("Keep Claude guidance.");
+    expect(fs.readFileSync(path.join(repoRoot, "CLAUDE.md"), "utf8")).toContain("<!-- agent-memory:start -->");
+
+    const second = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    expect(second.exitCode).toBe(0);
+    expect(loadConfig({ repoRoot }).config.agent_instructions.paths).toEqual(["AGENTS.md", "CLAUDE.md"]);
+  });
+
+  test("persists changed instruction targets when init is repeated without force", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+    const existingConfig = fs.readFileSync(configPath, "utf8");
+    fs.writeFileSync(configPath, `# Keep this local config comment.\n${existingConfig}\nlocal_extension: keep\n`);
+
+    const repeated = await dispatch(["init", "--yes", "--instructions-file", "CLAUDE.md"], { cwd: repoRoot });
+    const updatedConfig = fs.readFileSync(configPath, "utf8");
+
+    expect(repeated.exitCode).toBe(0);
+    expect(repeated.stdout).toContain("updated managed instruction paths");
+    expect(loadConfig({ repoRoot }).config.agent_instructions.paths).toEqual(["CLAUDE.md"]);
+    expect(updatedConfig).toContain("# Keep this local config comment.");
+    expect(updatedConfig).toContain("local_extension: keep");
+
+    const idempotent = await dispatch(["init", "--yes", "--instructions-file", "CLAUDE.md"], { cwd: repoRoot });
+    expect(idempotent.exitCode).toBe(0);
+    expect(fs.readFileSync(configPath, "utf8")).toBe(updatedConfig);
+
+    const claudePath = path.join(repoRoot, "CLAUDE.md");
+    fs.writeFileSync(
+      claudePath,
+      fs.readFileSync(claudePath, "utf8").replace("### Memory-Worthiness Gate", "### Outdated Memory Gate")
+    );
+    const upgrade = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(upgrade.exitCode).toBe(0);
+    expect(fs.readFileSync(claudePath, "utf8")).toContain("### Memory-Worthiness Gate");
+    expect(fs.readFileSync(claudePath, "utf8")).not.toContain("### Outdated Memory Gate");
+  });
+
+  test("rejects instruction files outside the repository", async () => {
+    const repoRoot = makeGitRepo();
+    const outsideRelativePath = `../${path.basename(repoRoot)}-outside-instructions.md`;
+
+    await expect(dispatch(["init", "--yes", "--instructions-file", outsideRelativePath], { cwd: repoRoot })).rejects.toThrow(
+      "Relative output path escapes repository root"
+    );
+    await expect(dispatch(["init", "--yes", "--instructions-file", "/tmp/CLAUDE.md"], { cwd: repoRoot })).rejects.toThrow(
+      "must be a repository-relative path"
+    );
+
+    expect(fs.existsSync(path.join(repoRoot, "agent-memory.config.yaml"))).toBe(false);
   });
 
   test("preserves user whitespace around refreshed AGENTS sections", async () => {

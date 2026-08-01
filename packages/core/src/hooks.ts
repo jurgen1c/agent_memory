@@ -1,6 +1,6 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { runGit } from "./git";
 import { findRepoRoot } from "./repo";
 import type { RepoInfo } from "./types";
 
@@ -49,11 +49,7 @@ export function installMemoryHooks(options: HookInstallOptions = {}): HookInstal
 
 function resolveGitHookPath(repoRoot: string, hookName: string): { absolutePath: string; actionPath: string } | null {
   try {
-    const output = execFileSync("git", ["rev-parse", "--git-path", `hooks/${hookName}`], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
-    }).trim();
+    const output = runGit(repoRoot, ["rev-parse", "--git-path", `hooks/${hookName}`]);
     const absolutePath = path.isAbsolute(output) ? path.normalize(output) : path.resolve(repoRoot, output);
     const relativePath = path.relative(repoRoot, absolutePath);
 

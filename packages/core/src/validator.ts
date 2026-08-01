@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolveContainedPath } from "@jurgen1c/agent-core/repository";
 import { normalizeChangedFiles } from "./changes";
+import { describeClaimSourcePolicyDecision, evaluateClaimSourcePath } from "./claim_sources";
 import { ConfigError } from "./errors";
 import { loadConfig } from "./config";
 import { discoverFiles, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
@@ -55,6 +56,7 @@ interface LoadedClaim {
   path: string;
   relativePath: string;
   raw: Record<string, unknown>;
+  body: string;
 }
 
 interface LoadedRecipe {
@@ -159,7 +161,7 @@ export function validateRepository(options: ValidateRepositoryOptions = {}): Val
   const planFiles = scoped && !deletedClaimChanged ? selectChangedFiles(allPlanFiles, changedFiles, repoRoot) : allPlanFiles;
   const profileFiles = scoped ? selectChangedFiles(allProfileFiles, changedFiles, repoRoot) : allProfileFiles;
 
-  const claims = loadClaims(pathContext, memoryRoot, claimFiles, loaded.config.validation, issues);
+  const claims = loadClaims(pathContext, memoryRoot, claimFiles, loaded.config.validation, loaded.config.claim_sources, issues);
   const recipes = loadRecipes(memoryRoot, recipeFiles, issues);
   const plans = loadPlans(memoryRoot, planFiles, pathContext, issues);
   const profiles = loadProfiles(memoryRoot, profileFiles, issues);
@@ -209,6 +211,7 @@ function loadClaims(
   memoryRoot: string,
   files: string[],
   validationConfig: ValidationConfig,
+  claimSourcePolicy: AgentMemoryConfig["claim_sources"],
   issues: ValidationIssue[]
 ): LoadedClaim[] {
   const claims: LoadedClaim[] = [];
@@ -225,13 +228,13 @@ function loadClaims(
       }
 
       validateOneClaimPerFile(markdown.frontmatterRaw, markdown.body, relativePath, validationConfig, issues);
-      const claim = normalizeClaim(markdown.frontmatter, relativePath, issues);
+      const claim = normalizeClaim(markdown.frontmatter, markdown.body, relativePath, issues);
 
       if (!claim) {
         continue;
       }
 
-      validateClaimFields(claim, pathContext, validationConfig, issues);
+      validateClaimFields(claim, pathContext, validationConfig, claimSourcePolicy, issues);
       claims.push({ ...claim, path: filePath });
     } catch (error) {
       addError(issues, "claim.parse", formatCaughtError(error), relativePath);
@@ -291,11 +294,17 @@ function normalizeClaimReference(raw: Record<string, unknown>, filePath: string,
     tags: [],
     path: filePath,
     relativePath,
-    raw
+    raw,
+    body: ""
   };
 }
 
-function normalizeClaim(raw: Record<string, unknown>, relativePath: string, issues: ValidationIssue[]): LoadedClaim | null {
+function normalizeClaim(
+  raw: Record<string, unknown>,
+  body: string,
+  relativePath: string,
+  issues: ValidationIssue[]
+): LoadedClaim | null {
   const requiredStrings = ["id", "type", "system", "status", "confidence", "severity", "title", "claim"] as const;
   const missing = requiredStrings.filter((field) => typeof raw[field] !== "string" || String(raw[field]).trim().length === 0);
 
@@ -322,7 +331,8 @@ function normalizeClaim(raw: Record<string, unknown>, relativePath: string, issu
     tags,
     path: "",
     relativePath,
-    raw
+    raw,
+    body
   };
 }
 
@@ -330,6 +340,7 @@ function validateClaimFields(
   claim: LoadedClaim,
   pathContext: RepoPathValidationContext,
   validationConfig: Pick<ValidationConfig, "require_source_files" | "require_verification">,
+  claimSourcePolicy: AgentMemoryConfig["claim_sources"],
   issues: ValidationIssue[]
 ): void {
   if (!CLAIM_TYPES.includes(claim.type as never)) {
@@ -364,8 +375,84 @@ function validateClaimFields(
     }
   }
 
+  if (claim.status === "current") {
+    const placeholderFields = new Set(
+      Object.entries(claim.raw)
+        .filter(([, value]) => valueContainsPlaceholder(value))
+        .map(([field]) => field)
+    );
+
+    if (containsPlaceholder(claim.body)) {
+      placeholderFields.add("body");
+    }
+
+    for (const field of placeholderFields) {
+      addError(
+        issues,
+        `claim.${field}.placeholder`,
+        `Current claim ${field} must not contain TODO placeholders. Keep unfinished claims in needs_review status.`,
+        claim.relativePath,
+        claim.id
+      );
+    }
+  }
+
+  const lastVerifiedCommit = claim.raw.last_verified_commit;
+
+  if (
+    lastVerifiedCommit !== undefined &&
+    lastVerifiedCommit !== null &&
+    (typeof lastVerifiedCommit !== "string" || lastVerifiedCommit.trim().length === 0)
+  ) {
+    addError(
+      issues,
+      "claim.last_verified_commit.invalid",
+      "last_verified_commit must be a non-empty Git commit reference or null.",
+      claim.relativePath,
+      claim.id
+    );
+  }
+
+  if (
+    claim.confidence === "verified" &&
+    (typeof lastVerifiedCommit !== "string" || lastVerifiedCommit.trim().length === 0)
+  ) {
+    addError(
+      issues,
+      "claim.last_verified_commit.required",
+      "Verified confidence requires last_verified_commit.",
+      claim.relativePath,
+      claim.id
+    );
+  }
+
   validateRepoPathReferences(claim.sourceFiles, "claim.source_files", pathContext, claim.relativePath, claim.id, true, issues);
   validateRepoPathReferences(claim.relatedFiles, "claim.related_files", pathContext, claim.relativePath, claim.id, true, issues);
+  validateClaimSourcePolicy(claim.sourceFiles, "claim.source_files", claimSourcePolicy, claim.relativePath, claim.id, issues);
+  validateClaimSourcePolicy(claim.relatedFiles, "claim.related_files", claimSourcePolicy, claim.relativePath, claim.id, issues);
+}
+
+function validateClaimSourcePolicy(
+  references: string[],
+  fieldCode: "claim.source_files" | "claim.related_files",
+  policy: AgentMemoryConfig["claim_sources"],
+  relativePath: string,
+  id: string,
+  issues: ValidationIssue[]
+): void {
+  for (const reference of references) {
+    const decision = evaluateClaimSourcePath(reference, policy);
+
+    if (!decision.eligible) {
+      addError(
+        issues,
+        `${fieldCode}.${decision.reason}`,
+        describeClaimSourcePolicyDecision(reference, decision),
+        relativePath,
+        id
+      );
+    }
+  }
 }
 
 function validateOneClaimPerFile(
@@ -647,6 +734,19 @@ function loadRecipes(memoryRoot: string, files: string[], issues: ValidationIssu
 
     if (typeof artifact.data.status === "string" && !CLAIM_STATUSES.includes(artifact.data.status)) {
       addError(issues, "recipe.status", `Invalid recipe status: ${artifact.data.status}`, artifact.relativePath);
+    }
+
+    if (artifact.data.status === "current") {
+      for (const [field, value] of Object.entries(artifact.data)) {
+        if (valueContainsPlaceholder(value)) {
+          addError(
+            issues,
+            `recipe.${field}.placeholder`,
+            `Current recipe ${field} must not contain TODO placeholders. Keep unfinished recipes in needs_review status.`,
+            artifact.relativePath
+          );
+        }
+      }
     }
 
     if (typeof artifact.data.id !== "string" || typeof artifact.data.status !== "string") {
@@ -1165,6 +1265,26 @@ function readOptionalStringArray(data: Record<string, unknown>, field: string, r
   }
 
   return readStringArray(data, field, relativePath, issues);
+}
+
+function containsPlaceholder(value: string): boolean {
+  return /\bTODO(?:_|:|\s+-)/i.test(value);
+}
+
+function valueContainsPlaceholder(value: unknown): boolean {
+  if (typeof value === "string") {
+    return containsPlaceholder(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.some(valueContainsPlaceholder);
+  }
+
+  if (isRecord(value)) {
+    return Object.values(value).some(valueContainsPlaceholder);
+  }
+
+  return false;
 }
 
 function addError(issues: ValidationIssue[], code: string, message: string, filePath?: string, id?: string): void {

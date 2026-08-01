@@ -1,10 +1,13 @@
-import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { AgentMemoryError } from "./errors";
 import { toPosix } from "./files";
+import { GitCommandError, runGit } from "./git";
 
 export interface GitDiffOptions {
   baseRef?: string;
   includeCommittedFallback?: boolean;
+  gitBinary?: string;
+  timeoutMs?: number;
 }
 
 export interface GitDiffSelection {
@@ -16,17 +19,35 @@ export function readGitDiffSelection(repoRoot: string, options: GitDiffOptions =
   const files = new Set<string>();
   const trackedFiles = new Set<string>();
   let usedCommittedFallback = false;
+  assertGitWorkTree(repoRoot, options);
+  const hasHead = gitHeadExists(repoRoot, options);
 
   if (options.baseRef) {
-    addGitFiles(files, repoRoot, ["diff", "--name-only", `${options.baseRef}...HEAD`], trackedFiles);
+    addRequiredGitFiles(
+      files,
+      repoRoot,
+      ["diff", "--name-only", `${options.baseRef}...HEAD`],
+      options,
+      trackedFiles,
+      `Could not read Git diff for base ref ${options.baseRef}.`
+    );
   }
 
-  addGitFiles(files, repoRoot, ["diff", "--name-only", "HEAD"], trackedFiles);
-  addGitFiles(files, repoRoot, ["diff", "--cached", "--name-only"], trackedFiles);
-  addGitFiles(files, repoRoot, ["ls-files", "--others", "--exclude-standard"]);
+  if (hasHead) {
+    addRequiredGitFiles(files, repoRoot, ["diff", "--name-only", "HEAD"], options, trackedFiles);
+  }
 
-  if (trackedFiles.size === 0 && options.includeCommittedFallback && !options.baseRef) {
-    addGitFiles(files, repoRoot, ["diff", "--name-only", "HEAD~1", "HEAD"]);
+  addRequiredGitFiles(files, repoRoot, ["diff", "--cached", "--name-only"], options, trackedFiles);
+  addRequiredGitFiles(files, repoRoot, ["ls-files", "--others", "--exclude-standard"], options);
+
+  if (
+    trackedFiles.size === 0 &&
+    options.includeCommittedFallback &&
+    !options.baseRef &&
+    hasHead &&
+    gitHeadHasParent(repoRoot, options)
+  ) {
+    addRequiredGitFiles(files, repoRoot, ["diff", "--name-only", "HEAD~1", "HEAD"], options);
     usedCommittedFallback = true;
   }
 
@@ -52,13 +73,16 @@ export function normalizeChangedFiles(files: string[], repoRoot: string): string
     .filter((file) => file.length > 0 && file !== ".");
 }
 
-function addGitFiles(files: Set<string>, repoRoot: string, args: string[], trackedFiles?: Set<string>): void {
+function addRequiredGitFiles(
+  files: Set<string>,
+  repoRoot: string,
+  args: string[],
+  options: GitDiffOptions,
+  trackedFiles?: Set<string>,
+  message = "Could not inspect Git changes."
+): void {
   try {
-    const output = execFileSync("git", args, {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
-    });
+    const output = runGit(repoRoot, args, gitCommandOptions(options));
 
     for (const line of output.split(/\r?\n/)) {
       const file = line.trim();
@@ -69,7 +93,66 @@ function addGitFiles(files: Set<string>, repoRoot: string, args: string[], track
         trackedFiles?.add(normalized);
       }
     }
-  } catch {
-    // Repos without matching refs can still pass explicit --changed-files.
+  } catch (error) {
+    throw new AgentMemoryError(message, {
+      details: [formatGitFailure(error)]
+    });
   }
+}
+
+function assertGitWorkTree(repoRoot: string, options: GitDiffOptions): void {
+  try {
+    const result = runGit(repoRoot, ["rev-parse", "--is-inside-work-tree"], gitCommandOptions(options));
+
+    if (result !== "true") {
+      throw new Error("Git did not report a working tree.");
+    }
+  } catch (error) {
+    throw new AgentMemoryError("Could not inspect Git changes.", {
+      details: [formatGitFailure(error)]
+    });
+  }
+}
+
+function gitHeadExists(repoRoot: string, options: GitDiffOptions): boolean {
+  try {
+    runGit(repoRoot, ["rev-parse", "--verify", "HEAD^{commit}"], gitCommandOptions(options));
+    return true;
+  } catch (error) {
+    if (error instanceof GitCommandError && !error.timedOut && error.status === 128) {
+      return false;
+    }
+
+    throw new AgentMemoryError("Could not inspect Git revision HEAD.", {
+      details: [formatGitFailure(error)]
+    });
+  }
+}
+
+function gitHeadHasParent(repoRoot: string, options: GitDiffOptions): boolean {
+  try {
+    const output = runGit(repoRoot, ["rev-list", "--parents", "-n", "1", "HEAD"], gitCommandOptions(options));
+    const revisions = output.split(/\s+/).filter((revision) => revision.length > 0);
+
+    if (revisions.length === 0) {
+      throw new Error("Git returned no revision for HEAD.");
+    }
+
+    return revisions.length > 1;
+  } catch (error) {
+    throw new AgentMemoryError("Could not inspect Git revision HEAD.", {
+      details: [formatGitFailure(error)]
+    });
+  }
+}
+
+function gitCommandOptions(options: GitDiffOptions): { gitBinary?: string; timeoutMs?: number } {
+  return {
+    gitBinary: options.gitBinary,
+    timeoutMs: options.timeoutMs
+  };
+}
+
+function formatGitFailure(error: unknown): string {
+  return error instanceof Error ? error.message : "Git command failed without an error message.";
 }

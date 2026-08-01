@@ -37,6 +37,16 @@ agent_skills:
     enabled: false
     path: docs/agent-memory/AGENT_SKILL.md
 
+agent_instructions:
+  path: CLAUDE.md
+
+claim_sources:
+  allow:
+    - app/**
+    - config/routes.rb
+  deny:
+    - app/generated/**
+
 context:
   default_budget: full
   default_depth: 2
@@ -49,7 +59,10 @@ context:
     expect(loaded.config.claims).toEqual(["claims/**/*.md"]);
     expect(loaded.config.plans).toEqual(["plans/**/*.yaml"]);
     expect(loaded.config.profiles).toEqual(["profiles/**/*.yaml"]);
+    expect(loaded.config.agent_instructions.paths).toEqual(["CLAUDE.md"]);
     expect(loaded.config.agent_skills.generic.enabled).toBe(false);
+    expect(loaded.config.claim_sources.allow).toEqual(["app/**", "config/routes.rb"]);
+    expect(loaded.config.claim_sources.deny).toEqual(["app/generated/**"]);
     expect(loaded.config.context.default_budget).toBe("full");
     expect(loaded.config.context.default_depth).toBe(2);
     expect(loaded.config.context.recipe_match_limit).toBe(3);
@@ -121,6 +134,9 @@ context:
     config.claims = ["null", "**/*.md", "{claims}/**/*.md", "1.2", "01", "1e3"];
     config.git.hooks = ["~"];
     config.agent_skills.codex.path = "false";
+    config.agent_instructions.paths = ["AGENTS.md", "CLAUDE.md"];
+    config.claim_sources.allow = ["src/**"];
+    config.claim_sources.deny = ["src/generated/**"];
     const rendered = renderConfigTemplate(config);
     const repoRoot = makeTempRepo(rendered);
     const loaded = loadConfig({ repoRoot });
@@ -130,12 +146,17 @@ context:
     expect(rendered).toContain('- "1e3"');
     expect(rendered).toContain("plans:");
     expect(rendered).toContain("profiles:");
+    expect(rendered).toContain("agent_instructions:");
+    expect(rendered).toContain("claim_sources:");
     expect(rendered).toContain("recipe_match_limit: 3");
     expect(loaded.config.memory_root).toBe("true");
     expect(loaded.config.database_path).toBe("123");
     expect(loaded.config.claims).toEqual(["null", "**/*.md", "{claims}/**/*.md", "1.2", "01", "1e3"]);
     expect(loaded.config.git.hooks).toEqual(["~"]);
     expect(loaded.config.agent_skills.codex.path).toBe("false");
+    expect(loaded.config.agent_instructions.paths).toEqual(["AGENTS.md", "CLAUDE.md"]);
+    expect(loaded.config.claim_sources.allow).toEqual(["src/**"]);
+    expect(loaded.config.claim_sources.deny).toEqual(["src/generated/**"]);
   });
 
   test("schema requires contextual workflow path globs", () => {
@@ -143,6 +164,9 @@ context:
 
     expect(schema.required).toContain("plans");
     expect(schema.required).toContain("profiles");
+    expect(schema.properties.agent_instructions.properties.path.type).toBe("string");
+    expect(schema.properties.agent_instructions.properties.paths.items.type).toBe("string");
+    expect(schema.properties.claim_sources.properties.deny.items.type).toBe("string");
   });
 });
 

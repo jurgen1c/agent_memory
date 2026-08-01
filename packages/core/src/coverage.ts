@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
+import { describeClaimSourcePolicyDecision, evaluateClaimSourcePath } from "./claim_sources";
 import { loadConfig } from "./config";
 import { configuredPathRelativeToRepo, discoverFiles, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
 import { parseYaml } from "./yaml";
 import { NotFoundError } from "./errors";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
+import type { AgentMemoryConfig } from "./types";
 
 export type CoverageChangeStatus = "covered" | "waived" | "uncovered" | "ignored";
 
@@ -23,6 +25,7 @@ export interface CoverageChange {
   relatedMemoryFiles: string[];
   changedMemoryFiles: string[];
   waiverIds: string[];
+  ignoreReason?: string;
   remediation?: string;
 }
 
@@ -106,7 +109,17 @@ export async function checkCoverage(options: CoverageOptions = {}): Promise<Cove
     const recipes = loadRecipeCoverageFiles(database);
     const changedFileSet = new Set(changedFiles);
     const changes = changedFiles.map((file) =>
-      coverageForFile(file, changedFileSet, indexes, claims, recipes, waivers, database, memoryRootRelative)
+      coverageForFile(
+        file,
+        changedFileSet,
+        indexes,
+        claims,
+        recipes,
+        waivers,
+        database,
+        memoryRootRelative,
+        loaded.config.claim_sources
+      )
     );
     warnings.push(...workflowCoverageWarnings(repoRoot, changedFiles, changedFileSet, database, memoryRootRelative));
 
@@ -132,8 +145,23 @@ function coverageForFile(
   recipes: RecipeCoverageFile[],
   waivers: CoverageWaiver[],
   database: SqliteDatabase,
-  memoryRootRelative: string
+  memoryRootRelative: string,
+  claimSourcePolicy: AgentMemoryConfig["claim_sources"]
 ): CoverageChange {
+  const sourceDecision = evaluateClaimSourcePath(file, claimSourcePolicy);
+
+  if (!sourceDecision.eligible) {
+    return {
+      path: file,
+      status: "ignored",
+      watchedBy: [],
+      relatedMemoryFiles: [],
+      changedMemoryFiles: [],
+      waiverIds: [],
+      ignoreReason: describeClaimSourcePolicyDecision(file, sourceDecision)
+    };
+  }
+
   const matchingIndexes = indexes.filter((index) => index.watchedFiles.some((pattern) => pathMatchesPattern(pattern, file)));
 
   if (matchingIndexes.length === 0) {
@@ -143,7 +171,8 @@ function coverageForFile(
       watchedBy: [],
       relatedMemoryFiles: [],
       changedMemoryFiles: [],
-      waiverIds: []
+      waiverIds: [],
+      ignoreReason: "File is not watched by a memory index."
     };
   }
 
@@ -183,7 +212,7 @@ function coverageForFile(
     relatedMemoryFiles,
     changedMemoryFiles: [],
     waiverIds: [],
-    remediation: "Update a related claim, index, or recipe in the same change set, or add a valid coverage waiver."
+    remediation: "Review whether durable memory changed. Update an existing claim, index, or recipe when warranted, or add a valid time-boxed waiver; do not create placeholder memory."
   };
 }
 

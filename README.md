@@ -46,7 +46,7 @@ Install the package in a repository that should own its memory:
 npm install --save-dev @jurgen1c/agent-memory-cli
 ```
 
-Initialize memory files, a `bin/memory` wrapper, `AGENTS.md` guidance, and agent instructions:
+Initialize memory files, a `bin/memory` wrapper, repository guidance, and agent skills:
 
 ```bash
 npx agent-memory init --yes --package-manager npm --agent codex --install-hooks
@@ -74,11 +74,11 @@ agent-memory --help
 - `docs/agent-memory/`: canonical memory root with `claims/`, `graph/`, `indexes/`, `recipes/`, `plans/`, `profiles/`, and `waivers/`.
 - `bin/memory`: repository-local wrapper around the installed or globally available CLI.
 - `.gitignore`: adds `.agent-memory/` so generated SQLite stays out of commits.
-- `AGENTS.md`: creates or refreshes a managed Agent Memory section that points agents to the repo-memory skill, requires context lookup before non-trivial work, and requires memory updates when durable knowledge changes.
+- Repository instruction files: creates or refreshes a managed Agent Memory section in `AGENTS.md` by default, or one or more files selected by repeating `--instructions-file`.
 - Agent instructions: installs Codex and generic instructions by default, unless `--agent` narrows the target.
 - Git hooks: installed only when `--install-hooks` is passed.
 
-`init` is safe to rerun. Existing scaffold files are skipped unless `--force` is passed. Existing `AGENTS.md` content is preserved; only the managed `agent-memory` section is appended or refreshed.
+`init` is safe to rerun. Existing scaffold files are skipped unless `--force` is passed. Existing repository instructions are preserved; only the managed `agent-memory` section is appended or refreshed. Selected instruction paths are saved under `agent_instructions.paths` so `upgrade --write` refreshes every configured file. Upgrade migrates the legacy singular `agent_instructions.path` setting.
 
 Init options:
 
@@ -90,8 +90,27 @@ Init options:
 | `--agent codex` | Install only the Codex repo-memory skill. Repeat `--agent` to install multiple targets. |
 | `--agent generic` | Install only the generic agent instruction file. |
 | `--skill-location .agents` | Install the selected agent skill under `.agents/skills/repo-memory/SKILL.md` and write that path to config. Requires exactly one `--agent`. |
+| `--instructions-file CLAUDE.md` | Append managed repository guidance to this file and persist it for upgrades. Repeat the option to manage files such as both `AGENTS.md` and `CLAUDE.md`. |
 | `--install-hooks` | Install non-blocking git hooks that run `bin/memory sync` after checkout, merge, or rewrite. |
 | `--force` | Overwrite existing scaffold files and hooks where supported. |
+
+### Claim Relevance and Source Policy
+
+Generated repository guidance and skills include a memory-worthiness gate. A new claim should normally be repository-specific, future-relevant, durable, consequential if forgotten, and evidence-backed. Agents are told to search existing memory first and not create claims merely because code changed or coverage reported a gap.
+
+Use repo-relative globs to control which files can support claims:
+
+```yaml
+claim_sources:
+  allow:
+    - app/**
+    - config/**
+  deny:
+    - app/generated/**
+    - vendor/**
+```
+
+An empty `allow` list permits every repository path. `deny` always wins. The policy applies to claim `source_files` and `related_files`; excluded changed files are ignored by claim coverage. Existing claims that reference newly excluded paths must be updated or removed before validation and compilation pass.
 
 Compile and check the repository memory:
 
@@ -130,6 +149,7 @@ When behavior changes, add or update memory before finishing:
 
 ```bash
 bin/memory new claim --type fact --system auth --title "Student OAuth UID is tenant scoped"
+bin/memory new recipe --system auth --title "Modify OAuth safely"
 bin/memory validate
 bin/memory compile
 bin/memory coverage --git-diff
@@ -142,10 +162,11 @@ Use `agent-memory help <command>` for full usage and examples.
 
 | Command | Purpose |
 | --- | --- |
-| `init` | Scaffold config, canonical memory folders, wrapper, gitignore entry, `AGENTS.md` guidance, and optional agent skills/hooks. |
+| `init` | Scaffold config, canonical memory folders, wrapper, gitignore entry, configurable repository guidance, and optional agent skills/hooks. |
 | `templates list` | List built-in claim templates. |
 | `templates show claim:fact` | Print a built-in claim template. |
-| `new claim` | Create one atomic claim from a template. |
+| `new claim` | Create one low-confidence atomic claim draft in `needs_review`. |
+| `new recipe` | Create one first-class YAML recipe draft in `needs_review`. |
 | `validate` | Validate config, claims, graphs, indexes, recipes, plans, profiles, and waivers. |
 | `compile` | Build the repo-local SQLite cache from canonical memory. |
 | `query` | Search compiled memory by text and metadata. |
@@ -159,7 +180,7 @@ Use `agent-memory help <command>` for full usage and examples.
 | `audit` | Audit changed memory for deterministic stale-claim risks. |
 | `doctor` | Check whether the compiled database exists, is fresh, and is compatible. |
 | `sync` | Compile, validate, and doctor memory in one command. |
-| `upgrade` | Refresh generated config comments, managed `AGENTS.md` guidance, and agent skill files after package upgrades. |
+| `upgrade` | Refresh generated config comments, the configured managed instruction file, and generated agent skill files after package upgrades. |
 | `install-hooks` | Install non-blocking git hooks that run `bin/memory sync`. |
 | `ui` | Serve a local browser UI for inspecting and reviewing repository memory. |
 | `install-skill` | Install repository memory instructions under `.codex`, `.agents`, `.claude`, or a custom path. |
@@ -352,7 +373,9 @@ Create a starter claim with:
 bin/memory new claim --type constraint --system auth --title "OAuth identity requires tenant context"
 ```
 
-Then fill in the generated TODO values. Every durable claim should include:
+New claims are deliberately created with `status: needs_review` and `confidence: low`. Fill in every generated TODO value, run the verification steps, and only then promote the claim to `current`. Validation rejects TODO placeholders in current claims.
+
+Every durable claim should include:
 
 - `id`: stable dotted identifier, usually `<system>.<slug>`.
 - `type`: one of the supported claim templates, such as `fact`, `rule`, `constraint`, `workflow`, `risk`, `decision`, or `deprecation`.
@@ -363,9 +386,24 @@ Then fill in the generated TODO values. Every durable claim should include:
 - `claim`: the atomic statement agents should rely on.
 - `source_files`: code or docs that support the claim.
 - `verification`: concrete checks a future agent can run.
+- `last_verified_commit`: the tested Git commit, or `null` until verification is complete.
 - `tags`: routing keywords for retrieval.
 
-Use `current` for verified knowledge. Use `needs_verification` or `needs_review` for plausible but unverified memory. If code conflicts with memory, trust code and update or deprecate the claim.
+Use `current` for checked knowledge. Use `needs_verification` or `needs_review` for plausible but unverified memory. `confidence: verified` requires a recorded `last_verified_commit`. Audit warns when a claim's supporting files changed after that commit. If code conflicts with memory, trust code and update or deprecate the claim.
+
+Create reusable procedures as first-class recipes:
+
+```bash
+bin/memory new recipe \
+  --system auth \
+  --title "Modify OAuth safely" \
+  --trigger "change oauth" \
+  --source-file src/auth.js \
+  --step "Inspect current identity resolution." \
+  --verification-step "bun test"
+```
+
+Recipe scaffolding also starts in `needs_review`. Replace TODO values before promotion to `current`; validation rejects TODO placeholders in current recipes. The legacy `claim:recipe` template remains compatibility-only.
 
 ## Graph Relationship Guide
 
@@ -430,9 +468,11 @@ bin/memory audit --git-diff --base origin/main
 ```
 
 `coverage` exits with code `6` when a changed watched file has no related memory update or valid waiver.
-`audit` exits with code `6` for error findings. Shared routes, shared symbols, and same-system claims with at least two shared `source_files` are strong overlap signals and require review. Shared source or related files are warnings, while tag-only overlap is informational. Any semantically accurate explicit graph relationship records that an overlap pair was reviewed; invalid `deprecated_by` references and unresolved active conflicts remain blocking.
+`audit` exits with code `6` for error findings. Shared routes, shared symbols, and same-system claims with at least two shared `source_files` are strong overlap signals and require review. Shared source or related files are warnings, while tag-only overlap is informational. Any semantically accurate explicit graph relationship records that an overlap pair was reviewed; invalid `deprecated_by` references and unresolved active conflicts remain blocking. A recorded `last_verified_commit` must resolve to a commit, and audit warns when referenced source files changed afterward.
 
 With `--git-diff`, audit compares overlap findings with the resolved base revision and reports new or more severe pairs. Use `--strict` to retain the legacy behavior that blocks every overlap, accepts only `replaces` or `conflicts_with` as graph review decisions, blocks `source.related_claims_not_reviewed`, and does not suppress base findings.
+
+Every Git subprocess runs through a shared bounded adapter. Baseline blob reads retain their five-second deadline; other Git operations use a bounded default deadline. If a restricted subprocess stalls, agent-memory terminates it instead of hanging. Audit emits a warning and conservatively retains current-tree overlap findings when baseline memory cannot be loaded.
 
 ## Migrating Existing Docs
 
@@ -486,7 +526,7 @@ Create starter drafts when you are ready. Automatic mode writes files under the 
 bin/memory migrate-docs --from docs/legacy --system auth --automatic
 ```
 
-Automatic drafts are `current`, low-confidence starter claims. Review them, split broad prose into atomic claims, add graph edges, and verify against code before treating them as stable memory. Automatic mode only writes drafts for docs inside the repository; use plan mode for external docs, then copy the source docs into the repo before creating drafts.
+Automatic drafts are `needs_review`, low-confidence starter claims. Review them, split broad prose into atomic claims, add graph edges, and verify against code before promoting them to current memory. Automatic mode only writes drafts for docs inside the repository; use plan mode for external docs, then copy the source docs into the repo before creating drafts.
 
 ## Package Development
 

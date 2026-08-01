@@ -16,6 +16,8 @@ export interface AgentManifest {
     config: string;
     memoryRoot: string;
     database: string;
+    instructions: string;
+    instruction_files: string[];
     skills: {
       codex: string;
       generic: string;
@@ -73,6 +75,8 @@ export function buildAgentManifest(options: BuildAgentManifestOptions = {}): Age
       config: path.relative(repoRoot, loaded.path) || loaded.path,
       memoryRoot: loaded.config.memory_root,
       database: loaded.config.database_path,
+      instructions: loaded.config.agent_instructions.paths[0],
+      instruction_files: loaded.config.agent_instructions.paths,
       skills: {
         codex: loaded.config.agent_skills.codex.path,
         generic: loaded.config.agent_skills.generic.path
@@ -89,7 +93,7 @@ function buildWorkflowCapabilities(): AgentManifest["capabilities"] {
     contextual_workflows: true,
     recipes: {
       enabled: true,
-      commands: ["recipes list", "recipes search", "recipes show"],
+      commands: ["new recipe", "recipes list", "recipes search", "recipes show"],
       context_flags: ["--recipe"]
     },
     plans: {

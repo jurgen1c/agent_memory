@@ -100,9 +100,15 @@ export function buildAgentCommands(commandPrefix: string): AgentCommandDescripti
     },
     {
       name: "new claim",
-      purpose: "Create one atomic claim from a built-in template.",
-      whenToUse: "Use when behavior, architecture, workflow, or constraints changed.",
+      purpose: "Create one low-confidence atomic claim draft.",
+      whenToUse: "Use when durable behavior, architecture, risk, decisions, or constraints changed and existing memory does not own it.",
       examples: [`${commandPrefix} new claim --type fact --system auth --title "Student OAuth UID is tenant scoped"`]
+    },
+    {
+      name: "new recipe",
+      purpose: "Create one first-class reusable workflow recipe draft.",
+      whenToUse: "Use when future agents need repository-specific recurring steps, safeguards, and verification.",
+      examples: [`${commandPrefix} new recipe --system auth --title "Modify OAuth safely" --source-file src/auth.js`]
     },
     {
       name: "validate",
@@ -124,7 +130,7 @@ export function buildAgentCommands(commandPrefix: string): AgentCommandDescripti
     },
     {
       name: "upgrade",
-      purpose: "Refresh generated config comments, managed AGENTS.md guidance, and agent skill files.",
+      purpose: "Refresh generated config comments, the configured managed instruction file, and agent skill files.",
       whenToUse: "Run after upgrading the agent-memory package version in a repository.",
       examples: [`${commandPrefix} upgrade`, `${commandPrefix} upgrade --write`]
     }

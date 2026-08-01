@@ -669,7 +669,7 @@ function draftClaimTemplate(doc: MigratedDocPlan): string {
 id: ${doc.suggestedId}
 type: fact
 system: ${systemSafeFromId(doc.suggestedId)}
-status: current
+status: needs_review
 confidence: low
 severity: normal
 
@@ -703,7 +703,7 @@ Legacy documentation at \`${doc.sourcePath}\` describes ${doc.title}. Review the
 ## Migration Notes
 
 - Source document: \`${doc.sourcePath}\`
-- Migration status: current
+- Migration status: needs_review
 - Confidence: low
 
 ## Verification

@@ -80,6 +80,8 @@ describe("new claim command", () => {
     const claimPath = path.join(repoRoot, "docs/agent-memory/claims/auth/student-oauth-uid-is-tenant-scoped.md");
     const content = fs.readFileSync(claimPath, "utf8");
     expect(content).toContain("type: fact");
+    expect(content).toContain("status: needs_review");
+    expect(content).toContain("confidence: low");
     expect(content).toContain("severity: normal");
     expect(content).toContain("Student OAuth identity resolution depends on tenant ID.");
     expect(content).toContain("- bun test");
@@ -127,6 +129,48 @@ describe("new claim command", () => {
     expect(content).toContain("severity: critical");
   });
 
+  test("rejects explicit source files excluded by claim source policy", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+    const config = fs.readFileSync(configPath, "utf8").replace(
+      "claim_sources:\n  allow: []\n  deny: []",
+      "claim_sources:\n  allow:\n    - src/**\n  deny:\n    - src/generated/**\n    - vendor/**"
+    );
+    fs.writeFileSync(configPath, config);
+
+    await expect(
+      dispatch(
+        [
+          "new",
+          "claim",
+          "--type=fact",
+          "--system=generated",
+          "--title=Generated client behavior",
+          "--source-file=src/generated/client.ts"
+        ],
+        { cwd: repoRoot }
+      )
+    ).rejects.toThrow("denied by claim_sources.deny pattern src/generated/**");
+
+    await expect(
+      dispatch(
+        [
+          "new",
+          "claim",
+          "--type=fact",
+          "--system=vendor",
+          "--title=Vendor secret behavior",
+          "--source-file=src/../vendor/secret.ts"
+        ],
+        { cwd: repoRoot }
+      )
+    ).rejects.toThrow("denied by claim_sources.deny pattern vendor/**");
+
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/generated/generated-client-behavior.md"))).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/vendor/vendor-secret-behavior.md"))).toBe(false);
+  });
+
   test("supports equals-form claim options and validates bad input", async () => {
     const repoRoot = makeGitRepo();
     await dispatch(["init", "--yes"], { cwd: repoRoot });
@@ -157,6 +201,78 @@ describe("new claim command", () => {
     ).rejects.toThrow("Unsupported claim severity: urgent");
     expect(dispatch(["new", "claim", "--type"], { cwd: repoRoot })).rejects.toThrow("--type requires a value");
     expect(dispatch(["new", "claim", "--wat"], { cwd: repoRoot })).rejects.toThrow("Unknown new claim option: --wat");
+  });
+});
+
+describe("new recipe command", () => {
+  test("creates a first-class recipe draft with repeatable options", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+
+    const result = await dispatch(
+      [
+        "new",
+        "recipe",
+        "--system=auth",
+        "--title=Modify OAuth safely",
+        "--trigger=change oauth",
+        "--source-file=src/auth.js",
+        "--step=Inspect current identity resolution.",
+        "--step=Preserve tenant scoping.",
+        "--verification-step=bun test"
+      ],
+      { cwd: repoRoot }
+    );
+
+    expect(result.stdout).toContain("Recipe draft created.");
+    expect(result.stdout).toContain("Status: needs_review");
+    expect(result.stdout).toContain("ID: recipe.auth.modify_oauth_safely");
+    const recipePath = path.join(repoRoot, "docs/agent-memory/recipes/auth/modify-oauth-safely.yaml");
+    const content = fs.readFileSync(recipePath, "utf8");
+    expect(content).toContain("status: needs_review");
+    expect(content).toContain('  - "change oauth"');
+    expect(content).toContain("  - src/auth.js");
+    expect(content).toContain('  - "Preserve tenant scoping."');
+
+    const validation = await dispatch(["validate"], { cwd: repoRoot });
+    expect(validation.exitCode).toBe(0);
+  });
+
+  test("avoids recipe ID and path collisions and validates options", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    await dispatch(["new", "recipe", "--system", "auth", "--title", "OAuth Review"], { cwd: repoRoot });
+    const second = await dispatch(["new", "recipe", "--system", "auth", "--title", "OAuth Review"], { cwd: repoRoot });
+
+    expect(second.stdout).toContain("ID: recipe.auth.oauth_review_2");
+    expect(second.stdout).toContain("recipes/auth/oauth-review-2.yaml");
+    expect(dispatch(["new", "recipe"], { cwd: repoRoot })).rejects.toThrow("Missing required new recipe options");
+    expect(dispatch(["new", "recipe", "--system=auth", "--title=Bad", "--wat"], { cwd: repoRoot })).rejects.toThrow(
+      "Unknown new recipe option: --wat"
+    );
+  });
+
+  test("keeps the recipe ID stable when force overwrites the same generated recipe", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    await dispatch(
+      ["new", "recipe", "--system=auth", "--title=OAuth Review", "--step=Inspect the existing OAuth flow."],
+      { cwd: repoRoot }
+    );
+
+    const forced = await dispatch(
+      ["new", "recipe", "--system=auth", "--title=OAuth Review", "--step=Inspect tenant-scoped OAuth.", "--force"],
+      { cwd: repoRoot }
+    );
+    const recipeDirectory = path.join(repoRoot, "docs/agent-memory/recipes/auth");
+    const recipeFiles = fs.readdirSync(recipeDirectory).filter((file) => file.endsWith(".yaml"));
+    const content = fs.readFileSync(path.join(recipeDirectory, "oauth-review.yaml"), "utf8");
+
+    expect(forced.stdout).toContain("ID: recipe.auth.oauth_review");
+    expect(forced.stdout).not.toContain("recipe.auth.oauth_review_2");
+    expect(recipeFiles).toEqual(["oauth-review.yaml"]);
+    expect(content).toContain('  - "Inspect tenant-scoped OAuth."');
+    expect(content).not.toContain("Inspect the existing OAuth flow.");
   });
 });
 

@@ -979,8 +979,51 @@ describe("audit command", () => {
       );
 
       expect(exitCode).toBe(1);
-      expect(stderr).toContain("Could not resolve audit base ref: missing-audit-base");
+      expect(stderr).toContain("Could not read Git diff for base ref missing-audit-base");
     }
+  });
+
+  test("warns when claim sources changed after last_verified_commit", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const verifiedCommit = gitOutput(cwd, ["rev-parse", "HEAD"]);
+    const claimPath = path.join(
+      cwd,
+      "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md"
+    );
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${verifiedCommit}`)
+    );
+    commitAll(cwd, "Record claim verification");
+    fs.appendFileSync(path.join(cwd, "src/auth.js"), "\n// changed after verification\n");
+
+    const result = await dispatch(["audit", "--changed-files", "src/auth.js", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as {
+      findings: Array<{ code: string; claimIds: string[]; shared_values: { source_files?: string[] } }>;
+    };
+    const finding = parsed.findings.find((item) => item.code === "claim.verification_outdated");
+
+    expect(result.exitCode).toBe(0);
+    expect(finding?.claimIds).toEqual(["auth.student_oauth.uid_is_tenant_scoped"]);
+    expect(finding?.shared_values.source_files).toEqual(["src/auth.js"]);
+  });
+
+  test("rejects an unknown last_verified_commit", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const relativeClaimPath = "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md";
+    const claimPath = path.join(cwd, relativeClaimPath);
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", "last_verified_commit: missing-commit")
+    );
+
+    const result = await dispatch(["audit", "--changed-files", relativeClaimPath], { cwd });
+
+    expect(result.exitCode).toBe(6);
+    expect(result.stdout).toContain("claim.last_verified_commit_invalid");
+    expect(result.stdout).toContain("missing-commit");
   });
 });
 

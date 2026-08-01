@@ -16,7 +16,8 @@ describe("coverage command", () => {
     expect(result.exitCode).toBe(6);
     expect(result.stdout).toContain("Agent Memory coverage failed");
     expect(result.stdout).toContain("src/auth.js");
-    expect(result.stdout).toContain("Update a related claim");
+    expect(result.stdout).toContain("Review whether durable memory changed");
+    expect(result.stdout).toContain("do not create placeholder memory");
   });
 
   test("passes when a related claim changes in the same change set", async () => {
@@ -113,6 +114,35 @@ describe("coverage command", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Watched changes: 0");
+  });
+
+  test("ignores watched files excluded by claim source policy", async () => {
+    const cwd = copyFixture(mockApp);
+    const configPath = path.join(cwd, "agent-memory.config.yaml");
+    const generatedPath = path.join(cwd, "src/generated/client.js");
+    fs.mkdirSync(path.dirname(generatedPath), { recursive: true });
+    fs.writeFileSync(generatedPath, "export const generated = true;\n");
+    const indexPath = path.join(cwd, "docs/agent-memory/indexes/auth.yaml");
+    fs.writeFileSync(indexPath, fs.readFileSync(indexPath, "utf8").replace("  - src/tenant.js", "  - src/tenant.js\n  - src/generated/client.js"));
+    fs.appendFileSync(
+      configPath,
+      `
+claim_sources:
+  allow:
+    - src/**
+  deny:
+    - src/generated/**
+`
+    );
+    const compile = await dispatch(["compile"], { cwd });
+    expect(compile.exitCode).toBe(0);
+
+    const result = await dispatch(["coverage", "--changed-files", "src/generated/client.js"], { cwd });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Claim-policy ignored: 1");
+    expect(result.stdout).toContain("src/generated/client.js");
+    expect(result.stdout).toContain("claim_sources.deny pattern src/generated/**");
   });
 
   test("checks git diff files", async () => {

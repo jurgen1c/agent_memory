@@ -16,6 +16,9 @@ const DEFAULT_CONFIG: AgentMemoryConfig = {
   plans: ["plans/**/*.yaml"],
   profiles: ["profiles/**/*.yaml"],
   waivers: ["waivers/**/*.yaml"],
+  agent_instructions: {
+    paths: ["AGENTS.md"]
+  },
   agent_skills: {
     codex: {
       enabled: true,
@@ -25,6 +28,10 @@ const DEFAULT_CONFIG: AgentMemoryConfig = {
       enabled: true,
       path: "docs/agent-memory/AGENT_SKILL.md"
     }
+  },
+  claim_sources: {
+    allow: [],
+    deny: []
   },
   git: {
     install_hooks: true,
@@ -122,6 +129,10 @@ ${renderStringArrayField("profiles", config.profiles)}
 # Coverage waiver YAML files. Use these for intentional memory coverage exceptions.
 ${renderStringArrayField("waivers", config.waivers)}
 
+# Managed repository instruction files. init and upgrade preserve local content outside each managed section.
+agent_instructions:
+${renderStringArrayField("paths", config.agent_instructions.paths, 2)}
+
 # Agent instruction output paths. Disable an agent or change where its skill file is installed.
 agent_skills:
   codex:
@@ -130,6 +141,11 @@ agent_skills:
   generic:
     enabled: ${config.agent_skills.generic.enabled}
     path: ${renderYamlScalar(config.agent_skills.generic.path)}
+
+# Repo-relative source paths eligible for claims. Empty allow means all paths; deny always wins.
+claim_sources:
+${renderStringArrayField("allow", config.claim_sources.allow, 2)}
+${renderStringArrayField("deny", config.claim_sources.deny, 2)}
 
 # Git hook settings. install-hooks reads this list when creating non-blocking sync hooks.
 git:
@@ -196,13 +212,39 @@ function normalizeConfig(value: unknown): AgentMemoryConfig {
     plans: readStringArray(value, "plans", DEFAULT_CONFIG.plans),
     profiles: readStringArray(value, "profiles", DEFAULT_CONFIG.profiles),
     waivers: readStringArray(value, "waivers", DEFAULT_CONFIG.waivers),
+    agent_instructions: readAgentInstructions(value),
     agent_skills: {
       codex: readAgentSkill(value, "codex", DEFAULT_CONFIG.agent_skills.codex),
       generic: readAgentSkill(value, "generic", DEFAULT_CONFIG.agent_skills.generic)
     },
+    claim_sources: readClaimSources(value),
     git: readGit(value),
     validation: readValidation(value),
     context: readContext(value)
+  };
+}
+
+function readAgentInstructions(root: Record<string, unknown>) {
+  const value = readRecord(root, "agent_instructions", {});
+  const legacyPath = value.path;
+
+  if (value.paths === undefined && legacyPath !== undefined && typeof legacyPath !== "string") {
+    throw new ConfigError("Config field agent_instructions.path must be a string.");
+  }
+
+  const paths =
+    value.paths !== undefined
+      ? readStringArray(value, "paths", DEFAULT_CONFIG.agent_instructions.paths)
+      : typeof legacyPath === "string"
+        ? [legacyPath]
+        : [...DEFAULT_CONFIG.agent_instructions.paths];
+
+  if (paths.length === 0 || paths.some((instructionPath) => instructionPath.trim().length === 0)) {
+    throw new ConfigError("Config field agent_instructions.paths must contain at least one non-empty path.");
+  }
+
+  return {
+    paths: Array.from(new Set(paths))
   };
 }
 
@@ -213,6 +255,15 @@ function readAgentSkill(root: Record<string, unknown>, key: "codex" | "generic",
   return {
     enabled: readBoolean(value, "enabled", fallback.enabled),
     path: readString(value, "path", fallback.path)
+  };
+}
+
+function readClaimSources(root: Record<string, unknown>) {
+  const value = readRecord(root, "claim_sources", {});
+
+  return {
+    allow: readStringArray(value, "allow", DEFAULT_CONFIG.claim_sources.allow),
+    deny: readStringArray(value, "deny", DEFAULT_CONFIG.claim_sources.deny)
   };
 }
 

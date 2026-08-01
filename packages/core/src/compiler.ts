@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, resolveConfiguredPath } from "./files";
+import { runGit } from "./git";
 import { loadMemory, type LoadedMemory, type MemoryClaim, type MemoryGraphEdge, type MemoryPlanTemplate, type MemoryProfileTrait } from "./memory";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
 import { validateRepository, type ValidationResult } from "./validator";
@@ -627,11 +627,7 @@ function insertMetadata(database: SqliteDatabase, memory: LoadedMemory, database
 
 function currentGitCommit(repoRoot: string): string {
   try {
-    return execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
-    }).trim();
+    return runGit(repoRoot, ["rev-parse", "HEAD"]);
   } catch {
     return "unknown";
   }

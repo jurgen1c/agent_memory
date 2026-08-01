@@ -208,6 +208,41 @@ describe("validate command", () => {
     expect(result.exitCode).toBe(0);
   });
 
+  test("rejects claim source and related paths excluded by claim source policy", async () => {
+    const cwd = copyFixture(mockApp);
+    const configPath = path.join(cwd, "agent-memory.config.yaml");
+    fs.appendFileSync(
+      configPath,
+      `
+claim_sources:
+  allow:
+    - src/**
+  deny:
+    - src/generated/**
+    - vendor/**
+`
+    );
+    fs.mkdirSync(path.join(cwd, "src/generated"), { recursive: true });
+    fs.mkdirSync(path.join(cwd, "vendor"), { recursive: true });
+    fs.writeFileSync(path.join(cwd, "src/generated/client.js"), "export const generated = true;\n");
+    fs.writeFileSync(path.join(cwd, "vendor/secret.js"), "export const secret = true;\n");
+    fs.writeFileSync(path.join(cwd, "README-claim-source.md"), "Not an allowed claim source.\n");
+    writeClaim(cwd, "docs/agent-memory/claims/auth/policy_excluded.md", {
+      id: "auth.policy_excluded",
+      title: "Policy excluded claim paths",
+      sourceFiles: ["src/generated/client.js", "src/../vendor/secret.js"],
+      relatedFiles: ["README-claim-source.md"]
+    });
+
+    const result = await dispatch(["validate", "--changed-files", "docs/agent-memory/claims/auth/policy_excluded.md"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("claim.source_files.denied");
+    expect(result.stdout).toContain("claim.related_files.not_allowed");
+    expect(result.stdout).toContain("src/generated/**");
+    expect(result.stdout).toContain("vendor/**");
+  });
+
   test("rejects claim file references when realpath checks fail", async () => {
     const cwd = copyFixture(mockApp);
     const claimPath = "docs/agent-memory/claims/auth/realpath_failure.md";
@@ -358,6 +393,108 @@ status: current
 
     expect(result.exitCode).toBe(2);
     expect(result.stdout).toContain("profile.conflicts_with.missing");
+  });
+
+  test("rejects TODO placeholders when a claim draft is promoted to current", async () => {
+    const cwd = copyFixture(mockApp);
+    const created = await dispatch(
+      ["new", "claim", "--type=fact", "--system=drafts", "--title=Unfinished memory", "--source-file=src/auth.js"],
+      { cwd }
+    );
+    expect(created.exitCode).toBe(0);
+    const relativePath = "docs/agent-memory/claims/drafts/unfinished-memory.md";
+    const claimPath = path.join(cwd, relativePath);
+    fs.writeFileSync(claimPath, fs.readFileSync(claimPath, "utf8").replace("status: needs_review", "status: current"));
+
+    const result = await dispatch(["validate", "--changed-files", relativePath], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("claim.claim.placeholder");
+    expect(result.stdout).toContain("claim.verification.placeholder");
+  });
+
+  test("rejects body TODO placeholders even when current claim frontmatter is complete", async () => {
+    const cwd = copyFixture(mockApp);
+    const created = await dispatch(
+      [
+        "new",
+        "claim",
+        "--type=fact",
+        "--system=drafts",
+        "--title=Complete frontmatter",
+        "--source-file=src/auth.js",
+        "--claim=Authentication uses tenant-scoped identity resolution.",
+        "--verification-step=bun test"
+      ],
+      { cwd }
+    );
+    expect(created.exitCode).toBe(0);
+    const relativePath = "docs/agent-memory/claims/drafts/complete-frontmatter.md";
+    const claimPath = path.join(cwd, relativePath);
+    fs.writeFileSync(claimPath, fs.readFileSync(claimPath, "utf8").replace("status: needs_review", "status: current"));
+
+    const result = await dispatch(["validate", "--changed-files", relativePath], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("claim.body.placeholder");
+    expect(result.stdout).not.toContain("claim.claim.placeholder");
+    expect(result.stdout).not.toContain("claim.verification.placeholder");
+  });
+
+  test("allows legitimate standalone TODO text in current claims and recipes", async () => {
+    const cwd = copyFixture(mockApp);
+    const claimPath = "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md";
+    const recipePath = "docs/agent-memory/recipes/auth/modify_student_oauth.yaml";
+    fs.writeFileSync(path.join(cwd, "src/todo.ts"), "export const trackedTodo = true;\n");
+    fs.writeFileSync(
+      path.join(cwd, claimPath),
+      `${fs
+        .readFileSync(path.join(cwd, claimPath), "utf8")
+        .replace("  - src/auth.js", "  - src/todo.ts")
+        .replace("  - bun test", "  - rg TODO src")}\nOperational TODO labels are searchable evidence, not scaffold placeholders.\n`
+    );
+    fs.writeFileSync(
+      path.join(cwd, recipePath),
+      fs
+        .readFileSync(path.join(cwd, recipePath), "utf8")
+        .replace("  - src/auth.js", "  - src/todo.ts")
+        .replace("  - bun test", "  - rg TODO src")
+    );
+
+    const result = await dispatch(["validate", "--changed-files", claimPath, recipePath], { cwd });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("validation passed");
+  });
+
+  test("requires a verification commit for verified claim confidence", async () => {
+    const cwd = copyFixture(mockApp);
+    const created = await dispatch(
+      [
+        "new",
+        "claim",
+        "--type=fact",
+        "--system=verification",
+        "--title=Verified memory",
+        "--source-file=src/auth.js",
+        "--claim=Auth behavior is verified.",
+        "--verification-step=bun test"
+      ],
+      { cwd }
+    );
+    expect(created.exitCode).toBe(0);
+    const relativePath = "docs/agent-memory/claims/verification/verified-memory.md";
+    const claimPath = path.join(cwd, relativePath);
+    const content = fs
+      .readFileSync(claimPath, "utf8")
+      .replace("status: needs_review", "status: current")
+      .replace("confidence: low", "confidence: verified");
+    fs.writeFileSync(claimPath, content);
+
+    const result = await dispatch(["validate", "--changed-files", relativePath], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("claim.last_verified_commit.required");
   });
 });
 

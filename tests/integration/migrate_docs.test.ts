@@ -19,7 +19,7 @@ describe("migrate-docs command", () => {
     expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/auth/migrated_student_oauth_legacy_behavior.md"))).toBe(false);
   });
 
-  test("automatically creates current claim drafts from existing docs", async () => {
+  test("automatically creates needs-review claim drafts from existing docs", async () => {
     const repoRoot = await initializedRepoWithLegacyDocs();
 
     const result = await dispatch(["migrate-docs", "--from", "docs/legacy", "--system", "auth", "--automatic"], { cwd: repoRoot });
@@ -28,7 +28,7 @@ describe("migrate-docs command", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Drafts created: 1");
-    expect(content).toContain("status: current");
+    expect(content).toContain("status: needs_review");
     expect(content).toContain("confidence: low");
     expect(content).toContain("docs/legacy/student-oauth.md");
 

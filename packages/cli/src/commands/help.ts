@@ -29,11 +29,19 @@ const TOPICS: HelpTopic[] = [
       "agent-memory init --yes --agent codex",
       "agent-memory init --yes --agent generic",
       "agent-memory init --yes --agent codex --skill-location .agents",
+      "agent-memory init --yes --instructions-file CLAUDE.md",
+      "agent-memory init --yes --instructions-file AGENTS.md --instructions-file CLAUDE.md",
       "agent-memory init --yes --install-hooks",
       "agent-memory init --yes --force"
     ],
-    examples: ["agent-memory init --yes --agent codex", "agent-memory init --yes --agent codex --skill-location .agents", "agent-memory init --package-manager bun"],
-    agentNotes: ["Safe to run repeatedly. Existing files are skipped unless --force is passed; AGENTS.md keeps local content and refreshes only the managed agent-memory section. Use --skill-location with exactly one --agent target."],
+    examples: [
+      "agent-memory init --yes --agent codex",
+      "agent-memory init --yes --instructions-file AGENTS.md --instructions-file CLAUDE.md",
+      "agent-memory init --package-manager bun"
+    ],
+    agentNotes: [
+      "Safe to run repeatedly. Existing files are skipped unless --force is passed; configured instruction files keep local content and refresh only the managed agent-memory section. Repeat --instructions-file for multiple agent instruction targets. Use --skill-location with exactly one --agent target."
+    ],
     phase: "Phase 2"
   },
   {
@@ -178,13 +186,18 @@ const TOPICS: HelpTopic[] = [
       "agent-memory new claim --interactive",
       "agent-memory new claim --type rule --system ci --severity critical",
       "agent-memory new claim --type fact --system auth --title \"Student OAuth UID is tenant scoped\" --source-file src/auth.js",
-      "agent-memory new claim --type fact --system auth --title \"Student OAuth UID is tenant scoped\" --id auth.student_oauth.uid_is_tenant_scoped"
+      "agent-memory new claim --type fact --system auth --title \"Student OAuth UID is tenant scoped\" --id auth.student_oauth.uid_is_tenant_scoped",
+      "agent-memory new recipe --system auth --title \"Modify OAuth safely\" --trigger \"change oauth\" --step \"Inspect current identity resolution\" --verification-step \"bun test\"",
+      "agent-memory new recipe --interactive"
     ],
     examples: [
       "agent-memory new claim --type fact --system auth --title \"Student OAuth UID is tenant scoped\"",
-      "agent-memory new claim --type constraint --system auth --id auth.ios_webview.cookies_not_reliable --title \"Cookies are not reliable in iOS webview\""
+      "agent-memory new claim --type constraint --system auth --id auth.ios_webview.cookies_not_reliable --title \"Cookies are not reliable in iOS webview\"",
+      "agent-memory new recipe --system auth --title \"Modify OAuth safely\" --source-file src/auth.js"
     ],
-    agentNotes: ["Creates one Markdown file per claim and avoids overwriting existing claim files."],
+    agentNotes: [
+      "Creates needs_review drafts and avoids overwriting existing artifacts. Claims start at low confidence; promote them only after replacing placeholders and completing verification. Prefer first-class YAML recipes over legacy recipe claims."
+    ],
     phase: "Phase 3"
   },
   {
@@ -264,7 +277,7 @@ const TOPICS: HelpTopic[] = [
       "agent-memory upgrade --json"
     ],
     examples: ["agent-memory upgrade", "agent-memory upgrade --write"],
-    agentNotes: ["Dry-run by default. Preserves config values, refreshes managed AGENTS.md and skill files, and warns before dropping unknown config fields."],
+    agentNotes: ["Dry-run by default. Preserves config values, refreshes the configured managed instruction file and generated skill files, and warns before dropping unknown config fields."],
     phase: "Maintenance"
   },
   {
@@ -324,7 +337,7 @@ const TOPICS: HelpTopic[] = [
       "For broad folders, first run --classify, review or edit the generated system map, then run --system-map with --automatic.",
       "Rerunning --classify skips an existing system map unless --force is passed.",
       "The --system value is still required for focused single-system migrations; it is the lowercase memory namespace for generated claim IDs and paths.",
-      "Automatic mode creates current, low-confidence drafts; agents must review and split them into precise atomic claims."
+      "Automatic mode creates needs_review, low-confidence drafts; agents must review and split them into precise atomic claims."
     ],
     phase: "Phase 10"
   },
@@ -363,7 +376,7 @@ export function renderHelp(topicName?: string): string {
     "  help                 Show command help.",
     "  init                 Scaffold memory files and agent instructions in a consuming repository.",
     "  templates            List, show, and copy built-in templates.",
-    "  new claim            Create a claim from a built-in template.",
+    "  new                  Create a safe claim or recipe draft.",
     "  validate             Validate canonical memory files.",
     "  compile              Build the repo-local SQLite memory cache.",
     "  query                Search compiled claims.",

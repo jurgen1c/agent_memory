@@ -35,6 +35,7 @@ user-invocable: false
     expect(content).toContain("Relationship Graphs");
     expect(content).toContain("Do not edit or commit the SQLite database");
     expect(content).toContain("references/claims.md");
+    expect(content).toContain("references/memory-worthiness.md");
     expect(content).toContain("references/contextual-workflows.md");
     expect(content).toContain("references/plans.md");
     expect(content).toContain("references/profiles.md");
@@ -42,12 +43,16 @@ user-invocable: false
     expect(content).toContain("If context includes matched recipes");
     expect(content).toContain("plans finish <id>");
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"))).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/memory-worthiness.md"))).toBe(true);
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/contextual-workflows.md"))).toBe(true);
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/plans.md"))).toBe(true);
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/profiles.md"))).toBe(true);
     expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/references/delegation.md"))).toBe(true);
     expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"), "utf8")).toContain(
       "<!-- agent-memory:generated-reference repo-memory/claims.md -->"
+    );
+    expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/memory-worthiness.md"), "utf8")).toContain(
+      "A new claim should normally pass at least four"
     );
     expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/contextual-workflows.md"), "utf8")).toContain(
       "Matched Recipes"
@@ -65,6 +70,7 @@ user-invocable: false
     expect(coverageReference).toContain("## Stale Review");
     expect(coverageReference).toContain("Never invent `replaces` or `conflicts_with`");
     expect(coverageReference).toContain("audit --git-diff --strict");
+    expect(coverageReference).toContain("All Git subprocesses are bounded");
     expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/delegation.md"), "utf8")).toContain(
       "lower-effort subagent"
     );
@@ -286,12 +292,16 @@ describe("agent-manifest command", () => {
     expect(parsed.tool).toBe("agent-memory");
     expect(parsed.commandPrefix).toBe("bin/memory");
     expect(parsed.paths.database).toBe(".agent-memory/memory.sqlite");
+    expect(parsed.paths.instructions).toBe("AGENTS.md");
+    expect(parsed.paths.instruction_files).toEqual(["AGENTS.md"]);
     expect(parsed.paths.skills.codex).toBe(".codex/skills/repo-memory/SKILL.md");
     expect(parsed.commands.some((command: { name: string }) => command.name === "context")).toBe(true);
     expect(parsed.commands.some((command: { name: string }) => command.name === "audit")).toBe(true);
+    expect(parsed.commands.some((command: { name: string }) => command.name === "new recipe")).toBe(true);
     expect(parsed.commands.find((command: { name: string }) => command.name === "context").examples[0]).toContain("bin/memory");
     expect(parsed.capabilities.contextual_workflows).toBe(true);
     expect(parsed.capabilities.recipes.commands).toContain("recipes search");
+    expect(parsed.capabilities.recipes.commands).toContain("new recipe");
     expect(parsed.capabilities.plans.commands).toEqual([
       "plans templates list",
       "plans templates show",

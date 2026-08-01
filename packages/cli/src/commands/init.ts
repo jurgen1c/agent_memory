@@ -25,6 +25,7 @@ function parseInitArgs(args: string[], cwd?: string): InitOptions {
   let packageManager: PackageManager = "npm";
   let installHooks = false;
   let skillLocation: string | undefined;
+  const instructionsFiles: string[] = [];
   const agents: AgentTarget[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -83,6 +84,17 @@ function parseInitArgs(args: string[], cwd?: string): InitOptions {
       continue;
     }
 
+    if (arg === "--instructions-file") {
+      instructionsFiles.push(readValue(args, index, "--instructions-file"));
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--instructions-file=")) {
+      instructionsFiles.push(readInlineValue(arg, "--instructions-file"));
+      continue;
+    }
+
     throw new AgentMemoryError(`Unknown init option: ${arg}`, {
       details: ["Run `agent-memory help init` for usage."]
     });
@@ -103,7 +115,8 @@ function parseInitArgs(args: string[], cwd?: string): InitOptions {
     packageManager,
     agents: uniqueAgents,
     installHooks,
-    skillLocation
+    skillLocation,
+    instructionsFiles: Array.from(new Set(instructionsFiles))
   };
 }
 

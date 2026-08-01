@@ -245,6 +245,10 @@ recipes:
 waivers:
   - waivers/**/*.yaml
 
+agent_instructions:
+  paths:
+    - AGENTS.md
+
 agent_skills:
   codex:
     enabled: true
@@ -252,6 +256,10 @@ agent_skills:
   generic:
     enabled: true
     path: docs/agent-memory/AGENT_SKILL.md
+
+claim_sources:
+  allow: []
+  deny: []
 
 git:
   install_hooks: true
@@ -272,6 +280,17 @@ context:
   default_depth: 1
   include_inferred_edges_by_default: false
 ```
+
+`agent_instructions.paths` contains one or more repository-relative files where
+`init` and `upgrade` maintain the marked Agent Memory section. `AGENTS.md` is
+the default, but repositories may select or combine `CLAUDE.md`, `AGENTS.md`,
+and other local instruction files. Upgrade migrates the legacy singular
+`agent_instructions.path` field.
+
+`claim_sources.allow` and `claim_sources.deny` contain repository-relative
+file globs. An empty allow list permits all repository paths and deny always
+wins. Excluded paths may not appear in claim `source_files` or `related_files`,
+and excluded changed files do not require claim coverage.
 
 ## 7. Canonical Claim Model
 
@@ -422,6 +441,11 @@ replaces: string[]
 deprecated_by: string | null
 metadata: object
 ```
+
+`new claim` creates `needs_review`, low-confidence drafts. Current claims must
+not contain TODO placeholders. `confidence: verified` requires a non-empty
+`last_verified_commit`. Audit resolves that commit and warns when a supporting
+source file changed afterward.
 
 ## 9. One Claim Per File Enforcement
 
@@ -960,6 +984,7 @@ Behavior:
 
 - generates a slug and suggested ID
 - creates a new Markdown file from template
+- defaults to `status: needs_review` and `confidence: low`
 - never overwrites existing file
 - prints path
 
@@ -970,6 +995,21 @@ agent-memory new claim --interactive
 agent-memory new claim --type constraint --system auth --id auth.ios_webview.cookies_not_reliable
 agent-memory new claim --type rule --system ci --severity critical
 ```
+
+### 14.12.1 New Recipe
+
+```bash
+agent-memory new recipe --system auth --title "Modify OAuth safely"
+```
+
+Behavior:
+
+- creates a first-class YAML recipe under `recipes/<system>/`
+- defaults to `status: needs_review`
+- supports repeatable triggers, source files, required claims, steps, and
+  verification options
+- avoids ID and filename collisions
+- never overwrites existing files unless `--force` is explicit
 
 ### 14.13 Deprecate Claim
 
@@ -1504,6 +1544,7 @@ Create a claim with:
 
 ```bash
 bin/memory new claim --type fact --system <system> --title "<title>"
+bin/memory new recipe --system <system> --title "<title>"
 ```
 
 Before finishing:
@@ -1514,22 +1555,39 @@ bin/memory compile
 bin/memory doctor
 ```
 
-## When to Update Memory
+## Memory-Worthiness Gate
 
-Update memory when:
+Search existing memory before creating a new artifact. A new claim should
+normally be repository-specific, future-relevant, durable beyond the current
+task, consequential if forgotten, and evidence-backed. It should normally
+satisfy at least four of those five tests.
 
-- behavior changed
-- architecture changed
-- a workflow changed
-- a critical constraint was discovered
-- a previous claim became stale
-- a reusable recipe was discovered
+Choose:
+
+- a claim for one durable truth or invariant
+- a recipe for a repeatable repository-specific agent procedure
+- an index for discoverability or file ownership
+- a local plan run for one-off execution state
+- a waiver for an intentional, reviewed, time-boxed coverage exception
+- no durable memory for temporary or low-value observations
 
 Do not update durable memory for:
 
 - formatting-only changes
 - speculative assumptions
 - temporary debugging notes
+- routine refactors
+- generic best practices
+- facts obvious from one local definition
+
+A claim tells future agents what is true or must remain true. A recipe tells
+future agents how to perform a recurring task safely. A coverage gap is a
+prompt to review memory, not proof that a new claim is required. Agents must
+not create placeholder claims or false graph relationships to clear checks.
+New claim and recipe commands create `needs_review` drafts. Current artifacts
+must not contain TODO placeholders. Verified claim confidence requires a
+recorded verification commit, and audit warns when supporting files changed
+after that commit.
 
 ## Relationship Graphs
 
@@ -2007,12 +2065,17 @@ Tasks:
 6. Add slug/ID generator.
 7. Add collision avoidance.
 8. Add interactive and non-interactive claim creation.
+9. Create claims as `needs_review`, low-confidence drafts.
+10. Implement first-class `new recipe` draft creation.
 
 Acceptance criteria:
 
 - `agent-memory templates list` shows all templates.
 - `agent-memory templates show claim:constraint` prints the template.
 - `agent-memory new claim --type fact --system auth --title "X"` creates one Markdown file.
+- New claim drafts cannot be mistaken for current verified memory.
+- `agent-memory new recipe --system auth --title "X"` creates one YAML recipe
+  draft with deterministic collision handling.
 
 ### Phase 4 — Parser and Validator
 
@@ -2145,12 +2208,19 @@ Tasks:
 5. Add waiver YAML support.
 6. Add CI-friendly exit codes.
 7. Add useful failure output.
+8. Bound Git baseline blob reads so restricted review subprocesses cannot stall audit indefinitely.
+9. Route every Git subprocess through one bounded adapter.
+10. Audit `last_verified_commit` and report supporting files changed afterward.
 
 Acceptance criteria:
 
 - Changed watched file with no claim update fails coverage.
 - Valid waiver passes coverage.
 - Non-watched file does not fail coverage.
+- A stalled `git cat-file --batch` baseline read is terminated and audit continues with a conservative warning.
+- No core command invokes an unbounded Git subprocess.
+- Unknown verification commits block audit; changed supporting files produce a
+  non-blocking verification warning.
 
 ### Phase 10 — Agent Skill Installation and Manifest
 
@@ -2165,12 +2235,21 @@ Tasks:
 5. Add repo-specific paths from config.
 6. Ensure skill reminds agents not to commit SQLite.
 7. Ensure skill explains templates and graph relationships.
+8. Add a generated memory-worthiness reference with positive and negative examples.
+9. Render claim source allow/deny policy in repository and skill guidance.
+10. Allow `init` to select one or more managed repository instruction files.
+11. Ensure `upgrade` refreshes every configured instruction file, generated skill, and references.
+12. Migrate legacy `agent_instructions.path` config to `agent_instructions.paths`.
 
 Acceptance criteria:
 
 - Skill file installs in expected path.
 - Agent manifest returns machine-readable command descriptions.
 - Skill references `bin/memory` when wrapper exists.
+- Generated guidance distinguishes claims, recipes, indexes, plan runs, waivers, and no-memory outcomes.
+- Claim source policy is enforced during creation, validation, and coverage.
+- Repeated `init --instructions-file` options preserve local content in every
+  configured target, and `upgrade --write` refreshes each managed section.
 
 ### Phase 11 — Documentation and Release
 
@@ -2297,3 +2376,6 @@ The tool is ready for v1 when:
 8. Related claims are included in context output according to graph depth and budget.
 9. CI can validate memory and coverage.
 10. SQLite remains repo-local, disposable, and gitignored.
+11. Generated guidance includes a durable-memory relevance threshold.
+12. Repositories can allow or deny claim source paths deterministically.
+13. Repositories can choose which local instruction file receives managed guidance.

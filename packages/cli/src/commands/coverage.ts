@@ -101,6 +101,7 @@ function renderCoverageResult(result: CoverageResult): string {
   const covered = result.changes.filter((change) => change.status === "covered");
   const waived = result.changes.filter((change) => change.status === "waived");
   const uncovered = result.changes.filter((change) => change.status === "uncovered");
+  const policyIgnored = result.changes.filter((change) => change.status === "ignored" && change.ignoreReason?.includes("claim_sources."));
   const lines = [
     result.ok ? "Agent Memory coverage passed." : "Agent Memory coverage failed.",
     "",
@@ -109,7 +110,8 @@ function renderCoverageResult(result: CoverageResult): string {
     `Watched changes: ${watched.length}`,
     `Covered: ${covered.length}`,
     `Waived: ${waived.length}`,
-    `Uncovered: ${uncovered.length}`
+    `Uncovered: ${uncovered.length}`,
+    `Claim-policy ignored: ${policyIgnored.length}`
   ];
 
   if (uncovered.length > 0) {
@@ -125,6 +127,14 @@ function renderCoverageResult(result: CoverageResult): string {
 
     for (const change of waived) {
       lines.push(`- ${change.path} (waivers: ${change.waiverIds.join(", ")})`);
+    }
+  }
+
+  if (policyIgnored.length > 0) {
+    lines.push("", "Claim-policy ignored files:");
+
+    for (const change of policyIgnored) {
+      lines.push(`- ${change.path} (${change.ignoreReason})`);
     }
   }
 

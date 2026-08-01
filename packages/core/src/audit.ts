@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -6,6 +5,8 @@ import { normalizeChangedFiles, readGitDiffSelection } from "./changes";
 import { loadConfig } from "./config";
 import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, configuredPathRelativeToRepo, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
+import { readGitBlobs } from "./git_blob_reader";
+import { GitCommandError, runGit } from "./git";
 import {
   loadMemory,
   type LoadedMemory,
@@ -109,6 +110,7 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
   const claimsById = new Map(claims.map((claim) => [claim.id, claim]));
   const explicitRelations = explicitRelationsFromGraphs(memory.graphs);
   const strict = options.strict ?? false;
+  const verificationAudit = findOutdatedVerifiedClaims(repoRoot, claims, memoryRootRelative);
 
   if (options.gitDiff && strict && options.baseRef) {
     resolveBaselineRevision(repoRoot, options.baseRef, changedFiles, gitDiffSelection?.usedCommittedFallback ?? false, []);
@@ -137,15 +139,102 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
     ...findCurrentRecipesWithInactiveClaims(memory.recipes, claimsById, changedFileSet, memoryRootRelative),
     ...findCurrentPlansWithInactiveRecipes(memory.plans, memory.recipes, changedFileSet, memoryRootRelative),
     ...findUnsafeCriticalProfiles(memory.profiles, changedFileSet, memoryRootRelative),
-    ...findUnmarkedProfileConflicts(memory.profiles, changedFileSet, memoryRootRelative)
+    ...findUnmarkedProfileConflicts(memory.profiles, changedFileSet, memoryRootRelative),
+    ...verificationAudit.findings
   ]);
 
   return {
     ok: findings.every((finding) => finding.severity !== "error"),
     changedFiles,
     findings,
-    warnings: [...loaded.repo.warnings, ...(baseline?.warnings ?? [])]
+    warnings: [...loaded.repo.warnings, ...(baseline?.warnings ?? []), ...verificationAudit.warnings]
   };
+}
+
+function findOutdatedVerifiedClaims(
+  repoRoot: string,
+  claims: ClaimRecord[],
+  memoryRootRelative: string
+): { findings: AuditFinding[]; warnings: string[] } {
+  const findings: AuditFinding[] = [];
+  const warnings: string[] = [];
+  const changedFilesByCommit = new Map<string, string[]>();
+  let workingTreeFiles: string[] | undefined;
+
+  for (const claim of claims) {
+    if (!isActiveClaim(claim)) {
+      continue;
+    }
+
+    const reference = readString(claim.raw, "last_verified_commit").trim();
+
+    if (reference.length === 0) {
+      continue;
+    }
+
+    let commit: string;
+
+    try {
+      commit = runGit(repoRoot, ["rev-parse", "--verify", `${reference}^{commit}`]);
+    } catch (error) {
+      if (error instanceof GitCommandError && error.timedOut) {
+        warnings.push(`Could not check last_verified_commit for ${claim.id}: ${error.message}.`);
+        continue;
+      }
+
+      findings.push({
+        code: "claim.last_verified_commit_invalid",
+        severity: "error",
+        message: `Claim ${claim.id} references an unknown last_verified_commit: ${reference}.`,
+        claimIds: [claim.id],
+        paths: [memoryPath(memoryRootRelative, claim.sourcePath)],
+        shared_values: {},
+        remediation: "Record a reachable verification commit or set last_verified_commit to null and lower confidence."
+      });
+      continue;
+    }
+
+    let changedFiles = changedFilesByCommit.get(commit);
+
+    if (!changedFiles) {
+      try {
+        const committed = normalizeAuditFiles(
+          runGit(repoRoot, ["diff", "--name-only", `${commit}..HEAD`])
+            .split(/\r?\n/)
+            .filter(Boolean),
+          repoRoot
+        );
+        workingTreeFiles ??= readGitDiffSelection(repoRoot).files;
+        changedFiles = Array.from(new Set([...committed, ...workingTreeFiles])).sort();
+        changedFilesByCommit.set(commit, changedFiles);
+      } catch (error) {
+        warnings.push(
+          `Could not compare claim verification commit ${reference} to the current tree: ${
+            error instanceof Error ? error.message : String(error)
+          }.`
+        );
+        continue;
+      }
+    }
+
+    const changedSources = changedFiles.filter((file) => claimMentionsFile(claim, file));
+
+    if (changedSources.length === 0) {
+      continue;
+    }
+
+    findings.push({
+      code: "claim.verification_outdated",
+      severity: "warning",
+      message: `Claim ${claim.id} source files changed after last_verified_commit ${reference}.`,
+      claimIds: [claim.id],
+      paths: [memoryPath(memoryRootRelative, claim.sourcePath), ...changedSources].sort(),
+      shared_values: { source_files: changedSources },
+      remediation: "Re-run the claim verification steps, then record the verified commit or change status to needs_verification."
+    });
+  }
+
+  return { findings, warnings: Array.from(new Set(warnings)) };
 }
 
 function loadAuditBaseline(
@@ -310,12 +399,7 @@ function suppressBaselineOverlapFindings(
 }
 
 function gitOutput(repoRoot: string, args: string[], trim = true): string {
-  const output = execFileSync("git", args, {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"]
-  });
-  return trim ? output.trim() : output;
+  return runGit(repoRoot, args, { trim });
 }
 
 function gitTreeFiles(repoRoot: string, revision: string): GitTreeFile[] {
@@ -329,45 +413,6 @@ function gitTreeFiles(repoRoot: string, revision: string): GitTreeFile[] {
         repoFile: toPosix(entry.slice(separator + 1))
       };
     });
-}
-
-function readGitBlobs(repoRoot: string, oids: string[]): Map<string, string> {
-  const uniqueOids = Array.from(new Set(oids));
-
-  if (uniqueOids.length === 0) {
-    return new Map();
-  }
-
-  const output = execFileSync("git", ["cat-file", "--batch"], {
-    cwd: repoRoot,
-    input: `${uniqueOids.join("\n")}\n`,
-    maxBuffer: 256 * 1024 * 1024,
-    stdio: ["pipe", "pipe", "ignore"]
-  });
-  const blobs = new Map<string, string>();
-  let offset = 0;
-
-  for (const oid of uniqueOids) {
-    const headerEnd = output.indexOf(10, offset);
-
-    if (headerEnd === -1) {
-      throw new AgentMemoryError(`Could not read audit baseline blob ${oid}.`);
-    }
-
-    const header = output.subarray(offset, headerEnd).toString("utf8");
-    const size = Number(header.split(" ")[2]);
-    const contentStart = headerEnd + 1;
-    const contentEnd = contentStart + size;
-
-    if (!Number.isSafeInteger(size) || size < 0 || contentEnd > output.length) {
-      throw new AgentMemoryError(`Could not parse audit baseline blob ${oid}.`);
-    }
-
-    blobs.set(oid, output.subarray(contentStart, contentEnd).toString("utf8"));
-    offset = contentEnd + 1;
-  }
-
-  return blobs;
 }
 
 function findCurrentRecipesWithInactiveClaims(
