@@ -1010,6 +1010,49 @@ describe("audit command", () => {
     expect(finding?.shared_values.source_files).toEqual(["src/auth.js"]);
   });
 
+  test("warns when a claim source is renamed after last_verified_commit", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const verifiedCommit = gitOutput(cwd, ["rev-parse", "HEAD"]);
+    const claimPath = path.join(cwd, "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md");
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${verifiedCommit}`)
+    );
+    commitAll(cwd, "Record claim verification");
+    fs.renameSync(path.join(cwd, "src/auth.js"), path.join(cwd, "src/auth-renamed.js"));
+    commitAll(cwd, "Rename verified source");
+
+    const result = await dispatch(["audit", "--changed-files", "src/auth-renamed.js", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as {
+      findings: Array<{ code: string; shared_values: { source_files?: string[] } }>;
+    };
+    const finding = parsed.findings.find((item) => item.code === "claim.verification_outdated");
+
+    expect(finding?.shared_values.source_files).toEqual(["src/auth.js"]);
+  });
+
+  test("warns when a claim source has an uncommitted rename", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const verifiedCommit = gitOutput(cwd, ["rev-parse", "HEAD"]);
+    const claimPath = path.join(cwd, "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md");
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${verifiedCommit}`)
+    );
+    commitAll(cwd, "Record claim verification");
+    fs.renameSync(path.join(cwd, "src/auth.js"), path.join(cwd, "src/auth-renamed.js"));
+
+    const result = await dispatch(["audit", "--changed-files", "src/auth-renamed.js", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as {
+      findings: Array<{ code: string; shared_values: { source_files?: string[] } }>;
+    };
+    const finding = parsed.findings.find((item) => item.code === "claim.verification_outdated");
+
+    expect(finding?.shared_values.source_files).toEqual(["src/auth.js"]);
+  });
+
   test("normalizes claim source dot segments before verification matching", async () => {
     const cwd = copyFixture(mockApp);
     initGitHistory(cwd);
@@ -1116,7 +1159,7 @@ describe("audit command", () => {
       `#!/usr/bin/env bash
 case "$*" in
   "rev-parse --verify ${verificationCommit}^{commit}") printf '%s\\n' "${verificationCommit}" ;;
-  "diff --name-only ${verificationCommit}..HEAD") exit 0 ;;
+  "diff --no-renames --name-only ${verificationCommit}..HEAD") exit 0 ;;
   "rev-parse --is-inside-work-tree") while true; do :; done ;;
   *) exit 9 ;;
 esac

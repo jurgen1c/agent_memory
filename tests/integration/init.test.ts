@@ -204,6 +204,46 @@ Keep this footer too.
     expect(fs.readFileSync(claudePath, "utf8")).not.toContain("### Outdated Memory Gate");
   });
 
+  test("preserves valid quoted and dotted top-level YAML blocks when updating instruction paths", async () => {
+    for (const config of [
+      `version: 1
+"agent_instructions":
+  paths:
+    - AGENTS.md
+"claim_sources":
+  allow: []
+  deny:
+    - vendor/**
+`,
+      `version: 1
+agent_instructions:
+  paths:
+    - AGENTS.md
+local.extension: keep
+claim_sources:
+  allow: []
+  deny:
+    - vendor/**
+`
+    ]) {
+      const repoRoot = makeGitRepo();
+      const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+      fs.writeFileSync(configPath, config);
+
+      const result = await dispatch(["init", "--yes", "--instructions-file", "CLAUDE.md"], { cwd: repoRoot });
+      const updated = fs.readFileSync(configPath, "utf8");
+
+      expect(result.exitCode).toBe(0);
+      expect(loadConfig({ repoRoot }).config.agent_instructions.paths).toEqual(["CLAUDE.md"]);
+      expect(updated).toContain("vendor/**");
+      if (config.includes("local.extension")) {
+        expect(updated).toContain("local.extension: keep");
+      } else {
+        expect(updated).toContain('"claim_sources":');
+      }
+    }
+  });
+
   test("rejects instruction files outside the repository", async () => {
     const repoRoot = makeGitRepo();
     const outsideRelativePath = `../${path.basename(repoRoot)}-outside-instructions.md`;

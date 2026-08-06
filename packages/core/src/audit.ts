@@ -246,7 +246,7 @@ function findOutdatedVerifiedClaims(
     if (!changedFiles) {
       try {
         const committed = normalizeAuditFiles(
-          runGit(repoRoot, ["diff", "--name-only", `${commit}..HEAD`], {
+          runGit(repoRoot, ["diff", "--no-renames", "--name-only", `${commit}..HEAD`], {
             gitBinary: options.gitBinary,
             timeoutMs: options.gitTimeoutMs
           })
@@ -255,6 +255,7 @@ function findOutdatedVerifiedClaims(
           repoRoot
         );
         workingTreeFiles ??= readGitDiffSelection(repoRoot, {
+          includeRenameSources: true,
           gitBinary: options.gitBinary,
           timeoutMs: options.gitTimeoutMs
         }).files;

@@ -197,7 +197,8 @@ ${config.agent_instructions.paths.map((instructionPath) => `    - ${renderYamlSc
 }
 
 function replaceTopLevelConfigBlock(existing: string, key: string, replacement: string): string {
-  const headerPattern = new RegExp(`^${key}:[^\\r\\n]*(?:\\r?\\n|$)`, "m");
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const headerPattern = new RegExp(`^(?:${escapedKey}|["']${escapedKey}["'])\\s*:[^\\r\\n]*(?:\\r?\\n|$)`, "m");
   const header = headerPattern.exec(existing);
 
   if (!header || header.index === undefined) {
@@ -208,7 +209,7 @@ function replaceTopLevelConfigBlock(existing: string, key: string, replacement: 
   const sectionStart = header.index;
   const contentStart = sectionStart + header[0].length;
   const remainder = existing.slice(contentStart);
-  const nextKey = /^[A-Za-z_][A-Za-z0-9_-]*\s*:/m.exec(remainder);
+  const nextKey = /^(?![ \t#\r\n])(?=.)/m.exec(remainder);
   let sectionEnd = nextKey?.index === undefined ? existing.length : contentStart + nextKey.index;
 
   const sectionTail = existing.slice(contentStart, sectionEnd);

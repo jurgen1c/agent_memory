@@ -6,6 +6,7 @@ import { GitCommandError, runGit } from "./git";
 export interface GitDiffOptions {
   baseRef?: string;
   includeCommittedFallback?: boolean;
+  includeRenameSources?: boolean;
   gitBinary?: string;
   timeoutMs?: number;
 }
@@ -26,7 +27,7 @@ export function readGitDiffSelection(repoRoot: string, options: GitDiffOptions =
     addRequiredGitFiles(
       files,
       repoRoot,
-      ["diff", "--name-only", `${options.baseRef}...HEAD`],
+      gitDiffArgs(options, `${options.baseRef}...HEAD`),
       options,
       trackedFiles,
       `Could not read Git diff for base ref ${options.baseRef}.`
@@ -34,10 +35,10 @@ export function readGitDiffSelection(repoRoot: string, options: GitDiffOptions =
   }
 
   if (hasHead) {
-    addRequiredGitFiles(files, repoRoot, ["diff", "--name-only", "HEAD"], options, trackedFiles);
+    addRequiredGitFiles(files, repoRoot, gitDiffArgs(options, "HEAD"), options, trackedFiles);
   }
 
-  addRequiredGitFiles(files, repoRoot, ["diff", "--cached", "--name-only"], options, trackedFiles);
+  addRequiredGitFiles(files, repoRoot, gitDiffArgs(options, "--cached"), options, trackedFiles);
   addRequiredGitFiles(files, repoRoot, ["ls-files", "--others", "--exclude-standard"], options);
 
   if (
@@ -47,7 +48,7 @@ export function readGitDiffSelection(repoRoot: string, options: GitDiffOptions =
     hasHead &&
     gitHeadHasParent(repoRoot, options)
   ) {
-    addRequiredGitFiles(files, repoRoot, ["diff", "--name-only", "HEAD~1", "HEAD"], options);
+    addRequiredGitFiles(files, repoRoot, gitDiffArgs(options, "HEAD~1", "HEAD"), options);
     usedCommittedFallback = true;
   }
 
@@ -55,6 +56,10 @@ export function readGitDiffSelection(repoRoot: string, options: GitDiffOptions =
     files: Array.from(files).sort(),
     usedCommittedFallback
   };
+}
+
+function gitDiffArgs(options: GitDiffOptions, ...revisions: string[]): string[] {
+  return ["diff", ...(options.includeRenameSources ? ["--no-renames"] : []), "--name-only", ...revisions];
 }
 
 export function readGitDiffFiles(repoRoot: string, options: GitDiffOptions = {}): string[] {
