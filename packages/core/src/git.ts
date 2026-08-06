@@ -23,6 +23,10 @@ export class GitCommandError extends Error {
   }
 }
 
+export function isFullGitObjectId(value: string): boolean {
+  return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value);
+}
+
 export function runGit(repoRoot: string, args: string[], options: GitCommandOptions = {}): string {
   const timeoutMs = options.timeoutMs ?? DEFAULT_GIT_COMMAND_TIMEOUT_MS;
   const result = spawnSync(options.gitBinary ?? "git", args, {

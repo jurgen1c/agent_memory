@@ -6,6 +6,7 @@ import { describeClaimSourcePolicyDecision, evaluateClaimSourcePath } from "./cl
 import { ConfigError } from "./errors";
 import { loadConfig } from "./config";
 import { discoverFiles, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
+import { isFullGitObjectId } from "./git";
 import { parseMarkdownFile, extractMarkdownSection } from "./markdown";
 import type { AgentMemoryConfig } from "./types";
 import { parseYaml } from "./yaml";
@@ -402,12 +403,12 @@ function validateClaimFields(
   if (
     lastVerifiedCommit !== undefined &&
     lastVerifiedCommit !== null &&
-    (typeof lastVerifiedCommit !== "string" || lastVerifiedCommit.trim().length === 0)
+    (typeof lastVerifiedCommit !== "string" || !isFullGitObjectId(lastVerifiedCommit.trim()))
   ) {
     addError(
       issues,
       "claim.last_verified_commit.invalid",
-      "last_verified_commit must be a non-empty Git commit reference or null.",
+      "last_verified_commit must be a full immutable Git commit object ID or null.",
       claim.relativePath,
       claim.id
     );

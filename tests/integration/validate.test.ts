@@ -496,6 +496,22 @@ status: current
     expect(result.exitCode).toBe(2);
     expect(result.stdout).toContain("claim.last_verified_commit.required");
   });
+
+  test("requires last_verified_commit to be a full immutable object ID", async () => {
+    const cwd = copyFixture(validFixture);
+    const relativePath = "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md";
+    const claimPath = path.join(cwd, relativePath);
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", "last_verified_commit: main")
+    );
+
+    const result = await dispatch(["validate", "--changed-files", relativePath], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("claim.last_verified_commit.invalid");
+    expect(result.stdout).toContain("full immutable Git commit object ID");
+  });
 });
 
 function copyFixture(source: string): string {

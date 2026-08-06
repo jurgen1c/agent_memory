@@ -1025,6 +1025,26 @@ describe("audit command", () => {
     expect(result.stdout).toContain("claim.last_verified_commit_invalid");
     expect(result.stdout).toContain("missing-commit");
   });
+
+  test("rejects movable last_verified_commit references", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const relativeClaimPath = "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md";
+    const claimPath = path.join(cwd, relativeClaimPath);
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", "last_verified_commit: HEAD")
+    );
+    commitAll(cwd, "Record movable verification reference");
+    fs.appendFileSync(path.join(cwd, "src/auth.js"), "\n// committed after movable verification\n");
+    commitAll(cwd, "Change source after verification");
+
+    const result = await dispatch(["audit", "--changed-files", "src/auth.js"], { cwd });
+
+    expect(result.exitCode).toBe(6);
+    expect(result.stdout).toContain("claim.last_verified_commit_invalid");
+    expect(result.stdout).toContain("full immutable Git commit object ID");
+  });
 });
 
 interface ClaimOptions {

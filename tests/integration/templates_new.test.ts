@@ -312,7 +312,54 @@ describe("new recipe command", () => {
     expect(content).toContain('  - "Inspect tenant-scoped OAuth."');
     expect(content).not.toContain("Inspect the existing OAuth flow.");
   });
+
+  test("creates recipe drafts under an absolute external memory root", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-external-recipes-"));
+    updateMemoryRoot(repoRoot, externalRoot);
+
+    const result = await dispatch(["new", "recipe", "--system=auth", "--title=External OAuth Review"], {
+      cwd: repoRoot
+    });
+    const expectedPath = path.join(externalRoot, "recipes/auth/external-oauth-review.yaml");
+    const incorrectPath = path.join(repoRoot, expectedPath);
+
+    expect(result.stdout).toContain(`Path: ${expectedPath}`);
+    expect(fs.existsSync(expectedPath)).toBe(true);
+    expect(fs.existsSync(incorrectPath)).toBe(false);
+  });
+
+  test("normalizes recipe source paths and rejects paths outside the repository", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+
+    await dispatch(
+      ["new", "recipe", "--system=auth", "--title=Normalized Recipe Source", "--source-file=src/../lib/auth.ts"],
+      { cwd: repoRoot }
+    );
+    const recipePath = path.join(repoRoot, "docs/agent-memory/recipes/auth/normalized-recipe-source.yaml");
+
+    expect(fs.readFileSync(recipePath, "utf8")).toContain("  - lib/auth.ts");
+
+    for (const sourceFile of [path.join(os.tmpdir(), "outside.ts"), "../outside.ts", "C:\\outside\\source.ts"]) {
+      await expect(
+        dispatch(
+          ["new", "recipe", "--system=invalid", `--title=Outside ${sourceFile}`, `--source-file=${sourceFile}`],
+          { cwd: repoRoot }
+        )
+      ).rejects.toThrow(/Path (?:must be repository-relative|escapes repository root)/);
+    }
+
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/recipes/invalid"))).toBe(false);
+  });
 });
+
+function updateMemoryRoot(repoRoot: string, memoryRoot: string): void {
+  const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+  const config = fs.readFileSync(configPath, "utf8");
+  fs.writeFileSync(configPath, config.replace(/^memory_root:.*$/m, `memory_root: ${JSON.stringify(memoryRoot)}`));
+}
 
 function makeGitRepo(): string {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-phase3-"));

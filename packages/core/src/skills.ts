@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildAgentCommands } from "./agent_commands";
+import { renderClaimSourcePolicy } from "./claim_sources";
 import { loadConfig } from "./config";
 import { AgentMemoryError } from "./errors";
 import { resolveRepoOutputPath } from "./repo";
@@ -222,11 +223,11 @@ Create durable memory only when the knowledge is repository-specific, likely to 
 
 A claim tells future agents what is true or must remain true. A recipe tells future agents how to perform a recurring task safely. Never create placeholder memory merely because code changed or coverage reported a gap.
 
-When claim verification succeeds, set \`last_verified_commit\` to the tested commit. Use \`confidence: verified\` only with that commit recorded. Audit warns when supporting files changed after the recorded commit.
+When claim verification succeeds, set \`last_verified_commit\` to the tested full Git commit object ID, never a movable ref such as a branch or \`HEAD\`. Use \`confidence: verified\` only with that commit recorded. Audit warns when supporting files changed after the recorded commit.
 
 Claim source eligibility comes from \`claim_sources\` in \`agent-memory.config.yaml\`:
 
-${renderClaimSourcePolicy(options.config)}
+${renderClaimSourcePolicy(options.config.claim_sources)}
 
 Deny patterns win over allow patterns. Do not reference policy-excluded paths through either \`source_files\` or \`related_files\`.
 
@@ -470,14 +471,6 @@ function renderMemoryPatterns(memoryRoot: string, label: string, patterns: strin
   return `- ${label}: ${rendered}`;
 }
 
-function renderClaimSourcePolicy(config: AgentMemoryConfig): string {
-  const allow = config.claim_sources.allow.length > 0 ? config.claim_sources.allow.map((pattern) => `\`${pattern}\``).join(", ") : "all repository paths";
-  const deny = config.claim_sources.deny.length > 0 ? config.claim_sources.deny.map((pattern) => `\`${pattern}\``).join(", ") : "none";
-
-  return `- Allowed claim sources: ${allow}
-- Denied claim sources: ${deny}`;
-}
-
 function renderCodexSkillFrontmatter(agent: AgentTarget, kind: AgentSkillKind): string {
   if (agent !== "codex") {
     return "";
@@ -534,7 +527,7 @@ Avoid broad summaries, temporary implementation notes, and claims that merely re
 
 A workflow claim describes a durable lifecycle or invariant, such as required state transitions. It does not replace a YAML recipe. The legacy \`claim:recipe\` template remains available for compatibility, but use first-class recipes for procedures agents should execute.
 
-\`new claim\` creates a \`needs_review\`, low-confidence draft. Replace all TODO fields and run its verification before changing it to \`current\`. Set \`last_verified_commit\` when verification succeeds; \`confidence: verified\` requires that commit.
+\`new claim\` creates a \`needs_review\`, low-confidence draft. Replace all TODO fields and run its verification before changing it to \`current\`. Set \`last_verified_commit\` to the full tested Git commit object ID when verification succeeds; \`confidence: verified\` requires that commit.
 `;
 }
 
@@ -563,7 +556,9 @@ agent-memory context --recipe recipe.auth.modify_student_oauth
 }
 
 function memoryWorthinessReference(config?: AgentMemoryConfig): string {
-  const policy = config ? renderClaimSourcePolicy(config) : "- Allowed claim sources: all repository paths\n- Denied claim sources: none";
+  const policy = config
+    ? renderClaimSourcePolicy(config.claim_sources)
+    : "- Allowed claim sources: all repository paths\n- Denied claim sources: none";
 
   return `${generatedReferenceHeader("repo-memory/memory-worthiness.md")}
 # Memory Worthiness
@@ -726,7 +721,7 @@ Use \`coverage --git-diff\` for non-trivial code changes. If watched files chang
 
 ## Stale Review
 
-Run \`audit --git-diff\` when canonical memory files changed. Strong duplicate signals block; shared tags and weak file overlap are advisory. Audit also checks recorded \`last_verified_commit\` values and warns when supporting files changed afterward. Re-run verification and record the tested commit, or move the claim to \`needs_verification\`. Resolve failures by reviewing the exact shared values and then updating or deprecating a claim, or adding any semantically accurate explicit graph relationship. Never invent \`replaces\` or \`conflicts_with\` solely to clear an audit finding. Repositories that intentionally depend on the legacy all-overlap gate can run \`audit --git-diff --strict\`.
+Run \`audit --git-diff\` when canonical memory files changed. Strong duplicate signals block; shared tags and weak file overlap are advisory. Audit requires \`last_verified_commit\` values to be full immutable Git commit object IDs and warns when supporting files changed afterward. Re-run verification and record the full tested commit object ID, or move the claim to \`needs_verification\`. Resolve failures by reviewing the exact shared values and then updating or deprecating a claim, or adding any semantically accurate explicit graph relationship. Never invent \`replaces\` or \`conflicts_with\` solely to clear an audit finding. Repositories that intentionally depend on the legacy all-overlap gate can run \`audit --git-diff --strict\`.
 
 All Git subprocesses are bounded. If a restricted subprocess stalls, agent-memory terminates it and follows the command's documented warning or fallback behavior. Audit conservatively retains current-tree overlap findings when baseline memory cannot be loaded.
 

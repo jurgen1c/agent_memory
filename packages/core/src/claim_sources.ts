@@ -51,6 +51,25 @@ export function describeClaimSourcePolicyDecision(filePath: string, decision: Cl
   return `Claim source path ${filePath} is allowed.`;
 }
 
+export function renderClaimSourcePolicy(policy: ClaimSourcePolicy): string {
+  const allow =
+    policy.allow.length > 0 ? policy.allow.map(renderMarkdownCodeSpan).join(", ") : "all repository paths";
+  const deny = policy.deny.length > 0 ? policy.deny.map(renderMarkdownCodeSpan).join(", ") : "none";
+
+  return `- Allowed claim sources: ${allow}
+- Denied claim sources: ${deny}`;
+}
+
+function renderMarkdownCodeSpan(value: string): string {
+  const singleLine = value.replaceAll("\r", "\\r").replaceAll("\n", "\\n");
+  const longestBacktickRun = Math.max(0, ...Array.from(singleLine.matchAll(/`+/g), (match) => match[0].length));
+  const delimiter = "`".repeat(longestBacktickRun + 1);
+  const needsPadding = /^[ `]|[ `]$/.test(singleLine);
+  const padding = needsPadding ? " " : "";
+
+  return `${delimiter}${padding}${singleLine}${padding}${delimiter}`;
+}
+
 function normalizeClaimSourcePath(filePath: string): string {
   const normalizedSeparators = toPosix(filePath).replaceAll("\\", "/");
   const normalizedSegments = path.posix.normalize(normalizedSeparators);

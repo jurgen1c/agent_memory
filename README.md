@@ -386,7 +386,7 @@ Every durable claim should include:
 - `claim`: the atomic statement agents should rely on.
 - `source_files`: code or docs that support the claim.
 - `verification`: concrete checks a future agent can run.
-- `last_verified_commit`: the tested Git commit, or `null` until verification is complete.
+- `last_verified_commit`: the full tested Git commit object ID, or `null` until verification is complete; movable refs such as branches and `HEAD` are invalid.
 - `tags`: routing keywords for retrieval.
 
 Use `current` for checked knowledge. Use `needs_verification` or `needs_review` for plausible but unverified memory. `confidence: verified` requires a recorded `last_verified_commit`. Audit warns when a claim's supporting files changed after that commit. If code conflicts with memory, trust code and update or deprecate the claim.
@@ -468,7 +468,7 @@ bin/memory audit --git-diff --base origin/main
 ```
 
 `coverage` exits with code `6` when a changed watched file has no related memory update or valid waiver.
-`audit` exits with code `6` for error findings. Shared routes, shared symbols, and same-system claims with at least two shared `source_files` are strong overlap signals and require review. Shared source or related files are warnings, while tag-only overlap is informational. Any semantically accurate explicit graph relationship records that an overlap pair was reviewed; invalid `deprecated_by` references and unresolved active conflicts remain blocking. A recorded `last_verified_commit` must resolve to a commit, and audit warns when referenced source files changed afterward.
+`audit` exits with code `6` for error findings. Shared routes, shared symbols, and same-system claims with at least two shared `source_files` are strong overlap signals and require review. Shared source or related files are warnings, while tag-only overlap is informational. Any semantically accurate explicit graph relationship records that an overlap pair was reviewed; invalid `deprecated_by` references and unresolved active conflicts remain blocking. A recorded `last_verified_commit` must be a full immutable commit object ID that resolves to a commit, and audit warns when referenced source files changed afterward.
 
 With `--git-diff`, audit compares overlap findings with the resolved base revision and reports new or more severe pairs. Use `--strict` to retain the legacy behavior that blocks every overlap, accepts only `replaces` or `conflicts_with` as graph review decisions, blocks `source.related_claims_not_reviewed`, and does not suppress base findings.
 

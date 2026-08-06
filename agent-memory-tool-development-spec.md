@@ -444,8 +444,9 @@ metadata: object
 
 `new claim` creates `needs_review`, low-confidence drafts. Current claims must
 not contain TODO placeholders. `confidence: verified` requires a non-empty
-`last_verified_commit`. Audit resolves that commit and warns when a supporting
-source file changed afterward.
+`last_verified_commit`. The value must be the full immutable Git commit object
+ID rather than a movable ref such as a branch or `HEAD`. Audit resolves that
+commit and warns when a supporting source file changed afterward.
 
 ## 9. One Claim Per File Enforcement
 
@@ -1586,8 +1587,8 @@ prompt to review memory, not proof that a new claim is required. Agents must
 not create placeholder claims or false graph relationships to clear checks.
 New claim and recipe commands create `needs_review` drafts. Current artifacts
 must not contain TODO placeholders. Verified claim confidence requires a
-recorded verification commit, and audit warns when supporting files changed
-after that commit.
+recorded full immutable verification commit object ID, and audit warns when
+supporting files changed after that commit.
 
 ## Relationship Graphs
 
@@ -2219,8 +2220,8 @@ Acceptance criteria:
 - Non-watched file does not fail coverage.
 - A stalled `git cat-file --batch` baseline read is terminated and audit continues with a conservative warning.
 - No core command invokes an unbounded Git subprocess.
-- Unknown verification commits block audit; changed supporting files produce a
-  non-blocking verification warning.
+- Unknown, abbreviated, or movable verification references block audit; changed
+  supporting files produce a non-blocking verification warning.
 
 ### Phase 10 — Agent Skill Installation and Manifest
 

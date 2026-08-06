@@ -3,6 +3,7 @@ import path from "node:path";
 import { loadConfig, renderYamlScalar } from "./config";
 import { AgentMemoryError } from "./errors";
 import { discoverFiles, resolveConfiguredPath, toPosix } from "./files";
+import { normalizeRepoRelativePath } from "./repo";
 import { slugify } from "./templates";
 import { parseYaml } from "./yaml";
 
@@ -35,8 +36,7 @@ export function createRecipe(options: NewRecipeOptions): NewRecipeResult {
   const existingIds = collectExistingRecipeIds(memoryRoot, loaded.config.recipes);
   const baseId = options.id ?? `recipe.${system}.${idSlug}`;
   const baseSlug = options.id ? slugify(recipeIdTail(options.id, system), "-") : titleSlug;
-  const forcedRelativePath = recipeBasePath(loaded.config.memory_root, system, baseSlug);
-  const forcedAbsolutePath = path.join(loaded.repo.root, forcedRelativePath);
+  const forcedAbsolutePath = recipeBasePath(memoryRoot, system, baseSlug);
   const replacingExistingRecipe = Boolean(options.force && fs.existsSync(forcedAbsolutePath));
   const existingTargetId = replacingExistingRecipe ? readRecipeId(forcedAbsolutePath) : null;
 
@@ -52,10 +52,13 @@ export function createRecipe(options: NewRecipeOptions): NewRecipeResult {
     : options.id
       ? assertAvailableRecipeId(options.id, existingIds)
       : nextAvailableRecipeId(baseId, existingIds);
-  const relativePath = replacingExistingRecipe
-    ? forcedRelativePath
-    : nextAvailableRecipePath(loaded.repo.root, loaded.config.memory_root, system, baseSlug);
-  const absolutePath = path.join(loaded.repo.root, relativePath);
+  const absolutePath = replacingExistingRecipe
+    ? forcedAbsolutePath
+    : nextAvailableRecipePath(memoryRoot, system, baseSlug);
+  const displayPath = displayRecipePath(loaded.repo.root, absolutePath);
+  const relevantFiles = (options.relevantFiles ?? []).map((filePath) =>
+    normalizeRepoRelativePath(loaded.repo.root, filePath)
+  );
 
   if (fs.existsSync(absolutePath) && !options.force) {
     throw new AgentMemoryError(`Refusing to overwrite existing recipe file: ${absolutePath}`);
@@ -66,7 +69,7 @@ export function createRecipe(options: NewRecipeOptions): NewRecipeResult {
     system,
     title: options.title,
     intentTriggers: nonEmpty(options.intentTriggers, "TODO: Describe when this recipe should be used."),
-    relevantFiles: options.relevantFiles ?? [],
+    relevantFiles,
     requiredClaims: options.requiredClaims ?? [],
     steps: nonEmpty(options.steps, "TODO: Add the first repository-specific step."),
     verification: nonEmpty(options.verification, "TODO: Add a concrete verification command.")
@@ -78,7 +81,7 @@ export function createRecipe(options: NewRecipeOptions): NewRecipeResult {
   return {
     id,
     path: absolutePath,
-    relativePath: toPosix(relativePath),
+    relativePath: displayPath,
     status: "created"
   };
 }
@@ -176,25 +179,26 @@ function nextAvailableRecipeId(baseId: string, existingIds: Set<string>): string
   return `${baseId}_${counter}`;
 }
 
-function nextAvailableRecipePath(
-  repoRoot: string,
-  memoryRoot: string,
-  system: string,
-  baseSlug: string
-): string {
+function nextAvailableRecipePath(memoryRoot: string, system: string, baseSlug: string): string {
   const basePath = recipeBasePath(memoryRoot, system, baseSlug);
 
-  if (!fs.existsSync(path.join(repoRoot, basePath))) {
+  if (!fs.existsSync(basePath)) {
     return basePath;
   }
 
   let counter = 2;
-  while (fs.existsSync(path.join(repoRoot, memoryRoot, "recipes", system, `${baseSlug}-${counter}.yaml`))) counter += 1;
+  while (fs.existsSync(path.join(memoryRoot, "recipes", system, `${baseSlug}-${counter}.yaml`))) counter += 1;
   return path.join(memoryRoot, "recipes", system, `${baseSlug}-${counter}.yaml`);
 }
 
 function recipeBasePath(memoryRoot: string, system: string, baseSlug: string): string {
   return path.join(memoryRoot, "recipes", system, `${baseSlug}.yaml`);
+}
+
+function displayRecipePath(repoRoot: string, absolutePath: string): string {
+  const relativePath = path.relative(repoRoot, absolutePath);
+  const displayPath = relativePath.startsWith("..") || path.isAbsolute(relativePath) ? absolutePath : relativePath;
+  return toPosix(displayPath);
 }
 
 function recipeIdTail(id: string, system: string): string {

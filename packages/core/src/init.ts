@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { renderClaimSourcePolicy } from "./claim_sources";
 import { defaultConfig, loadConfig, renderConfigTemplate, renderYamlScalar } from "./config";
 import { AgentMemoryError } from "./errors";
 import { installMemoryHooks } from "./hooks";
@@ -432,13 +433,13 @@ A claim tells future agents what is true or must remain true. A recipe tells fut
 
 \`bin/memory new claim\` and \`bin/memory new recipe\` create \`needs_review\` drafts. Claims start with low confidence. Replace every TODO, complete verification, and only then promote an artifact to \`current\`. Current claims or recipes containing TODO placeholders fail validation.
 
-When claim verification succeeds, record the tested Git commit in \`last_verified_commit\`. Use \`confidence: verified\` only when that commit is present. Audit warns when supporting files changed after the recorded verification commit.
+When claim verification succeeds, record the tested full Git commit object ID in \`last_verified_commit\`. Do not use a movable ref such as a branch or \`HEAD\`. Use \`confidence: verified\` only when that commit is present. Audit warns when supporting files changed after the recorded verification commit.
 
 ### Claim Source Policy
 
 \`claim_sources.allow\` and \`claim_sources.deny\` in \`agent-memory.config.yaml\` control which repository files may be referenced by claims and which changed files participate in claim coverage. An empty allow list permits all repository paths; deny patterns always win.
 
-${renderClaimSourcePolicy(config)}
+${renderClaimSourcePolicy(config.claim_sources)}
 
 Do not attach claims to denied paths indirectly through \`related_files\`. If a changed file is policy-excluded, leave it without a claim unless the policy itself should be changed.
 
@@ -477,14 +478,6 @@ function normalizeInstructionFilePath(repoRoot: string, instructionPath: string)
   }
 
   return displayOutputPath(repoRoot, absolutePath);
-}
-
-function renderClaimSourcePolicy(config: AgentMemoryConfig): string {
-  const allow = config.claim_sources.allow.length > 0 ? config.claim_sources.allow.map((pattern) => `\`${pattern}\``).join(", ") : "all repository paths";
-  const deny = config.claim_sources.deny.length > 0 ? config.claim_sources.deny.map((pattern) => `\`${pattern}\``).join(", ") : "none";
-
-  return `- Allowed claim sources: ${allow}
-- Denied claim sources: ${deny}`;
 }
 
 export function wrapperTemplate(packageManager: PackageManager): string {

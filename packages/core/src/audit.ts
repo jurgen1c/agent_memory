@@ -6,7 +6,7 @@ import { loadConfig } from "./config";
 import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, configuredPathRelativeToRepo, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
 import { readGitBlobs } from "./git_blob_reader";
-import { GitCommandError, runGit } from "./git";
+import { GitCommandError, isFullGitObjectId, runGit } from "./git";
 import {
   loadMemory,
   type LoadedMemory,
@@ -172,6 +172,19 @@ function findOutdatedVerifiedClaims(
       continue;
     }
 
+    if (!isFullGitObjectId(reference)) {
+      findings.push({
+        code: "claim.last_verified_commit_invalid",
+        severity: "error",
+        message: `Claim ${claim.id} must use a full immutable Git commit object ID for last_verified_commit: ${reference}.`,
+        claimIds: [claim.id],
+        paths: [memoryPath(memoryRootRelative, claim.sourcePath)],
+        shared_values: {},
+        remediation: "Record the full verification commit object ID or set last_verified_commit to null and lower confidence."
+      });
+      continue;
+    }
+
     let commit: string;
 
     try {
@@ -189,7 +202,7 @@ function findOutdatedVerifiedClaims(
         claimIds: [claim.id],
         paths: [memoryPath(memoryRootRelative, claim.sourcePath)],
         shared_values: {},
-        remediation: "Record a reachable verification commit or set last_verified_commit to null and lower confidence."
+        remediation: "Record a reachable full verification commit object ID or set last_verified_commit to null and lower confidence."
       });
       continue;
     }
