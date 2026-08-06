@@ -155,6 +155,42 @@ agent_instructions:
     }
   });
 
+  test("normalizes and deduplicates repository-relative claim-source globs", () => {
+    const repoRoot = makeTempRepo(`
+version: 1
+claim_sources:
+  allow:
+    - ./src/../app/**
+    - app/**
+  deny:
+    - app\\generated\\**
+`);
+
+    expect(loadConfig({ repoRoot }).config.claim_sources).toEqual({
+      allow: ["app/**"],
+      deny: ["app/generated/**"]
+    });
+  });
+
+  test("rejects absolute and repository-escaping claim-source globs", () => {
+    for (const [key, glob] of [
+      ["allow", "/tmp/**"],
+      ["allow", "../shared/**"],
+      ["deny", "C:\\outside\\**"]
+    ] as const) {
+      const repoRoot = makeTempRepo(`
+version: 1
+claim_sources:
+  ${key}:
+    - ${JSON.stringify(glob)}
+`);
+
+      expect(() => loadConfig({ repoRoot })).toThrow(
+        `Config field claim_sources.${key} must contain repository-relative glob patterns inside the repository`
+      );
+    }
+  });
+
   test("renders YAML-reserved string values as round-trippable strings", () => {
     const config = defaultConfig();
     config.memory_root = "true";

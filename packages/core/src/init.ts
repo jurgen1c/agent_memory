@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { renderClaimSourcePolicy } from "./claim_sources";
-import { defaultConfig, loadConfig, renderConfigTemplate, renderYamlScalar } from "./config";
+import { defaultConfig, loadConfig, renderConfigTemplate } from "./config";
 import { AgentMemoryError } from "./errors";
 import { installMemoryHooks } from "./hooks";
 import { findRepoRoot, normalizeRepoRelativePath, resolveRepoOutputPath } from "./repo";
 import { parseAgentTarget, renderAgentSkill, skillPathForLocation, writeCodexSkillReferences, type AgentTarget } from "./skills";
 import type { AgentMemoryConfig, RepoInfo } from "./types";
+import { setYamlTopLevelValue } from "./yaml";
 
 export type PackageManager = "npm" | "bun";
 
@@ -179,7 +180,9 @@ function ensureConfigFile(
   }
 
   const existing = fs.readFileSync(absolutePath, "utf8");
-  const updated = replaceTopLevelConfigBlock(existing, "agent_instructions", renderAgentInstructionsBlock(config));
+  const updated = setYamlTopLevelValue(existing, "agent_instructions", {
+    paths: config.agent_instructions.paths
+  });
 
   if (updated === existing) {
     actions.push({ path: relativePath, status: "skipped", detail: "instruction paths already configured" });
@@ -188,39 +191,6 @@ function ensureConfigFile(
 
   fs.writeFileSync(absolutePath, updated);
   actions.push({ path: relativePath, status: "updated", detail: "updated managed instruction paths" });
-}
-
-function renderAgentInstructionsBlock(config: AgentMemoryConfig): string {
-  return `agent_instructions:
-  paths:
-${config.agent_instructions.paths.map((instructionPath) => `    - ${renderYamlScalar(instructionPath)}`).join("\n")}`;
-}
-
-function replaceTopLevelConfigBlock(existing: string, key: string, replacement: string): string {
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const headerPattern = new RegExp(`^(?:${escapedKey}|["']${escapedKey}["'])\\s*:[^\\r\\n]*(?:\\r?\\n|$)`, "m");
-  const header = headerPattern.exec(existing);
-
-  if (!header || header.index === undefined) {
-    const prefix = existing.trimEnd();
-    return `${prefix}${prefix.length > 0 ? "\n\n" : ""}${replacement}\n`;
-  }
-
-  const sectionStart = header.index;
-  const contentStart = sectionStart + header[0].length;
-  const remainder = existing.slice(contentStart);
-  const nextKey = /^(?![ \t#\r\n])(?=.)/m.exec(remainder);
-  let sectionEnd = nextKey?.index === undefined ? existing.length : contentStart + nextKey.index;
-
-  const sectionTail = existing.slice(contentStart, sectionEnd);
-  const preservedSectionComment = /(?:^|\r?\n)((?:(?:#[^\r\n]*|\s*)\r?\n)+)$/.exec(sectionTail);
-
-  if (preservedSectionComment?.index !== undefined) {
-    sectionEnd = contentStart + preservedSectionComment.index + (preservedSectionComment[0].startsWith("\n") ? 1 : 0);
-  }
-
-  const suffix = existing.slice(sectionEnd).replace(/^(?:\r?\n)+/, "");
-  return `${existing.slice(0, sectionStart)}${replacement}\n${suffix.length > 0 ? `\n${suffix}` : ""}`;
 }
 
 function writeExecutable(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): void {

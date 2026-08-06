@@ -244,6 +244,35 @@ claim_sources:
     }
   });
 
+  test("inserts instruction paths inside flow mappings and explicit YAML documents", async () => {
+    for (const config of [
+      `{ version: 1, claim_sources: { allow: [], deny: [vendor/**] } }\n`,
+      `version: 1
+claim_sources:
+  allow: []
+  deny:
+    - vendor/**
+...\n`
+    ]) {
+      const repoRoot = makeGitRepo();
+      const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+      fs.writeFileSync(configPath, config);
+
+      const first = await dispatch(["init", "--yes", "--instructions-file", "CLAUDE.md"], { cwd: repoRoot });
+      const updated = fs.readFileSync(configPath, "utf8");
+
+      expect(first.exitCode).toBe(0);
+      expect(loadConfig({ repoRoot }).config.agent_instructions.paths).toEqual(["CLAUDE.md"]);
+      expect(loadConfig({ repoRoot }).config.claim_sources.deny).toEqual(["vendor/**"]);
+      if (config.includes("...")) expect(updated.trimEnd()).toEndWith("...");
+
+      const second = await dispatch(["init", "--yes", "--instructions-file", "CLAUDE.md"], { cwd: repoRoot });
+
+      expect(second.exitCode).toBe(0);
+      expect(fs.readFileSync(configPath, "utf8")).toBe(updated);
+    }
+  });
+
   test("rejects instruction files outside the repository", async () => {
     const repoRoot = makeGitRepo();
     const outsideRelativePath = `../${path.basename(repoRoot)}-outside-instructions.md`;

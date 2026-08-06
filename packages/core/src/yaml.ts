@@ -3,6 +3,7 @@ import {
   parseYamlDocument,
   type JsonValue
 } from "@jurgen1c/agent-core/yaml";
+import { isMap, parseDocument } from "yaml";
 import { ConfigError } from "./errors";
 
 export type YamlValue = JsonValue;
@@ -18,6 +19,29 @@ export function parseYaml(input: string): YamlValue {
   }
 
   throw new ConfigError(`Invalid YAML:\n${formatYamlParseIssues(result.issues)}`);
+}
+
+export function setYamlTopLevelValue(input: string, key: string, value: JsonValue): string {
+  const document = parseDocument(input, {
+    logLevel: "error",
+    prettyErrors: true,
+    schema: "core",
+    strict: true,
+    stringKeys: true,
+    uniqueKeys: true
+  });
+  const issues = [...document.errors, ...document.warnings];
+
+  if (issues.length > 0) {
+    throw new ConfigError(`Invalid YAML:\n${issues.map((issue) => issue.message).join("\n")}`);
+  }
+
+  if (!isMap(document.contents)) {
+    throw new ConfigError("Invalid YAML: expected a top-level mapping.");
+  }
+
+  document.set(key, value);
+  return document.toString({ lineWidth: 0 });
 }
 
 function stripDocumentScalarEnding(value: JsonValue): JsonValue {

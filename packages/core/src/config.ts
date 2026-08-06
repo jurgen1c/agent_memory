@@ -217,7 +217,7 @@ function normalizeConfig(value: unknown, repoRoot: string): AgentMemoryConfig {
       codex: readAgentSkill(value, "codex", DEFAULT_CONFIG.agent_skills.codex),
       generic: readAgentSkill(value, "generic", DEFAULT_CONFIG.agent_skills.generic)
     },
-    claim_sources: readClaimSources(value),
+    claim_sources: readClaimSources(value, repoRoot),
     git: readGit(value),
     validation: readValidation(value),
     context: readContext(value)
@@ -269,13 +269,34 @@ function readAgentSkill(root: Record<string, unknown>, key: "codex" | "generic",
   };
 }
 
-function readClaimSources(root: Record<string, unknown>) {
+function readClaimSources(root: Record<string, unknown>, repoRoot: string) {
   const value = readRecord(root, "claim_sources", {});
 
   return {
-    allow: readStringArray(value, "allow", DEFAULT_CONFIG.claim_sources.allow),
-    deny: readStringArray(value, "deny", DEFAULT_CONFIG.claim_sources.deny)
+    allow: readClaimSourceGlobs(value, "allow", DEFAULT_CONFIG.claim_sources.allow, repoRoot),
+    deny: readClaimSourceGlobs(value, "deny", DEFAULT_CONFIG.claim_sources.deny, repoRoot)
   };
+}
+
+function readClaimSourceGlobs(
+  value: Record<string, unknown>,
+  key: "allow" | "deny",
+  fallback: string[],
+  repoRoot: string
+): string[] {
+  const globs = readStringArray(value, key, fallback);
+  const normalized = globs.map((glob) => {
+    try {
+      return normalizeRepoRelativePath(repoRoot, glob);
+    } catch (error) {
+      throw new ConfigError(
+        `Config field claim_sources.${key} must contain repository-relative glob patterns inside the repository: ${glob}`,
+        { cause: error }
+      );
+    }
+  });
+
+  return Array.from(new Set(normalized));
 }
 
 function readGit(root: Record<string, unknown>) {
