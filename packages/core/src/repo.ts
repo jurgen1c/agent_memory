@@ -67,7 +67,7 @@ export function normalizeRepoRelativePath(repoRoot: string, targetPath: string):
   }
 
   try {
-    const absolutePath = resolveContainedPath(repoRoot, portablePath).absolutePath;
+    const absolutePath = resolveContainedPath(repoRoot, portablePath, { rejectFinalSymlink: true }).absolutePath;
     const relativePath = path.relative(repoRoot, absolutePath).split(path.sep).join("/");
 
     if (relativePath.length === 0) {

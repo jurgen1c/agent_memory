@@ -1094,6 +1094,30 @@ describe("audit command", () => {
     }
   });
 
+  test("rejects invalid last_verified_commit values on inactive claims", async () => {
+    for (const status of ["stale", "deprecated", "rejected"]) {
+      const cwd = copyFixture(mockApp);
+      const relativeClaimPath = "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md";
+      const claimPath = path.join(cwd, relativeClaimPath);
+      fs.writeFileSync(
+        claimPath,
+        fs
+          .readFileSync(claimPath, "utf8")
+          .replace("status: current", `status: ${status}`)
+          .replace("last_verified_commit: null", "last_verified_commit: HEAD")
+      );
+
+      const result = await dispatch(["audit", "--changed-files", relativeClaimPath, "--json"], { cwd });
+      const parsed = JSON.parse(result.stdout) as {
+        findings: Array<{ code: string; claimIds: string[] }>;
+      };
+      const finding = parsed.findings.find((item) => item.code === "claim.last_verified_commit_invalid");
+
+      expect(result.exitCode).toBe(6);
+      expect(finding?.claimIds).toEqual(["auth.student_oauth.uid_is_tenant_scoped"]);
+    }
+  });
+
   test("rejects abbreviated commit IDs in SHA-256 repositories", async () => {
     const cwd = copyFixture(mockApp);
     git(cwd, ["init", "--object-format=sha256"]);

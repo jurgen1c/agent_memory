@@ -330,6 +330,33 @@ describe("new recipe command", () => {
     expect(fs.existsSync(incorrectPath)).toBe(false);
   });
 
+  test("rejects recipe output paths that escape the memory root through symlinks", async () => {
+    for (const symlinkLocation of ["recipes", "system", "file"] as const) {
+      const repoRoot = makeGitRepo();
+      await dispatch(["init", "--yes"], { cwd: repoRoot });
+      const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-outside-recipes-"));
+      const recipesRoot = path.join(repoRoot, "docs/agent-memory/recipes");
+      const systemRoot = path.join(recipesRoot, "auth");
+      const outsideFile = path.join(outsideRoot, "symlink-escape.yaml");
+
+      if (symlinkLocation === "recipes") {
+        fs.rmSync(recipesRoot, { recursive: true });
+        fs.symlinkSync(outsideRoot, recipesRoot, "dir");
+      } else if (symlinkLocation === "system") {
+        fs.symlinkSync(outsideRoot, systemRoot, "dir");
+      } else {
+        fs.mkdirSync(systemRoot, { recursive: true });
+        fs.symlinkSync(outsideFile, path.join(systemRoot, "symlink-escape.yaml"), "file");
+      }
+
+      await expect(
+        dispatch(["new", "recipe", "--system=auth", "--title=Symlink Escape"], { cwd: repoRoot })
+      ).rejects.toThrow("Recipe output path must stay inside the configured memory root");
+
+      expect(fs.existsSync(outsideFile)).toBe(false);
+    }
+  });
+
   test("normalizes recipe source paths and rejects paths outside the repository", async () => {
     const repoRoot = makeGitRepo();
     await dispatch(["init", "--yes"], { cwd: repoRoot });

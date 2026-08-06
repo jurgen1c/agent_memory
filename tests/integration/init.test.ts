@@ -290,6 +290,20 @@ claim_sources:
     expect(fs.existsSync(path.join(repoRoot, "agent-memory.config.yaml"))).toBe(false);
   });
 
+  test("rejects dangling symlink instruction files before writing their targets", async () => {
+    const repoRoot = makeGitRepo();
+    const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-outside-instructions-"));
+    const outsideFile = path.join(outsideRoot, "AGENTS.md");
+    fs.symlinkSync(outsideFile, path.join(repoRoot, "AGENTS.md"), "file");
+
+    await expect(dispatch(["init", "--yes", "--instructions-file", "AGENTS.md"], { cwd: repoRoot })).rejects.toThrow(
+      "must be a repository-relative path inside the repository"
+    );
+
+    expect(fs.existsSync(outsideFile)).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, "agent-memory.config.yaml"))).toBe(false);
+  });
+
   test("preserves user whitespace around refreshed AGENTS sections", async () => {
     const repoRoot = makeGitRepo();
     const agentsPath = path.join(repoRoot, "AGENTS.md");

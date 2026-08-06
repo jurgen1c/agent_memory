@@ -1,5 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import {
+  PathContainmentError,
+  resolveContainedPath
+} from "@jurgen1c/agent-core/repository";
 import { loadConfig, renderYamlScalar } from "./config";
 import { AgentMemoryError } from "./errors";
 import { discoverFiles, resolveConfiguredPath, toPosix } from "./files";
@@ -37,6 +41,7 @@ export function createRecipe(options: NewRecipeOptions): NewRecipeResult {
   const baseId = options.id ?? `recipe.${system}.${idSlug}`;
   const baseSlug = options.id ? slugify(recipeIdTail(options.id, system), "-") : titleSlug;
   const forcedAbsolutePath = recipeBasePath(memoryRoot, system, baseSlug);
+  assertRecipeOutputPath(memoryRoot, forcedAbsolutePath);
   const replacingExistingRecipe = Boolean(options.force && fs.existsSync(forcedAbsolutePath));
   const existingTargetId = replacingExistingRecipe ? readRecipeId(forcedAbsolutePath) : null;
 
@@ -52,9 +57,10 @@ export function createRecipe(options: NewRecipeOptions): NewRecipeResult {
     : options.id
       ? assertAvailableRecipeId(options.id, existingIds)
       : nextAvailableRecipeId(baseId, existingIds);
-  const absolutePath = replacingExistingRecipe
-    ? forcedAbsolutePath
-    : nextAvailableRecipePath(memoryRoot, system, baseSlug);
+  const absolutePath = assertRecipeOutputPath(
+    memoryRoot,
+    replacingExistingRecipe ? forcedAbsolutePath : nextAvailableRecipePath(memoryRoot, system, baseSlug)
+  );
   const displayPath = displayRecipePath(loaded.repo.root, absolutePath);
   const relevantFiles = (options.relevantFiles ?? []).map((filePath) =>
     normalizeRepoRelativePath(loaded.repo.root, filePath)
@@ -193,6 +199,18 @@ function nextAvailableRecipePath(memoryRoot: string, system: string, baseSlug: s
 
 function recipeBasePath(memoryRoot: string, system: string, baseSlug: string): string {
   return path.join(memoryRoot, "recipes", system, `${baseSlug}.yaml`);
+}
+
+function assertRecipeOutputPath(memoryRoot: string, targetPath: string): string {
+  try {
+    return resolveContainedPath(memoryRoot, targetPath, { rejectFinalSymlink: true }).absolutePath;
+  } catch (error) {
+    if (!(error instanceof PathContainmentError)) throw error;
+    throw new AgentMemoryError("Recipe output path must stay inside the configured memory root.", {
+      details: ["Remove output-path symlinks that leave the memory root and try again."],
+      cause: error
+    });
+  }
 }
 
 function displayRecipePath(repoRoot: string, absolutePath: string): string {

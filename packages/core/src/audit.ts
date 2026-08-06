@@ -171,10 +171,6 @@ function findOutdatedVerifiedClaims(
   let workingTreeFiles: string[] | undefined;
 
   for (const claim of claims) {
-    if (!isActiveClaim(claim)) {
-      continue;
-    }
-
     const rawReference = claim.raw.last_verified_commit;
 
     if (rawReference === undefined || rawReference === null) {
@@ -238,6 +234,10 @@ function findOutdatedVerifiedClaims(
         memoryRootRelative,
         `Claim ${claim.id} must use the repository's full immutable Git commit object ID for last_verified_commit: ${reference}.`
       ));
+      continue;
+    }
+
+    if (!isActiveClaim(claim)) {
       continue;
     }
 
