@@ -171,6 +171,44 @@ describe("new claim command", () => {
     expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/vendor/vendor-secret-behavior.md"))).toBe(false);
   });
 
+  test("normalizes source paths and rejects paths outside the repository", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+
+    await dispatch(
+      [
+        "new",
+        "claim",
+        "--type=fact",
+        "--system=auth",
+        "--title=Normalized source",
+        "--source-file=src/../lib/auth.ts"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const claimPath = path.join(repoRoot, "docs/agent-memory/claims/auth/normalized-source.md");
+    expect(fs.readFileSync(claimPath, "utf8")).toContain("  - lib/auth.ts");
+
+    for (const sourceFile of [path.join(os.tmpdir(), "outside.ts"), "../outside.ts", "C:\\outside\\source.ts"]) {
+      await expect(
+        dispatch(
+          [
+            "new",
+            "claim",
+            "--type=fact",
+            "--system=invalid",
+            `--title=Outside ${sourceFile}`,
+            `--source-file=${sourceFile}`
+          ],
+          { cwd: repoRoot }
+        )
+      ).rejects.toThrow(/Path (?:must be repository-relative|escapes repository root)/);
+    }
+
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/invalid"))).toBe(false);
+  });
+
   test("supports equals-form claim options and validates bad input", async () => {
     const repoRoot = makeGitRepo();
     await dispatch(["init", "--yes"], { cwd: repoRoot });

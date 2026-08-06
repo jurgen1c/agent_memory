@@ -127,6 +127,34 @@ context:
     expect(() => loadConfig({ repoRoot })).toThrow(ConfigError);
   });
 
+  test("normalizes and deduplicates repository-relative instruction paths", () => {
+    const repoRoot = makeTempRepo(`
+version: 1
+agent_instructions:
+  paths:
+    - ./docs/../AGENTS.md
+    - AGENTS.md
+    - nested\\CLAUDE.md
+`);
+
+    expect(loadConfig({ repoRoot }).config.agent_instructions.paths).toEqual(["AGENTS.md", "nested/CLAUDE.md"]);
+  });
+
+  test("rejects absolute and repository-escaping instruction paths", () => {
+    for (const instructionPath of ["/tmp/AGENTS.md", "../AGENTS.md", "C:\\outside\\AGENTS.md"]) {
+      const repoRoot = makeTempRepo(`
+version: 1
+agent_instructions:
+  paths:
+    - ${JSON.stringify(instructionPath)}
+`);
+
+      expect(() => loadConfig({ repoRoot })).toThrow(
+        "Config field agent_instructions.paths must contain repository-relative paths inside the repository"
+      );
+    }
+  });
+
   test("renders YAML-reserved string values as round-trippable strings", () => {
     const config = defaultConfig();
     config.memory_root = "true";

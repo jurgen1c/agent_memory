@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ConfigError } from "./errors";
-import { findRepoRoot, resolveInsideRepo } from "./repo";
+import { findRepoRoot, normalizeRepoRelativePath, resolveInsideRepo } from "./repo";
 import type { AgentMemoryConfig, LoadedConfig, RepoInfo } from "./types";
 import { parseYaml } from "./yaml";
 
@@ -77,7 +77,7 @@ export function loadConfig(options: LoadConfigOptions = {}): LoadedConfig {
 
   const raw = fs.readFileSync(configPath, "utf8");
   const parsed = parseYaml(raw);
-  const config = normalizeConfig(parsed);
+  const config = normalizeConfig(parsed, repo.root);
 
   return {
     config,
@@ -188,7 +188,7 @@ function resolveRepo(options: LoadConfigOptions): RepoInfo {
   return findRepoRoot(options.cwd);
 }
 
-function normalizeConfig(value: unknown): AgentMemoryConfig {
+function normalizeConfig(value: unknown, repoRoot: string): AgentMemoryConfig {
   if (!isRecord(value)) {
     throw new ConfigError("Config root must be a YAML mapping.");
   }
@@ -212,7 +212,7 @@ function normalizeConfig(value: unknown): AgentMemoryConfig {
     plans: readStringArray(value, "plans", DEFAULT_CONFIG.plans),
     profiles: readStringArray(value, "profiles", DEFAULT_CONFIG.profiles),
     waivers: readStringArray(value, "waivers", DEFAULT_CONFIG.waivers),
-    agent_instructions: readAgentInstructions(value),
+    agent_instructions: readAgentInstructions(value, repoRoot),
     agent_skills: {
       codex: readAgentSkill(value, "codex", DEFAULT_CONFIG.agent_skills.codex),
       generic: readAgentSkill(value, "generic", DEFAULT_CONFIG.agent_skills.generic)
@@ -224,7 +224,7 @@ function normalizeConfig(value: unknown): AgentMemoryConfig {
   };
 }
 
-function readAgentInstructions(root: Record<string, unknown>) {
+function readAgentInstructions(root: Record<string, unknown>, repoRoot: string) {
   const value = readRecord(root, "agent_instructions", {});
   const legacyPath = value.path;
 
@@ -243,8 +243,19 @@ function readAgentInstructions(root: Record<string, unknown>) {
     throw new ConfigError("Config field agent_instructions.paths must contain at least one non-empty path.");
   }
 
+  const normalizedPaths = paths.map((instructionPath) => {
+    try {
+      return normalizeRepoRelativePath(repoRoot, instructionPath);
+    } catch (error) {
+      throw new ConfigError(
+        `Config field agent_instructions.paths must contain repository-relative paths inside the repository: ${instructionPath}`,
+        { cause: error }
+      );
+    }
+  });
+
   return {
-    paths: Array.from(new Set(paths))
+    paths: Array.from(new Set(normalizedPaths))
   };
 }
 

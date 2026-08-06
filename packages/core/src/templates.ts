@@ -4,6 +4,7 @@ import { describeClaimSourcePolicyDecision, evaluateClaimSourcePath } from "./cl
 import { AgentMemoryError, NotFoundError } from "./errors";
 import { loadConfig } from "./config";
 import { resolveConfiguredPath } from "./files";
+import { normalizeRepoRelativePath } from "./repo";
 
 export const CLAIM_TYPES = [
   "fact",
@@ -468,7 +469,9 @@ export function createClaim(options: NewClaimOptions): NewClaimResult {
   const loaded = loadConfig({ cwd: options.cwd });
   const memoryRoot = resolveConfiguredPath(loaded.repo.root, loaded.config.memory_root);
   const normalizedSystem = normalizeSystem(options.system);
-  const sourceFile = options.sourceFile ?? "TODO_SOURCE_FILE";
+  const sourceFile = options.sourceFile
+    ? normalizeRepoRelativePath(loaded.repo.root, options.sourceFile)
+    : "TODO_SOURCE_FILE";
   const verificationStep = options.verificationStep ?? "TODO - Add a concrete verification step.";
   const claimText = options.claim ?? `TODO: Document ${options.title}.`;
   const explicitId = options.id;
@@ -480,10 +483,10 @@ export function createClaim(options: NewClaimOptions): NewClaimResult {
   const absolutePath = path.join(loaded.repo.root, relativePath);
 
   if (options.sourceFile) {
-    const sourceDecision = evaluateClaimSourcePath(options.sourceFile, loaded.config.claim_sources);
+    const sourceDecision = evaluateClaimSourcePath(sourceFile, loaded.config.claim_sources);
 
     if (!sourceDecision.eligible) {
-      throw new AgentMemoryError(describeClaimSourcePolicyDecision(options.sourceFile, sourceDecision), {
+      throw new AgentMemoryError(describeClaimSourcePolicyDecision(sourceFile, sourceDecision), {
         details: ["Update claim_sources in agent-memory.config.yaml only when this path should become eligible for durable claims."]
       });
     }
