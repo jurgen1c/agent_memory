@@ -4,7 +4,7 @@ import { renderClaimSourcePolicy } from "./claim_sources";
 import { defaultConfig, loadConfig, renderConfigTemplate, renderYamlScalar } from "./config";
 import { AgentMemoryError } from "./errors";
 import { installMemoryHooks } from "./hooks";
-import { findRepoRoot, resolveRepoOutputPath } from "./repo";
+import { findRepoRoot, normalizeRepoRelativePath, resolveRepoOutputPath } from "./repo";
 import { parseAgentTarget, renderAgentSkill, skillPathForLocation, writeCodexSkillReferences, type AgentTarget } from "./skills";
 import type { AgentMemoryConfig, RepoInfo } from "./types";
 
@@ -463,21 +463,26 @@ Update targets:
 }
 
 function normalizeInstructionFilePath(repoRoot: string, instructionPath: string): string {
-  if (path.isAbsolute(instructionPath)) {
-    throw new AgentMemoryError("Agent instruction file must be a repository-relative path.", {
-      details: ["Example: --instructions-file CLAUDE.md"]
+  let normalizedPath: string;
+
+  try {
+    normalizedPath = normalizeRepoRelativePath(repoRoot, instructionPath);
+  } catch (error) {
+    throw new AgentMemoryError("Agent instruction file must be a repository-relative path inside the repository.", {
+      details: ["Example: --instructions-file CLAUDE.md"],
+      cause: error
     });
   }
 
-  const absolutePath = resolveOutputPath(repoRoot, instructionPath);
+  const absolutePath = resolveOutputPath(repoRoot, normalizedPath);
 
   if (fs.existsSync(absolutePath) && fs.statSync(absolutePath).isDirectory()) {
-    throw new AgentMemoryError(`Agent instruction path points to a directory: ${instructionPath}`, {
+    throw new AgentMemoryError(`Agent instruction path points to a directory: ${normalizedPath}`, {
       details: ["Choose a repository-relative instruction file such as AGENTS.md or CLAUDE.md."]
     });
   }
 
-  return displayOutputPath(repoRoot, absolutePath);
+  return normalizedPath;
 }
 
 export function wrapperTemplate(packageManager: PackageManager): string {
@@ -502,6 +507,13 @@ if command -v agent-memory >/dev/null 2>&1; then
   exec agent-memory "$@"
 fi
 
+if [ ! -t 0 ] && [ "\${AGENT_MEMORY_ALLOW_NPX:-}" != "1" ]; then
+  printf '%s\\n' \\
+    "No installed agent-memory CLI was found in this non-interactive environment." \\
+    "Install @jurgen1c/agent-memory-cli, set AGENT_MEMORY_CLI, or set AGENT_MEMORY_ALLOW_NPX=1 to permit the package-manager fallback." >&2
+  exit 1
+fi
+
 exec ${fallback} "$@"
 `;
 }
@@ -514,12 +526,42 @@ export function detectGeneratedWrapperPackageManager(content: string): PackageMa
       return packageManager;
     }
 
+    if (normalized === normalizeWrapperContent(unboundedWrapperTemplate(packageManager))) {
+      return packageManager;
+    }
+
     if (normalized === normalizeWrapperContent(legacyWrapperTemplate(packageManager))) {
       return packageManager;
     }
   }
 
   return null;
+}
+
+function unboundedWrapperTemplate(packageManager: PackageManager): string {
+  const fallback = packageManager === "bun" ? "bunx @jurgen1c/agent-memory-cli" : "npx -y @jurgen1c/agent-memory-cli";
+
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "\${AGENT_MEMORY_CLI:-}" ]; then
+  exec "\${AGENT_MEMORY_CLI}" "$@"
+fi
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "\${SCRIPT_DIR}/.." && pwd)"
+LOCAL_CLI="\${REPO_ROOT}/node_modules/.bin/agent-memory"
+
+if [ -x "\${LOCAL_CLI}" ]; then
+  exec "\${LOCAL_CLI}" "$@"
+fi
+
+if command -v agent-memory >/dev/null 2>&1; then
+  exec agent-memory "$@"
+fi
+
+exec ${fallback} "$@"
+`;
 }
 
 function legacyWrapperTemplate(packageManager: PackageManager): string {

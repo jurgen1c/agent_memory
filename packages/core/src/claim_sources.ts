@@ -70,7 +70,7 @@ function renderMarkdownCodeSpan(value: string): string {
   return `${delimiter}${padding}${singleLine}${padding}${delimiter}`;
 }
 
-function normalizeClaimSourcePath(filePath: string): string {
+export function normalizeClaimSourcePath(filePath: string): string {
   const normalizedSeparators = toPosix(filePath).replaceAll("\\", "/");
   const normalizedSegments = path.posix.normalize(normalizedSeparators);
   return normalizedSegments === "." ? "" : normalizedSegments.replace(/^(?:\.\/)+/, "");

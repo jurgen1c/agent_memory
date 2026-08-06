@@ -95,7 +95,8 @@ function addRequiredGitFiles(
     }
   } catch (error) {
     throw new AgentMemoryError(message, {
-      details: [formatGitFailure(error)]
+      details: [formatGitFailure(error)],
+      cause: error
     });
   }
 }
@@ -109,7 +110,8 @@ function assertGitWorkTree(repoRoot: string, options: GitDiffOptions): void {
     }
   } catch (error) {
     throw new AgentMemoryError("Could not inspect Git changes.", {
-      details: [formatGitFailure(error)]
+      details: [formatGitFailure(error)],
+      cause: error
     });
   }
 }
@@ -124,7 +126,8 @@ function gitHeadExists(repoRoot: string, options: GitDiffOptions): boolean {
     }
 
     throw new AgentMemoryError("Could not inspect Git revision HEAD.", {
-      details: [formatGitFailure(error)]
+      details: [formatGitFailure(error)],
+      cause: error
     });
   }
 }
@@ -141,7 +144,8 @@ function gitHeadHasParent(repoRoot: string, options: GitDiffOptions): boolean {
     return revisions.length > 1;
   } catch (error) {
     throw new AgentMemoryError("Could not inspect Git revision HEAD.", {
-      details: [formatGitFailure(error)]
+      details: [formatGitFailure(error)],
+      cause: error
     });
   }
 }

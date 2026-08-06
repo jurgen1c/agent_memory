@@ -198,6 +198,21 @@ agent_instructions:
     expect(wrapper).toContain("bunx @jurgen1c/agent-memory-cli");
   });
 
+  test("refreshes previously generated wrappers with an unbounded scoped fallback", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
+    fs.writeFileSync(wrapperPath, unboundedGeneratedWrapper("npm"));
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+    const wrapper = fs.readFileSync(wrapperPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("refreshed npm wrapper");
+    expect(wrapper).toBe(wrapperTemplate("npm"));
+    expect(wrapper).toContain("AGENT_MEMORY_ALLOW_NPX");
+  });
+
   test("refreshes generated wrappers with EOF whitespace drift", async () => {
     const repoRoot = makeRepo(oldConfig());
     const wrapperPath = path.join(repoRoot, "bin/memory");
@@ -623,6 +638,32 @@ set -euo pipefail
 
 if [ -n "\${AGENT_MEMORY_CLI:-}" ]; then
   exec "\${AGENT_MEMORY_CLI}" "$@"
+fi
+
+if command -v agent-memory >/dev/null 2>&1; then
+  exec agent-memory "$@"
+fi
+
+exec ${fallback} "$@"
+`;
+}
+
+function unboundedGeneratedWrapper(packageManager: "npm" | "bun"): string {
+  const fallback = packageManager === "bun" ? "bunx @jurgen1c/agent-memory-cli" : "npx -y @jurgen1c/agent-memory-cli";
+
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "\${AGENT_MEMORY_CLI:-}" ]; then
+  exec "\${AGENT_MEMORY_CLI}" "$@"
+fi
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "\${SCRIPT_DIR}/.." && pwd)"
+LOCAL_CLI="\${REPO_ROOT}/node_modules/.bin/agent-memory"
+
+if [ -x "\${LOCAL_CLI}" ]; then
+  exec "\${LOCAL_CLI}" "$@"
 fi
 
 if command -v agent-memory >/dev/null 2>&1; then

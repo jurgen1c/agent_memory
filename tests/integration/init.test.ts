@@ -68,8 +68,10 @@ describe("init command", () => {
     expect(agents).toContain("Allowed claim sources: all repository paths");
     const wrapper = fs.readFileSync(path.join(repoRoot, "bin/memory"), "utf8");
     expect(wrapper).toContain('LOCAL_CLI="${REPO_ROOT}/node_modules/.bin/agent-memory"');
+    expect(wrapper).toContain('AGENT_MEMORY_ALLOW_NPX:-}');
     expect(wrapper).toContain("exec npx -y @jurgen1c/agent-memory-cli");
     expect(wrapper).not.toContain("npx agent-memory");
+    expect(fs.readFileSync(path.resolve("bin/memory"), "utf8")).toBe(wrapper);
     expect(fs.statSync(path.join(repoRoot, "bin/memory")).mode & 0o111).toBeGreaterThan(0);
 
     const second = await dispatch(["init", "--yes"], { cwd: repoRoot });
@@ -207,10 +209,13 @@ Keep this footer too.
     const outsideRelativePath = `../${path.basename(repoRoot)}-outside-instructions.md`;
 
     await expect(dispatch(["init", "--yes", "--instructions-file", outsideRelativePath], { cwd: repoRoot })).rejects.toThrow(
-      "Relative output path escapes repository root"
+      "must be a repository-relative path inside the repository"
     );
     await expect(dispatch(["init", "--yes", "--instructions-file", "/tmp/CLAUDE.md"], { cwd: repoRoot })).rejects.toThrow(
-      "must be a repository-relative path"
+      "must be a repository-relative path inside the repository"
+    );
+    await expect(dispatch(["init", "--yes", "--instructions-file", "C:\\outside\\AGENTS.md"], { cwd: repoRoot })).rejects.toThrow(
+      "must be a repository-relative path inside the repository"
     );
 
     expect(fs.existsSync(path.join(repoRoot, "agent-memory.config.yaml"))).toBe(false);
@@ -376,6 +381,23 @@ Keep this footer too.
 
     expect(wrapper).toContain("exec bunx @jurgen1c/agent-memory-cli");
     expect(wrapper).not.toContain("bunx agent-memory");
+  });
+
+  test("does not invoke a package-manager fallback automatically in non-interactive environments", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes", "--package-manager", "npm"], { cwd: repoRoot });
+
+    const result = spawnSync("/bin/bash", ["bin/memory", "help"], {
+      cwd: repoRoot,
+      env: {
+        PATH: "/usr/bin:/bin"
+      },
+      encoding: "utf8"
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("No installed agent-memory CLI was found in this non-interactive environment.");
+    expect(result.stderr).toContain("AGENT_MEMORY_ALLOW_NPX=1");
   });
 
   test("can install non-blocking git hooks during init", async () => {

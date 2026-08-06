@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { readGitDiffSelection } from "../../packages/core/src/changes";
-import { GitCommandError, runGit } from "../../packages/core/src/git";
+import { GitCommandError, repositoryObjectIdLength, runGit } from "../../packages/core/src/git";
 
 describe("bounded Git command runner", () => {
   test("returns trimmed text output", () => {
@@ -84,6 +84,29 @@ esac
     runGit(root, ["add", "staged.ts"]);
 
     expect(readGitDiffSelection(root).files).toEqual(["staged.ts", "untracked.ts"]);
+  });
+
+  test("reads the repository object ID length without spawning Git", () => {
+    const sha1Root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-sha1-format-"));
+    const sha256Root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-sha256-format-"));
+    fs.mkdirSync(path.join(sha1Root, ".git"));
+    fs.mkdirSync(path.join(sha256Root, ".git"));
+    fs.writeFileSync(path.join(sha1Root, ".git/config"), "[core]\n\trepositoryformatversion = 0\n");
+    expect(repositoryObjectIdLength(sha1Root)).toBe(40);
+
+    for (const objectFormat of ['"sha256"', "sha256 # repository hash format", '"sha256" ; repository hash format']) {
+      fs.writeFileSync(
+        path.join(sha256Root, ".git/config"),
+        `[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectFormat = ${objectFormat}\n`
+      );
+      expect(repositoryObjectIdLength(sha256Root)).toBe(64);
+    }
+
+    fs.writeFileSync(
+      path.join(sha1Root, ".git/config"),
+      '[core]\n\trepositoryformatversion = 0\n[extensions "metadata"]\n\tobjectFormat = sha256\n'
+    );
+    expect(repositoryObjectIdLength(sha1Root)).toBe(40);
   });
 });
 

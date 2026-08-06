@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -66,6 +67,26 @@ describe("validate command", () => {
     const changed = await dispatch(["validate", "--changed-files", "docs/agent-memory/claims/auth/broken_unrelated.md"], { cwd });
     expect(changed.exitCode).toBe(2);
     expect(changed.stdout).toContain("claim.source_files.missing");
+  });
+
+  test("revalidates all claim sources when the source policy config changes", async () => {
+    const cwd = copyFixture(mockApp);
+    const configPath = path.join(cwd, "agent-memory.config.yaml");
+    fs.appendFileSync(
+      configPath,
+      `
+claim_sources:
+  allow:
+    - app/**
+  deny: []
+`
+    );
+
+    const result = await dispatch(["validate", "--changed-files", "agent-memory.config.yaml"], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("claim.source_files.not_allowed");
+    expect(result.stdout).toContain("src/auth.js");
   });
 
   test("checks changed graphs against unchanged claim references", async () => {
@@ -511,6 +532,23 @@ status: current
     expect(result.exitCode).toBe(2);
     expect(result.stdout).toContain("claim.last_verified_commit.invalid");
     expect(result.stdout).toContain("full immutable Git commit object ID");
+  });
+
+  test("requires the full object ID length used by a SHA-256 repository", async () => {
+    const cwd = copyFixture(validFixture);
+    const initialized = spawnSync("git", ["init", "--object-format=sha256"], { cwd, encoding: "utf8" });
+    expect(initialized.status).toBe(0);
+    const relativePath = "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md";
+    const claimPath = path.join(cwd, relativePath);
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${"a".repeat(40)}`)
+    );
+
+    const result = await dispatch(["validate", "--changed-files", relativePath], { cwd });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("claim.last_verified_commit.invalid");
   });
 });
 

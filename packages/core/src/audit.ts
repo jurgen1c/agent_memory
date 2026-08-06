@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { normalizeChangedFiles, readGitDiffSelection } from "./changes";
+import { normalizeClaimSourcePath } from "./claim_sources";
 import { loadConfig } from "./config";
 import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, configuredPathRelativeToRepo, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
@@ -24,6 +25,8 @@ export interface AuditOptions {
   gitDiff?: boolean;
   baseRef?: string;
   strict?: boolean;
+  gitBinary?: string;
+  gitTimeoutMs?: number;
 }
 
 export type AuditSeverity = "error" | "warning" | "info";
@@ -99,7 +102,12 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
   const memoryRootRelative = configuredPathRelativeToRepo(repoRoot, loaded.config.memory_root);
   const memoryFiles = canonicalMemoryFiles(repoRoot, memoryRootRelative, loaded.config);
   const gitDiffSelection = options.gitDiff
-    ? readGitDiffSelection(repoRoot, { baseRef: options.baseRef, includeCommittedFallback: true })
+    ? readGitDiffSelection(repoRoot, {
+        baseRef: options.baseRef,
+        includeCommittedFallback: true,
+        gitBinary: options.gitBinary,
+        timeoutMs: options.gitTimeoutMs
+      })
     : undefined;
   const changedFiles = normalizeAuditFiles(
     [...(options.changedFiles ?? []), ...(gitDiffSelection?.files ?? [])],
@@ -110,7 +118,7 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
   const claimsById = new Map(claims.map((claim) => [claim.id, claim]));
   const explicitRelations = explicitRelationsFromGraphs(memory.graphs);
   const strict = options.strict ?? false;
-  const verificationAudit = findOutdatedVerifiedClaims(repoRoot, claims, memoryRootRelative);
+  const verificationAudit = findOutdatedVerifiedClaims(repoRoot, claims, memoryRootRelative, options);
 
   if (options.gitDiff && strict && options.baseRef) {
     resolveBaselineRevision(repoRoot, options.baseRef, changedFiles, gitDiffSelection?.usedCommittedFallback ?? false, []);
@@ -154,7 +162,8 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
 function findOutdatedVerifiedClaims(
   repoRoot: string,
   claims: ClaimRecord[],
-  memoryRootRelative: string
+  memoryRootRelative: string,
+  options: Pick<AuditOptions, "gitBinary" | "gitTimeoutMs">
 ): { findings: AuditFinding[]; warnings: string[] } {
   const findings: AuditFinding[] = [];
   const warnings: string[] = [];
@@ -166,11 +175,22 @@ function findOutdatedVerifiedClaims(
       continue;
     }
 
-    const reference = readString(claim.raw, "last_verified_commit").trim();
+    const rawReference = claim.raw.last_verified_commit;
 
-    if (reference.length === 0) {
+    if (rawReference === undefined || rawReference === null) {
       continue;
     }
+
+    if (typeof rawReference !== "string" || rawReference.trim().length === 0) {
+      findings.push(invalidVerificationFinding(
+        claim,
+        memoryRootRelative,
+        `Claim ${claim.id} has a malformed last_verified_commit; expected a full immutable Git commit object ID or null.`
+      ));
+      continue;
+    }
+
+    const reference = rawReference.trim();
 
     if (!isFullGitObjectId(reference)) {
       findings.push({
@@ -188,11 +208,16 @@ function findOutdatedVerifiedClaims(
     let commit: string;
 
     try {
-      commit = runGit(repoRoot, ["rev-parse", "--verify", `${reference}^{commit}`]);
+      commit = runGit(repoRoot, ["rev-parse", "--verify", `${reference}^{commit}`], {
+        gitBinary: options.gitBinary,
+        timeoutMs: options.gitTimeoutMs
+      });
     } catch (error) {
-      if (error instanceof GitCommandError && error.timedOut) {
-        warnings.push(`Could not check last_verified_commit for ${claim.id}: ${error.message}.`);
-        continue;
+      const unavailableGit = unavailableGitFailure(error);
+
+      if (unavailableGit) {
+        findings.push(verificationUnavailableFinding(claim, memoryRootRelative, unavailableGit));
+        break;
       }
 
       findings.push({
@@ -207,20 +232,42 @@ function findOutdatedVerifiedClaims(
       continue;
     }
 
+    if (commit.toLowerCase() !== reference.toLowerCase()) {
+      findings.push(invalidVerificationFinding(
+        claim,
+        memoryRootRelative,
+        `Claim ${claim.id} must use the repository's full immutable Git commit object ID for last_verified_commit: ${reference}.`
+      ));
+      continue;
+    }
+
     let changedFiles = changedFilesByCommit.get(commit);
 
     if (!changedFiles) {
       try {
         const committed = normalizeAuditFiles(
-          runGit(repoRoot, ["diff", "--name-only", `${commit}..HEAD`])
+          runGit(repoRoot, ["diff", "--name-only", `${commit}..HEAD`], {
+            gitBinary: options.gitBinary,
+            timeoutMs: options.gitTimeoutMs
+          })
             .split(/\r?\n/)
             .filter(Boolean),
           repoRoot
         );
-        workingTreeFiles ??= readGitDiffSelection(repoRoot).files;
+        workingTreeFiles ??= readGitDiffSelection(repoRoot, {
+          gitBinary: options.gitBinary,
+          timeoutMs: options.gitTimeoutMs
+        }).files;
         changedFiles = Array.from(new Set([...committed, ...workingTreeFiles])).sort();
         changedFilesByCommit.set(commit, changedFiles);
       } catch (error) {
+        const unavailableGit = unavailableGitFailure(error);
+
+        if (unavailableGit) {
+          findings.push(verificationUnavailableFinding(claim, memoryRootRelative, unavailableGit));
+          break;
+        }
+
         warnings.push(
           `Could not compare claim verification commit ${reference} to the current tree: ${
             error instanceof Error ? error.message : String(error)
@@ -945,7 +992,52 @@ function overlapSeverity(left: ClaimRecord, right: ClaimRecord, shared: AuditSha
 }
 
 function claimMentionsFile(claim: ClaimRecord, sourceFile: string): boolean {
-  return [...claim.sourceFiles, ...claim.relatedFiles].some((pattern) => pattern === sourceFile || pathMatchesPattern(pattern, sourceFile));
+  const normalizedSourceFile = normalizeClaimSourcePath(sourceFile);
+
+  return [...claim.sourceFiles, ...claim.relatedFiles].some((pattern) => {
+    const normalizedPattern = normalizeClaimSourcePath(pattern);
+    return normalizedPattern === normalizedSourceFile || pathMatchesPattern(normalizedPattern, normalizedSourceFile);
+  });
+}
+
+function invalidVerificationFinding(claim: ClaimRecord, memoryRootRelative: string, message: string): AuditFinding {
+  return {
+    code: "claim.last_verified_commit_invalid",
+    severity: "error",
+    message,
+    claimIds: [claim.id],
+    paths: [memoryPath(memoryRootRelative, claim.sourcePath)],
+    shared_values: {},
+    remediation: "Record the full verification commit object ID or set last_verified_commit to null and lower confidence."
+  };
+}
+
+function unavailableGitFailure(error: unknown): GitCommandError | undefined {
+  if (error instanceof GitCommandError) {
+    return error.timedOut || error.status === null ? error : undefined;
+  }
+
+  if (error instanceof AgentMemoryError) {
+    return unavailableGitFailure(error.cause);
+  }
+
+  return undefined;
+}
+
+function verificationUnavailableFinding(
+  claim: ClaimRecord,
+  memoryRootRelative: string,
+  error: GitCommandError
+): AuditFinding {
+  return {
+    code: "claim.verification_check_unavailable",
+    severity: "error",
+    message: `Could not inspect Git verification state for ${claim.id}: ${error.message}.`,
+    claimIds: [claim.id],
+    paths: [memoryPath(memoryRootRelative, claim.sourcePath)],
+    shared_values: {},
+    remediation: "Allow Git subprocesses in the sandbox, then run the audit again."
+  };
 }
 
 function claimTouchedByChangedFiles(

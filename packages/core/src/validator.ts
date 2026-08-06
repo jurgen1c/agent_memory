@@ -6,7 +6,7 @@ import { describeClaimSourcePolicyDecision, evaluateClaimSourcePath } from "./cl
 import { ConfigError } from "./errors";
 import { loadConfig } from "./config";
 import { discoverFiles, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
-import { isFullGitObjectId } from "./git";
+import { isFullGitObjectId, repositoryObjectIdLength } from "./git";
 import { parseMarkdownFile, extractMarkdownSection } from "./markdown";
 import type { AgentMemoryConfig } from "./types";
 import { parseYaml } from "./yaml";
@@ -97,6 +97,7 @@ interface LoadedProfileTrait {
 
 interface RepoPathValidationContext {
   repoRoot: string;
+  objectIdLength?: number;
 }
 
 type ValidationConfig = AgentMemoryConfig["validation"];
@@ -146,6 +147,7 @@ export function validateRepository(options: ValidateRepositoryOptions = {}): Val
   const issues: ValidationIssue[] = [];
   const changedFiles = new Set(normalizeChangedFiles(options.changedFiles ?? [], repoRoot));
   const scoped = changedFiles.size > 0;
+  const configChanged = changedFiles.has(toPosix(path.relative(repoRoot, loaded.path)));
 
   const allClaimFiles = discoverFiles(memoryRoot, loaded.config.claims);
   const allGraphFiles = discoverFiles(memoryRoot, loaded.config.graphs);
@@ -154,7 +156,7 @@ export function validateRepository(options: ValidateRepositoryOptions = {}): Val
   const allPlanFiles = discoverFiles(memoryRoot, loaded.config.plans);
   const allProfileFiles = discoverFiles(memoryRoot, loaded.config.profiles);
 
-  const claimFiles = scoped ? selectChangedFiles(allClaimFiles, changedFiles, repoRoot) : allClaimFiles;
+  const claimFiles = scoped && !configChanged ? selectChangedFiles(allClaimFiles, changedFiles, repoRoot) : allClaimFiles;
   const deletedClaimChanged = scoped && changedCanonicalFileWasDeleted(changedFiles, repoRoot, memoryRoot, allClaimFiles, loaded.config.claims);
   const graphFiles = scoped && !deletedClaimChanged ? selectChangedFiles(allGraphFiles, changedFiles, repoRoot) : allGraphFiles;
   const indexFiles = scoped ? selectChangedFiles(allIndexFiles, changedFiles, repoRoot) : allIndexFiles;
@@ -403,7 +405,7 @@ function validateClaimFields(
   if (
     lastVerifiedCommit !== undefined &&
     lastVerifiedCommit !== null &&
-    (typeof lastVerifiedCommit !== "string" || !isFullGitObjectId(lastVerifiedCommit.trim()))
+    (typeof lastVerifiedCommit !== "string" || !isFullGitObjectId(lastVerifiedCommit.trim(), pathContext.objectIdLength))
   ) {
     addError(
       issues,
@@ -1352,7 +1354,7 @@ function changedCanonicalFileWasDeleted(changedFiles: Set<string>, repoRoot: str
 }
 
 function createRepoPathValidationContext(repoRoot: string): RepoPathValidationContext {
-  return { repoRoot };
+  return { repoRoot, objectIdLength: repositoryObjectIdLength(repoRoot) };
 }
 
 function validateRepoPathReferences(

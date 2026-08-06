@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 export const DEFAULT_GIT_COMMAND_TIMEOUT_MS = 10_000;
 export const DEFAULT_GIT_MAX_BUFFER_BYTES = 256 * 1024 * 1024;
@@ -23,8 +25,32 @@ export class GitCommandError extends Error {
   }
 }
 
-export function isFullGitObjectId(value: string): boolean {
-  return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value);
+export function isFullGitObjectId(value: string, expectedLength?: number): boolean {
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value)) {
+    return false;
+  }
+
+  return expectedLength === undefined || value.length === expectedLength;
+}
+
+export function repositoryObjectIdLength(repoRoot: string): 40 | 64 | undefined {
+  const gitDirectory = resolveGitDirectory(repoRoot);
+
+  if (!gitDirectory) {
+    return undefined;
+  }
+
+  const commonDirectory = resolveCommonGitDirectory(gitDirectory);
+  const configPath = path.join(commonDirectory, "config");
+
+  if (!fs.existsSync(configPath)) {
+    return 40;
+  }
+
+  const config = fs.readFileSync(configPath, "utf8");
+  const repositoryFormatVersion = readGitConfigValue(config, "core", "repositoryformatversion");
+  const objectFormat = readGitConfigValue(config, "extensions", "objectformat");
+  return repositoryFormatVersion === "1" && objectFormat?.toLowerCase() === "sha256" ? 64 : 40;
 }
 
 export function runGit(repoRoot: string, args: string[], options: GitCommandOptions = {}): string {
@@ -92,4 +118,86 @@ function assertGitResult(
       { status }
     );
   }
+}
+
+function resolveGitDirectory(repoRoot: string): string | undefined {
+  const gitPath = path.join(repoRoot, ".git");
+
+  if (!fs.existsSync(gitPath)) {
+    return undefined;
+  }
+
+  if (fs.statSync(gitPath).isDirectory()) {
+    return gitPath;
+  }
+
+  const match = fs.readFileSync(gitPath, "utf8").match(/^gitdir:\s*(.+)\s*$/im);
+  return match ? path.resolve(repoRoot, match[1]) : undefined;
+}
+
+function resolveCommonGitDirectory(gitDirectory: string): string {
+  const commonDirectoryPath = path.join(gitDirectory, "commondir");
+
+  if (!fs.existsSync(commonDirectoryPath)) {
+    return gitDirectory;
+  }
+
+  return path.resolve(gitDirectory, fs.readFileSync(commonDirectoryPath, "utf8").trim());
+}
+
+function readGitConfigValue(content: string, sectionName: string, keyName: string): string | undefined {
+  let currentSection = "";
+
+  for (const line of content.split(/\r?\n/)) {
+    const section = line.match(/^\s*\[\s*([^\s\]"]+)(\s+"[^"]*")?\s*\]/);
+
+    if (section) {
+      currentSection = section[2] ? "" : section[1].toLowerCase();
+      continue;
+    }
+
+    if (currentSection !== sectionName.toLowerCase()) {
+      continue;
+    }
+
+    const entry = line.match(/^\s*([^\s=]+)\s*=\s*(.*?)\s*$/);
+
+    if (entry?.[1].toLowerCase() === keyName.toLowerCase()) {
+      return normalizeGitConfigValue(entry[2]);
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeGitConfigValue(value: string): string {
+  let normalized = "";
+  let quoted = false;
+  let escaped = false;
+
+  for (const character of value.trim()) {
+    if (escaped) {
+      normalized += character;
+      escaped = false;
+      continue;
+    }
+
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+
+    if (character === '"') {
+      quoted = !quoted;
+      continue;
+    }
+
+    if (!quoted && (character === "#" || character === ";")) {
+      break;
+    }
+
+    normalized += character;
+  }
+
+  return normalized.trim();
 }
