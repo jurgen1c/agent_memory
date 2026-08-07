@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  isPathInside,
+  nearestExistingAncestor,
   PathContainmentError,
   resolveContainedPath
 } from "@jurgen1c/agent-core/repository";
@@ -202,8 +204,16 @@ function recipeBasePath(memoryRoot: string, system: string, baseSlug: string): s
 }
 
 function assertRecipeOutputPath(memoryRoot: string, targetPath: string): string {
+  const resolvedMemoryRoot = path.resolve(memoryRoot);
+  const resolvedTargetPath = path.resolve(targetPath);
+  const containmentRoot = nearestExistingAncestor(resolvedMemoryRoot);
+
+  if (!isPathInside(resolvedMemoryRoot, resolvedTargetPath) || containmentRoot === null) {
+    throw new AgentMemoryError("Recipe output path must stay inside the configured memory root.");
+  }
+
   try {
-    return resolveContainedPath(memoryRoot, targetPath, { rejectFinalSymlink: true }).absolutePath;
+    return resolveContainedPath(containmentRoot, resolvedTargetPath, { rejectFinalSymlink: true }).absolutePath;
   } catch (error) {
     if (!(error instanceof PathContainmentError)) throw error;
     throw new AgentMemoryError("Recipe output path must stay inside the configured memory root.", {

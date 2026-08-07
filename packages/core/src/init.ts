@@ -4,7 +4,7 @@ import { renderClaimSourcePolicy } from "./claim_sources";
 import { defaultConfig, loadConfig, renderConfigTemplate } from "./config";
 import { AgentMemoryError } from "./errors";
 import { installMemoryHooks } from "./hooks";
-import { findRepoRoot, normalizeRepoRelativePath, resolveRepoOutputPath } from "./repo";
+import { findRepoRoot, normalizeRepoRelativeOutputPath, resolveRepoOutputPath } from "./repo";
 import { parseAgentTarget, renderAgentSkill, skillPathForLocation, writeCodexSkillReferences, type AgentTarget } from "./skills";
 import type { AgentMemoryConfig, RepoInfo } from "./types";
 import { setYamlTopLevelValue } from "./yaml";
@@ -437,7 +437,7 @@ function normalizeInstructionFilePath(repoRoot: string, instructionPath: string)
   let normalizedPath: string;
 
   try {
-    normalizedPath = normalizeRepoRelativePath(repoRoot, instructionPath);
+    normalizedPath = normalizeRepoRelativeOutputPath(repoRoot, instructionPath);
   } catch (error) {
     throw new AgentMemoryError("Agent instruction file must be a repository-relative path inside the repository.", {
       details: ["Example: --instructions-file CLAUDE.md"],

@@ -209,6 +209,48 @@ describe("new claim command", () => {
     expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/invalid"))).toBe(false);
   });
 
+  test("accepts contained source-file symlinks and rejects escaping symlinks", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    fs.mkdirSync(path.join(repoRoot, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "src/auth.ts"), "export const auth = true;\n");
+    fs.symlinkSync("auth.ts", path.join(repoRoot, "src/auth-link.ts"), "file");
+
+    await dispatch(
+      [
+        "new",
+        "claim",
+        "--type=fact",
+        "--system=auth",
+        "--title=Symlink source",
+        "--source-file=src/auth-link.ts"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const claimPath = path.join(repoRoot, "docs/agent-memory/claims/auth/symlink-source.md");
+    expect(fs.readFileSync(claimPath, "utf8")).toContain("  - src/auth-link.ts");
+    expect((await dispatch(["validate"], { cwd: repoRoot })).exitCode).toBe(0);
+
+    const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-outside-source-"));
+    fs.writeFileSync(path.join(outsideRoot, "outside.ts"), "export const outside = true;\n");
+    fs.symlinkSync(path.join(outsideRoot, "outside.ts"), path.join(repoRoot, "src/outside-link.ts"), "file");
+
+    await expect(
+      dispatch(
+        [
+          "new",
+          "claim",
+          "--type=fact",
+          "--system=auth",
+          "--title=Escaping symlink source",
+          "--source-file=src/outside-link.ts"
+        ],
+        { cwd: repoRoot }
+      )
+    ).rejects.toThrow("escapes repository root through a symlink");
+  });
+
   test("supports equals-form claim options and validates bad input", async () => {
     const repoRoot = makeGitRepo();
     await dispatch(["init", "--yes"], { cwd: repoRoot });
@@ -330,6 +372,24 @@ describe("new recipe command", () => {
     expect(fs.existsSync(incorrectPath)).toBe(false);
   });
 
+  test("creates the first recipe under missing local and external memory roots", async () => {
+    const externalParent = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-missing-recipe-root-"));
+
+    for (const configuredRoot of ["custom/memory", path.join(externalParent, "external-memory")]) {
+      const repoRoot = makeGitRepo();
+      await dispatch(["init", "--yes"], { cwd: repoRoot });
+      updateMemoryRoot(repoRoot, configuredRoot);
+      const memoryRoot = path.isAbsolute(configuredRoot) ? configuredRoot : path.join(repoRoot, configuredRoot);
+
+      const result = await dispatch(["new", "recipe", "--system=auth", "--title=Bootstrap Recipe"], {
+        cwd: repoRoot
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(fs.existsSync(path.join(memoryRoot, "recipes/auth/bootstrap-recipe.yaml"))).toBe(true);
+    }
+  });
+
   test("rejects recipe output paths that escape the memory root through symlinks", async () => {
     for (const symlinkLocation of ["recipes", "system", "file"] as const) {
       const repoRoot = makeGitRepo();
@@ -379,6 +439,23 @@ describe("new recipe command", () => {
     }
 
     expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/recipes/invalid"))).toBe(false);
+  });
+
+  test("accepts contained symlinks as recipe source files", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    fs.mkdirSync(path.join(repoRoot, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "src/auth.ts"), "export const auth = true;\n");
+    fs.symlinkSync("auth.ts", path.join(repoRoot, "src/auth-link.ts"), "file");
+
+    await dispatch(
+      ["new", "recipe", "--system=auth", "--title=Symlink Recipe Source", "--source-file=src/auth-link.ts"],
+      { cwd: repoRoot }
+    );
+
+    const recipePath = path.join(repoRoot, "docs/agent-memory/recipes/auth/symlink-recipe-source.yaml");
+    expect(fs.readFileSync(recipePath, "utf8")).toContain("  - src/auth-link.ts");
+    expect((await dispatch(["validate"], { cwd: repoRoot })).exitCode).toBe(0);
   });
 });
 

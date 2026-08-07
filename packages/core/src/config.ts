@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ConfigError } from "./errors";
-import { findRepoRoot, normalizeRepoRelativePath, resolveInsideRepo } from "./repo";
+import { findRepoRoot, normalizeRepoRelativeOutputPath, normalizeRepoRelativePath, resolveInsideRepo } from "./repo";
 import type { AgentMemoryConfig, LoadedConfig, RepoInfo } from "./types";
 import { parseYaml } from "./yaml";
 
@@ -245,7 +245,7 @@ function readAgentInstructions(root: Record<string, unknown>, repoRoot: string) 
 
   const normalizedPaths = paths.map((instructionPath) => {
     try {
-      return normalizeRepoRelativePath(repoRoot, instructionPath);
+      return normalizeRepoRelativeOutputPath(repoRoot, instructionPath);
     } catch (error) {
       throw new ConfigError(
         `Config field agent_instructions.paths must contain repository-relative paths inside the repository: ${instructionPath}`,

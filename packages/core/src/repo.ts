@@ -58,6 +58,14 @@ export function resolveRepoOutputPath(repoRoot: string, targetPath: string): str
 }
 
 export function normalizeRepoRelativePath(repoRoot: string, targetPath: string): string {
+  return normalizeRepoRelative(repoRoot, targetPath, false);
+}
+
+export function normalizeRepoRelativeOutputPath(repoRoot: string, targetPath: string): string {
+  return normalizeRepoRelative(repoRoot, targetPath, true);
+}
+
+function normalizeRepoRelative(repoRoot: string, targetPath: string, rejectFinalSymlink: boolean): string {
   const portablePath = targetPath.replaceAll("\\", "/");
 
   if (path.posix.isAbsolute(portablePath) || path.win32.isAbsolute(targetPath)) {
@@ -67,7 +75,7 @@ export function normalizeRepoRelativePath(repoRoot: string, targetPath: string):
   }
 
   try {
-    const absolutePath = resolveContainedPath(repoRoot, portablePath, { rejectFinalSymlink: true }).absolutePath;
+    const absolutePath = resolveContainedPath(repoRoot, portablePath, { rejectFinalSymlink }).absolutePath;
     const relativePath = path.relative(repoRoot, absolutePath).split(path.sep).join("/");
 
     if (relativePath.length === 0) {
