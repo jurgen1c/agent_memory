@@ -1174,6 +1174,48 @@ describe("audit command", () => {
     expect(result.stdout).toContain("full immutable Git commit object ID");
   });
 
+  test("caches shared verification commit resolutions and failures", () => {
+    for (const resolves of [true, false]) {
+      const cwd = copyFixture(mockApp);
+      const verificationCommit = (resolves ? "a" : "b").repeat(40);
+      const invocationLog = path.join(cwd, "git-invocations.log");
+      const fakeGit = path.join(cwd, "verification-git");
+      const resolutionCommand = `rev-parse --verify ${verificationCommit}^{commit}`;
+      fs.writeFileSync(
+        fakeGit,
+        `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> ${JSON.stringify(invocationLog)}
+case "$*" in
+  ${JSON.stringify(resolutionCommand)}) ${resolves ? `printf '%s\\n' "${verificationCommit}"` : "exit 9"} ;;
+  *) exit 9 ;;
+esac
+`
+      );
+      fs.chmodSync(fakeGit, 0o755);
+
+      for (const relativeClaimPath of [
+        "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md",
+        "docs/agent-memory/claims/tenancy/current_tenant_required_for_student_auth.md"
+      ]) {
+        const claimPath = path.join(cwd, relativeClaimPath);
+        fs.writeFileSync(
+          claimPath,
+          fs
+            .readFileSync(claimPath, "utf8")
+            .replace("status: current", "status: stale")
+            .replace("last_verified_commit: null", `last_verified_commit: ${verificationCommit}`)
+        );
+      }
+
+      const result = auditMemory({ cwd, changedFiles: ["README.md"], gitBinary: fakeGit });
+      const resolutionCalls = fs.readFileSync(invocationLog, "utf8").trim().split("\n").filter((line) => line === resolutionCommand);
+      const invalidFindings = result.findings.filter((finding) => finding.code === "claim.last_verified_commit_invalid");
+
+      expect(resolutionCalls).toHaveLength(1);
+      expect(invalidFindings).toHaveLength(resolves ? 0 : 2);
+    }
+  });
+
   test("stops verification after the first unavailable Git subprocess", () => {
     const cwd = copyFixture(mockApp);
     const stalledGit = path.join(cwd, "stalled-git");

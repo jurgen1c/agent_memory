@@ -167,6 +167,10 @@ function findOutdatedVerifiedClaims(
 ): { findings: AuditFinding[]; warnings: string[] } {
   const findings: AuditFinding[] = [];
   const warnings: string[] = [];
+  const commitResolutionByReference = new Map<
+    string,
+    { ok: true; commit: string } | { ok: false; error: unknown }
+  >();
   const changedFilesByCommit = new Map<string, string[]>();
   let workingTreeFiles: string[] | undefined;
 
@@ -201,15 +205,26 @@ function findOutdatedVerifiedClaims(
       continue;
     }
 
-    let commit: string;
+    let resolution = commitResolutionByReference.get(reference);
 
-    try {
-      commit = runGit(repoRoot, ["rev-parse", "--verify", `${reference}^{commit}`], {
-        gitBinary: options.gitBinary,
-        timeoutMs: options.gitTimeoutMs
-      });
-    } catch (error) {
-      const unavailableGit = unavailableGitFailure(error);
+    if (!resolution) {
+      try {
+        resolution = {
+          ok: true,
+          commit: runGit(repoRoot, ["rev-parse", "--verify", `${reference}^{commit}`], {
+            gitBinary: options.gitBinary,
+            timeoutMs: options.gitTimeoutMs
+          })
+        };
+      } catch (error) {
+        resolution = { ok: false, error };
+      }
+
+      commitResolutionByReference.set(reference, resolution);
+    }
+
+    if (!resolution.ok) {
+      const unavailableGit = unavailableGitFailure(resolution.error);
 
       if (unavailableGit) {
         findings.push(verificationUnavailableFinding(claim, memoryRootRelative, unavailableGit));
@@ -227,6 +242,8 @@ function findOutdatedVerifiedClaims(
       });
       continue;
     }
+
+    const commit = resolution.commit;
 
     if (commit.toLowerCase() !== reference.toLowerCase()) {
       findings.push(invalidVerificationFinding(
