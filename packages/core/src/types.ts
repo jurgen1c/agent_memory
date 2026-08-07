@@ -11,6 +11,11 @@ export interface AgentSkillConfig {
   path: string;
 }
 
+export interface ClaimSourcePolicy {
+  allow: string[];
+  deny: string[];
+}
+
 export interface AgentMemoryConfig {
   version: number;
   memory_root: string;
@@ -22,10 +27,14 @@ export interface AgentMemoryConfig {
   plans: string[];
   profiles: string[];
   waivers: string[];
+  agent_instructions: {
+    paths: string[];
+  };
   agent_skills: {
     codex: AgentSkillConfig;
     generic: AgentSkillConfig;
   };
+  claim_sources: ClaimSourcePolicy;
   git: {
     install_hooks: boolean;
     hooks: string[];

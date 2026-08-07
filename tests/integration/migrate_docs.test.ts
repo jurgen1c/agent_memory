@@ -19,7 +19,7 @@ describe("migrate-docs command", () => {
     expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/auth/migrated_student_oauth_legacy_behavior.md"))).toBe(false);
   });
 
-  test("automatically creates current claim drafts from existing docs", async () => {
+  test("automatically creates needs-review claim drafts from existing docs", async () => {
     const repoRoot = await initializedRepoWithLegacyDocs();
 
     const result = await dispatch(["migrate-docs", "--from", "docs/legacy", "--system", "auth", "--automatic"], { cwd: repoRoot });
@@ -28,12 +28,32 @@ describe("migrate-docs command", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Drafts created: 1");
-    expect(content).toContain("status: current");
+    expect(content).toContain("status: needs_review");
     expect(content).toContain("confidence: low");
     expect(content).toContain("docs/legacy/student-oauth.md");
 
     const validate = await dispatch(["validate"], { cwd: repoRoot });
     expect(validate.exitCode).toBe(0);
+  });
+
+  test("preflights every direct automatic migration source against claim policy before writing", async () => {
+    const repoRoot = await initializedRepoWithLegacyDocs();
+    fs.writeFileSync(path.join(repoRoot, "docs/legacy/blocked.md"), "# Blocked Legacy Doc\n\nDo not migrate.\n");
+    denyClaimSource(repoRoot, "docs/legacy/blocked.md");
+    let stderr = "";
+
+    const exitCode = await runCli(
+      ["migrate-docs", "--from", "docs/legacy", "--system", "auth", "--automatic"],
+      quietStreams((chunk) => {
+        stderr += chunk;
+      }),
+      { cwd: repoRoot }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("Claim source path docs/legacy/blocked.md is denied");
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/auth/migrated_student_oauth_legacy_behavior.md"))).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/auth/migrated_blocked_legacy_doc.md"))).toBe(false);
   });
 
   test("plans and creates drafts when a repo-local memory root does not exist yet", async () => {
@@ -264,6 +284,49 @@ mappings:
     expect(validate.exitCode).toBe(0);
   });
 
+  test("preflights every system-map automatic migration source against claim policy before writing", async () => {
+    const repoRoot = makeGitRepo();
+    const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    expect(init.exitCode).toBe(0);
+    fs.mkdirSync(path.join(repoRoot, "docs/canonical"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "docs/canonical/allowed.md"), "# Allowed Doc\n");
+    fs.writeFileSync(path.join(repoRoot, "docs/canonical/blocked.md"), "# Blocked Doc\n");
+    denyClaimSource(repoRoot, "docs/canonical/blocked.md");
+    const mapPath = path.join(repoRoot, ".agent-memory/migrations/policy.yaml");
+    fs.mkdirSync(path.dirname(mapPath), { recursive: true });
+    fs.writeFileSync(
+      mapPath,
+      `version: 1
+source_root: docs/canonical
+mappings:
+  - source: docs/canonical/allowed.md
+    system: docs
+    title: Allowed Doc
+    confidence: high
+    reason: Reviewed docs
+  - source: docs/canonical/blocked.md
+    system: docs
+    title: Blocked Doc
+    confidence: high
+    reason: Reviewed docs
+`
+    );
+    let stderr = "";
+
+    const exitCode = await runCli(
+      ["migrate-docs", "--system-map", ".agent-memory/migrations/policy.yaml", "--automatic"],
+      quietStreams((chunk) => {
+        stderr += chunk;
+      }),
+      { cwd: repoRoot }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("Claim source path docs/canonical/blocked.md is denied");
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/docs/migrated_allowed_doc.md"))).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/docs/migrated_blocked_doc.md"))).toBe(false);
+  });
+
   test("warns when no migratable docs are found", async () => {
     const repoRoot = makeGitRepo();
     const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
@@ -459,6 +522,15 @@ function updateMemoryRoot(repoRoot: string, memoryRoot: string): void {
   fs.writeFileSync(
     configPath,
     config.replace(/^memory_root:.*$/m, `memory_root: ${JSON.stringify(memoryRoot)}`)
+  );
+}
+
+function denyClaimSource(repoRoot: string, sourcePath: string): void {
+  const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+  const config = fs.readFileSync(configPath, "utf8");
+  fs.writeFileSync(
+    configPath,
+    config.replace("claim_sources:\n  allow: []\n  deny: []", `claim_sources:\n  allow: []\n  deny:\n    - ${sourcePath}`)
   );
 }
 

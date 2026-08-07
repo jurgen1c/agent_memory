@@ -1,10 +1,10 @@
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig, renderYamlScalar } from "./config";
 import { AgentMemoryError, NotFoundError } from "./errors";
 import { resolveConfiguredPath } from "./files";
+import { runGit } from "./git";
 import { commandPrefixForRepo } from "./skills";
 import { parseYaml } from "./yaml";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
@@ -822,7 +822,7 @@ function slugify(value: string): string {
 
 function currentGitValue(repoRoot: string, args: string[]): string | undefined {
   try {
-    return execFileSync("git", args, { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return runGit(repoRoot, args);
   } catch {
     return undefined;
   }

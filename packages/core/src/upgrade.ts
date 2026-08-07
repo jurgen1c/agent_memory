@@ -48,6 +48,10 @@ const CONFIG_SCHEMA: ConfigSchema = {
   plans: true,
   profiles: true,
   waivers: true,
+  agent_instructions: {
+    path: true,
+    paths: true
+  },
   agent_skills: {
     codex: {
       enabled: true,
@@ -57,6 +61,10 @@ const CONFIG_SCHEMA: ConfigSchema = {
       enabled: true,
       path: true
     }
+  },
+  claim_sources: {
+    allow: true,
+    deny: true
   },
   git: {
     install_hooks: true,
@@ -86,7 +94,8 @@ const CONFIG_SCHEMA: ConfigSchema = {
 };
 
 const DEPRECATED_CONFIG_FIELDS = new Map<string, string>([
-  ["context.include_inferred_edges", "Use context.include_inferred_edges_by_default instead."]
+  ["context.include_inferred_edges", "Use context.include_inferred_edges_by_default instead."],
+  ["agent_instructions.path", "Use agent_instructions.paths instead."]
 ]);
 
 const AGENT_TARGETS = ["codex", "generic"] satisfies AgentTarget[];
@@ -123,7 +132,7 @@ export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
     actions
   });
   upgradeMemoryScaffold(repo.root, config, options, actions, warnings);
-  upgradeAgentsFile(repo.root, options, actions);
+  upgradeAgentInstructionsFile(repo.root, config, options, actions, warnings);
   upgradeMemoryWrapper(repo.root, options, actions, warnings);
   upgradeSkillFiles(repo.root, config, options, actions, warnings);
 
@@ -281,11 +290,50 @@ function upgradeConfigFile(options: {
   options.actions.push({ path: relativePath, status: "would_update", detail: "refresh comments and missing defaults" });
 }
 
-function upgradeAgentsFile(repoRoot: string, options: UpgradeOptions, actions: UpgradeAction[]): void {
-  const relativePath = "AGENTS.md";
-  const absolutePath = path.join(repoRoot, relativePath);
+function upgradeAgentInstructionsFile(
+  repoRoot: string,
+  config: AgentMemoryConfig,
+  options: UpgradeOptions,
+  actions: UpgradeAction[],
+  warnings: string[]
+): void {
+  for (const configuredPath of config.agent_instructions.paths) {
+    upgradeOneAgentInstructionsFile(repoRoot, configuredPath, config, options, actions, warnings);
+  }
+}
+
+function upgradeOneAgentInstructionsFile(
+  repoRoot: string,
+  configuredPath: string,
+  config: AgentMemoryConfig,
+  options: UpgradeOptions,
+  actions: UpgradeAction[],
+  warnings: string[]
+): void {
+  if (path.isAbsolute(configuredPath)) {
+    warnings.push(`Agent instruction path ${configuredPath} must be repository-relative; skipping to avoid unintended writes.`);
+    actions.push({ path: configuredPath, status: "skipped", detail: "absolute instruction path is not allowed" });
+    return;
+  }
+
+  const absolutePath = tryResolveConfiguredPath(repoRoot, configuredPath);
+
+  if (absolutePath === null) {
+    warnings.push(`Agent instruction path ${configuredPath} escapes the repository root; skipping to avoid unintended writes.`);
+    actions.push({ path: configuredPath, status: "skipped", detail: "relative path escapes repository root" });
+    return;
+  }
+
+  const relativePath = displayRepoPath(repoRoot, absolutePath);
+
+  if (fs.existsSync(absolutePath) && fs.statSync(absolutePath).isDirectory()) {
+    warnings.push(`Agent instruction path ${configuredPath} is a directory; skipping.`);
+    actions.push({ path: relativePath, status: "skipped", detail: "instruction path is a directory" });
+    return;
+  }
+
   const existing = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : "";
-  const update = buildAgentsMemoryContent(existing);
+  const update = buildAgentsMemoryContent(existing, config);
 
   if (update.status === "skipped") {
     actions.push({ path: relativePath, status: "skipped", detail: update.detail });
@@ -293,6 +341,7 @@ function upgradeAgentsFile(repoRoot: string, options: UpgradeOptions, actions: U
   }
 
   if (options.write) {
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
     fs.writeFileSync(absolutePath, update.content);
     actions.push({ path: relativePath, status: update.status, detail: update.detail });
     return;
@@ -329,7 +378,7 @@ function upgradeSkillFiles(
     if (existing === next) {
       actions.push({ path: relativePath, status: "skipped", detail: "already current" });
       if (agent === "codex") {
-        upgradeCodexSkillReferences(repoRoot, absolutePath, options, actions, warnings);
+        upgradeCodexSkillReferences(repoRoot, absolutePath, config, options, actions, warnings);
       }
       continue;
     }
@@ -345,7 +394,7 @@ function upgradeSkillFiles(
       fs.writeFileSync(absolutePath, next);
       actions.push({ path: relativePath, status: existing === null ? "created" : "updated", detail: existing === null ? "installed skill" : "refreshed skill" });
       if (agent === "codex") {
-        upgradeCodexSkillReferences(repoRoot, absolutePath, options, actions, warnings);
+        upgradeCodexSkillReferences(repoRoot, absolutePath, config, options, actions, warnings);
       }
       continue;
     }
@@ -357,7 +406,7 @@ function upgradeSkillFiles(
     });
 
     if (agent === "codex") {
-      upgradeCodexSkillReferences(repoRoot, absolutePath, options, actions, warnings);
+      upgradeCodexSkillReferences(repoRoot, absolutePath, config, options, actions, warnings);
     }
   }
 }
@@ -422,13 +471,14 @@ function tryResolveConfiguredPath(repoRoot: string, skillPath: string): string |
 function upgradeCodexSkillReferences(
   repoRoot: string,
   absoluteSkillPath: string,
+  config: AgentMemoryConfig,
   options: UpgradeOptions,
   actions: UpgradeAction[],
   warnings: string[]
 ): void {
   const skillDir = path.dirname(absoluteSkillPath);
 
-  for (const reference of codexSkillReferenceFiles("repo")) {
+  for (const reference of codexSkillReferenceFiles("repo", config)) {
     const absolutePath = path.join(skillDir, reference.path);
     const relativePath = displayRepoPath(repoRoot, absolutePath);
     const existing = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : null;
@@ -473,6 +523,12 @@ function applyDeprecatedConfigAliases(
     return config;
   }
 
+  const agentInstructions = parsedConfig.agent_instructions;
+
+  if (isRecord(agentInstructions) && "path" in agentInstructions && !("paths" in agentInstructions)) {
+    warnings.push(aliasMigrationWarning(warningMode, "agent_instructions.path", "agent_instructions.paths"));
+  }
+
   const context = parsedConfig.context;
 
   if (!isRecord(context) || !("include_inferred_edges" in context)) {
@@ -492,20 +548,20 @@ function applyDeprecatedConfigAliases(
   }
 
   config.context.include_inferred_edges_by_default = deprecatedValue;
-  warnings.push(deprecatedAliasMigrationWarning(warningMode));
+  warnings.push(aliasMigrationWarning(warningMode, "context.include_inferred_edges", "context.include_inferred_edges_by_default"));
   return config;
 }
 
-function deprecatedAliasMigrationWarning(mode: DeprecatedAliasWarningMode): string {
+function aliasMigrationWarning(mode: DeprecatedAliasWarningMode, from: string, to: string): string {
   if (mode === "applied") {
-    return "Deprecated config field context.include_inferred_edges was migrated to context.include_inferred_edges_by_default.";
+    return `Deprecated config field ${from} was migrated to ${to}.`;
   }
 
   if (mode === "planned") {
-    return "Deprecated config field context.include_inferred_edges would be migrated to context.include_inferred_edges_by_default.";
+    return `Deprecated config field ${from} would be migrated to ${to}.`;
   }
 
-  return "Deprecated config field context.include_inferred_edges migration to context.include_inferred_edges_by_default was deferred because unknown config fields require manual review.";
+  return `Deprecated config field ${from} migration to ${to} was deferred because unknown config fields require manual review.`;
 }
 
 function collectUnknownConfigPaths(value: unknown): string[] {

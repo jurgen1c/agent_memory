@@ -1,11 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import { defaultConfig, renderConfigTemplate } from "./config";
+import { renderClaimSourcePolicy } from "./claim_sources";
+import { defaultConfig, loadConfig, renderConfigTemplate } from "./config";
 import { AgentMemoryError } from "./errors";
+import { resolveConfiguredPath } from "./files";
 import { installMemoryHooks } from "./hooks";
-import { findRepoRoot, resolveRepoOutputPath } from "./repo";
+import { findRepoRoot, normalizeRepoRelativeOutputPath, resolveRepoOutputPath } from "./repo";
 import { parseAgentTarget, renderAgentSkill, skillPathForLocation, writeCodexSkillReferences, type AgentTarget } from "./skills";
-import type { RepoInfo } from "./types";
+import type { AgentMemoryConfig, RepoInfo } from "./types";
+import { setYamlTopLevelValue } from "./yaml";
 
 export type PackageManager = "npm" | "bun";
 
@@ -17,6 +20,7 @@ export interface InitOptions {
   agents: AgentTarget[];
   installHooks: boolean;
   skillLocation?: string;
+  instructionsFiles?: string[];
 }
 
 export interface InitAction {
@@ -35,8 +39,15 @@ export function initRepository(options: InitOptions): InitResult {
   const repo = findRepoRoot(options.cwd);
   const actions: InitAction[] = [];
   const warnings = [...repo.warnings];
-  const agents = options.agents.length > 0 ? options.agents : (["codex", "generic"] satisfies AgentTarget[]);
-  const config = defaultConfig();
+  const existingConfigPath = path.join(repo.root, "agent-memory.config.yaml");
+  const config =
+    !options.force && fs.existsSync(existingConfigPath)
+      ? structuredClone(loadConfig({ repoRoot: repo.root }).config)
+      : defaultConfig();
+  const agents =
+    options.agents.length > 0
+      ? options.agents
+      : (["codex", "generic"] satisfies AgentTarget[]).filter((agent) => config.agent_skills[agent].enabled);
 
   if (options.skillLocation && agents.length !== 1) {
     throw new AgentMemoryError("skillLocation requires exactly one agent target.");
@@ -55,20 +66,35 @@ export function initRepository(options: InitOptions): InitResult {
     }
   }
 
-  writeFile(repo.root, "agent-memory.config.yaml", renderConfigTemplate(config), options.force, actions);
-  writeFile(repo.root, "docs/agent-memory/README.md", memoryReadmeTemplate(), options.force, actions);
-  ensureAgentsMemorySection(repo.root, actions);
+  if (options.instructionsFiles && options.instructionsFiles.length > 0) {
+    config.agent_instructions.paths = Array.from(
+      new Set(options.instructionsFiles.map((instructionPath) => normalizeInstructionFilePath(repo.root, instructionPath)))
+    );
+  }
+
+  ensureConfigFile(
+    repo.root,
+    config,
+    options.force,
+    Boolean(options.instructionsFiles && options.instructionsFiles.length > 0),
+    actions
+  );
+  const memoryRoot = resolveConfiguredPath(repo.root, config.memory_root);
+  writeFile(repo.root, path.join(memoryRoot, "README.md"), memoryReadmeTemplate(), options.force, actions);
+  for (const instructionPath of config.agent_instructions.paths) {
+    ensureAgentInstructionsSection(repo.root, instructionPath, config, actions);
+  }
 
   for (const gitkeepPath of [
-    "docs/agent-memory/claims/.gitkeep",
-    "docs/agent-memory/graph/.gitkeep",
-    "docs/agent-memory/indexes/.gitkeep",
-    "docs/agent-memory/recipes/.gitkeep",
-    "docs/agent-memory/plans/.gitkeep",
-    "docs/agent-memory/profiles/.gitkeep",
-    "docs/agent-memory/waivers/.gitkeep"
+    "claims/.gitkeep",
+    "graph/.gitkeep",
+    "indexes/.gitkeep",
+    "recipes/.gitkeep",
+    "plans/.gitkeep",
+    "profiles/.gitkeep",
+    "waivers/.gitkeep"
   ]) {
-    writeFile(repo.root, gitkeepPath, "", options.force, actions);
+    writeFile(repo.root, path.join(memoryRoot, gitkeepPath), "", options.force, actions);
   }
 
   writeExecutable(repo.root, "bin/memory", wrapperTemplate(options.packageManager), options.force, actions);
@@ -83,7 +109,14 @@ export function initRepository(options: InitOptions): InitResult {
       actions
     );
     if (skillAction.status !== "skipped") {
-      writeCodexSkillReferences(repo.root, resolveOutputPath(repo.root, config.agent_skills.codex.path), "repo", options.force, actions);
+      writeCodexSkillReferences(
+        repo.root,
+        resolveOutputPath(repo.root, config.agent_skills.codex.path),
+        "repo",
+        options.force,
+        actions,
+        config
+      );
     }
   }
 
@@ -128,6 +161,40 @@ function writeFile(repoRoot: string, relativePath: string, content: string, forc
   return action;
 }
 
+function ensureConfigFile(
+  repoRoot: string,
+  config: AgentMemoryConfig,
+  force: boolean,
+  updateInstructionPaths: boolean,
+  actions: InitAction[]
+): void {
+  const relativePath = "agent-memory.config.yaml";
+  const absolutePath = resolveOutputPath(repoRoot, relativePath);
+
+  if (!fs.existsSync(absolutePath) || force) {
+    writeFile(repoRoot, relativePath, renderConfigTemplate(config), force, actions);
+    return;
+  }
+
+  if (!updateInstructionPaths) {
+    actions.push({ path: relativePath, status: "skipped", detail: "already exists" });
+    return;
+  }
+
+  const existing = fs.readFileSync(absolutePath, "utf8");
+  const updated = setYamlTopLevelValue(existing, "agent_instructions", {
+    paths: config.agent_instructions.paths
+  });
+
+  if (updated === existing) {
+    actions.push({ path: relativePath, status: "skipped", detail: "instruction paths already configured" });
+    return;
+  }
+
+  fs.writeFileSync(absolutePath, updated);
+  actions.push({ path: relativePath, status: "updated", detail: "updated managed instruction paths" });
+}
+
 function writeExecutable(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): void {
   writeFile(repoRoot, relativePath, content, force, actions);
   const absolutePath = resolveOutputPath(repoRoot, relativePath);
@@ -163,21 +230,34 @@ function ensureGitignoreEntry(repoRoot: string, entry: string, actions: InitActi
   actions.push({ path: relativePath, status: existing.length > 0 ? "updated" : "created", detail: `added ${entry}` });
 }
 
-export function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): void {
-  const relativePath = "AGENTS.md";
-  const absolutePath = path.join(repoRoot, relativePath);
+export function ensureAgentInstructionsSection(
+  repoRoot: string,
+  instructionPath: string,
+  config: AgentMemoryConfig,
+  actions: InitAction[]
+): void {
+  const relativePath = normalizeInstructionFilePath(repoRoot, instructionPath);
+  const absolutePath = resolveOutputPath(repoRoot, relativePath);
   const existing = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : "";
-  const update = buildAgentsMemoryContent(existing);
+  const update = buildAgentsMemoryContent(existing, config);
 
   if (update.status !== "skipped") {
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
     fs.writeFileSync(absolutePath, update.content);
   }
 
   actions.push({ path: relativePath, status: update.status, detail: update.detail });
 }
 
-export function buildAgentsMemoryContent(existing: string): { content: string; status: "created" | "skipped" | "updated"; detail: string } {
-  const section = agentsMemorySection();
+export function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[]): void {
+  ensureAgentInstructionsSection(repoRoot, "AGENTS.md", defaultConfig(), actions);
+}
+
+export function buildAgentsMemoryContent(
+  existing: string,
+  config: AgentMemoryConfig = defaultConfig()
+): { content: string; status: "created" | "skipped" | "updated"; detail: string } {
+  const section = agentsMemorySection(config);
 
   if (existing.includes(section)) {
     return { content: existing, status: "skipped", detail: "agent-memory section already present" };
@@ -268,13 +348,15 @@ Generated memory lives in \`.agent-memory/\` and should not be committed.
 `;
 }
 
-function agentsMemorySection(): string {
+function agentsMemorySection(config: AgentMemoryConfig): string {
+  const memoryRoot = config.memory_root.replace(/[\\/]+$/, "");
+
   return `<!-- agent-memory:start -->
 ## Agent Memory Knowledge Base
 
 Use the repo-memory skill or instruction file whenever it is available. This section is the repo-level fallback and requirement.
 
-Durable repository knowledge lives in \`docs/agent-memory/\` and must stay versioned and reviewable. Generated memory lives in \`.agent-memory/\` and must not be committed.
+Durable repository knowledge lives in \`${memoryRoot}/\` and must stay versioned and reviewable. Generated memory lives in \`.agent-memory/\` and must not be committed.
 
 Memory artifacts:
 
@@ -297,14 +379,49 @@ Before non-trivial work:
 5. Use \`bin/memory query\`, \`bin/memory show\`, or \`bin/memory system\` for precise claims, graph links, recipes, or watched-file context.
 6. If context includes matched recipes, follow their required claims, verification, and memory-update prompts.
 7. If context includes a plan stage, work that stage unless the user broadens scope.
-8. If context includes profile traits, treat them as repo guidance below system, developer, user, and AGENTS.md instructions.
+8. If context includes profile traits, treat them as repo guidance below system, developer, user, and repository instruction-file guidance.
 
 For non-trivial work, cite the relevant claim IDs, system IDs, and verification commands in plans or PR notes.
+
+### Memory-Worthiness Gate
+
+Search existing claims and recipes before creating new memory. Update or deprecate existing memory when it already owns the knowledge.
+
+A new claim should normally satisfy at least four of these five tests:
+
+1. Repository-specific: it is not generic engineering knowledge.
+2. Future-relevant: a later task is likely to need it.
+3. Durable: it should remain true beyond the current task or implementation moment.
+4. Consequential: forgetting it could cause an incorrect change, meaningful risk, or repeated investigation.
+5. Evidence-backed: code, tests, configuration, documentation, or another concrete source can verify it.
+
+Choose the narrowest suitable artifact:
+
+- Claim: one durable fact, rule, constraint, decision, risk, or lifecycle invariant.
+- Recipe: a repeatable agent procedure with repository-specific steps, ordering, safeguards, or verification.
+- Index: discoverability, file ownership, watched paths, routes, jobs, models, or search terms.
+- Local plan run: one-off task execution state; do not commit it.
+- Waiver: a reviewed, time-boxed exception where watched-file coverage intentionally does not require a memory update.
+- No durable memory: formatting-only work, routine refactors, temporary debugging observations, generic best practices, or facts obvious from one local definition.
+
+A claim tells future agents what is true or must remain true. A recipe tells future agents how to perform a recurring task safely. Do not create a claim merely because code changed or coverage reported a gap, and do not create placeholder memory to satisfy coverage.
+
+\`bin/memory new claim\` and \`bin/memory new recipe\` create \`needs_review\` drafts. Claims start with low confidence. Replace every TODO, complete verification, and only then promote an artifact to \`current\`. Current claims or recipes containing TODO placeholders fail validation.
+
+When claim verification succeeds, record the tested full Git commit object ID in \`last_verified_commit\`. Do not use a movable ref such as a branch or \`HEAD\`. Use \`confidence: verified\` only when that commit is present. Audit warns when supporting files changed after the recorded verification commit.
+
+### Claim Source Policy
+
+\`claim_sources.allow\` and \`claim_sources.deny\` in \`agent-memory.config.yaml\` control which repository files may be referenced by claims and which changed files participate in claim coverage. An empty allow list permits all repository paths; deny patterns always win.
+
+${renderClaimSourcePolicy(config.claim_sources)}
+
+Do not attach claims to denied paths indirectly through \`related_files\`. If a changed file is policy-excluded, leave it without a claim unless the policy itself should be changed.
 
 After non-trivial work:
 
 1. Update memory in the same change when durable repository knowledge changed.
-2. Use \`bin/memory templates list\` and \`bin/memory templates show <template>\` before creating artifacts.
+2. Use \`bin/memory templates list\`, \`bin/memory new claim\`, or \`bin/memory new recipe\` instead of inventing artifact formats.
 3. Run \`bin/memory validate\` and \`bin/memory sync\` before finishing changes that touch memory.
 4. Run \`bin/memory audit --git-diff\` before finishing when canonical memory files changed.
 
@@ -318,6 +435,35 @@ Update targets:
 - Profile traits for reusable retrieval/output/verification/risk/scope guidance.
 - Waivers for intentional coverage exceptions with a reason and expiration.
 <!-- agent-memory:end -->`;
+}
+
+function normalizeInstructionFilePath(repoRoot: string, instructionPath: string): string {
+  if (instructionPath.trim().length === 0) {
+    throw new AgentMemoryError("Agent instruction file must not be blank.", {
+      details: ["Example: --instructions-file CLAUDE.md"]
+    });
+  }
+
+  let normalizedPath: string;
+
+  try {
+    normalizedPath = normalizeRepoRelativeOutputPath(repoRoot, instructionPath);
+  } catch (error) {
+    throw new AgentMemoryError("Agent instruction file must be a repository-relative path inside the repository.", {
+      details: ["Example: --instructions-file CLAUDE.md"],
+      cause: error
+    });
+  }
+
+  const absolutePath = resolveOutputPath(repoRoot, normalizedPath);
+
+  if (fs.existsSync(absolutePath) && fs.statSync(absolutePath).isDirectory()) {
+    throw new AgentMemoryError(`Agent instruction path points to a directory: ${normalizedPath}`, {
+      details: ["Choose a repository-relative instruction file such as AGENTS.md or CLAUDE.md."]
+    });
+  }
+
+  return normalizedPath;
 }
 
 export function wrapperTemplate(packageManager: PackageManager): string {
@@ -342,6 +488,13 @@ if command -v agent-memory >/dev/null 2>&1; then
   exec agent-memory "$@"
 fi
 
+if [ ! -t 0 ] && [ "\${AGENT_MEMORY_ALLOW_NPX:-}" != "1" ]; then
+  printf '%s\\n' \\
+    "No installed agent-memory CLI was found in this non-interactive environment." \\
+    "Install @jurgen1c/agent-memory-cli, set AGENT_MEMORY_CLI, or set AGENT_MEMORY_ALLOW_NPX=1 to permit the package-manager fallback." >&2
+  exit 1
+fi
+
 exec ${fallback} "$@"
 `;
 }
@@ -354,12 +507,42 @@ export function detectGeneratedWrapperPackageManager(content: string): PackageMa
       return packageManager;
     }
 
+    if (normalized === normalizeWrapperContent(unboundedWrapperTemplate(packageManager))) {
+      return packageManager;
+    }
+
     if (normalized === normalizeWrapperContent(legacyWrapperTemplate(packageManager))) {
       return packageManager;
     }
   }
 
   return null;
+}
+
+function unboundedWrapperTemplate(packageManager: PackageManager): string {
+  const fallback = packageManager === "bun" ? "bunx @jurgen1c/agent-memory-cli" : "npx -y @jurgen1c/agent-memory-cli";
+
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "\${AGENT_MEMORY_CLI:-}" ]; then
+  exec "\${AGENT_MEMORY_CLI}" "$@"
+fi
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "\${SCRIPT_DIR}/.." && pwd)"
+LOCAL_CLI="\${REPO_ROOT}/node_modules/.bin/agent-memory"
+
+if [ -x "\${LOCAL_CLI}" ]; then
+  exec "\${LOCAL_CLI}" "$@"
+fi
+
+if command -v agent-memory >/dev/null 2>&1; then
+  exec agent-memory "$@"
+fi
+
+exec ${fallback} "$@"
+`;
 }
 
 function legacyWrapperTemplate(packageManager: PackageManager): string {

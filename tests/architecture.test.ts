@@ -61,6 +61,15 @@ describe("standalone Agent Memory architecture", () => {
         .toContain("@jurgen1c/agent-core/repository");
     }
   });
+
+  test("routes every Git subprocess through the bounded Git adapter", () => {
+    const sourceRoot = path.join(repositoryRoot, "packages", "core", "src");
+    const childProcessImports = sourceFiles(sourceRoot)
+      .filter((file) => fs.readFileSync(file, "utf8").includes('from "node:child_process"'))
+      .map((file) => path.relative(repositoryRoot, file));
+
+    expect(childProcessImports).toEqual(["packages/core/src/git.ts"]);
+  });
 });
 
 function readJson(relativePath: string): unknown {

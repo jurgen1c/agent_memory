@@ -57,4 +57,45 @@ export function resolveRepoOutputPath(repoRoot: string, targetPath: string): str
   }
 }
 
+export function normalizeRepoRelativePath(repoRoot: string, targetPath: string): string {
+  return normalizeRepoRelative(repoRoot, targetPath, false);
+}
+
+export function normalizeRepoRelativeOutputPath(repoRoot: string, targetPath: string): string {
+  return normalizeRepoRelative(repoRoot, targetPath, true);
+}
+
+function normalizeRepoRelative(repoRoot: string, targetPath: string, rejectFinalSymlink: boolean): string {
+  const portablePath = targetPath.replaceAll("\\", "/");
+
+  if (path.posix.isAbsolute(portablePath) || path.win32.isAbsolute(targetPath)) {
+    throw new AgentMemoryError(`Path must be repository-relative: ${targetPath}`, {
+      details: ["Choose a path inside the repository."]
+    });
+  }
+
+  try {
+    const absolutePath = resolveContainedPath(repoRoot, portablePath, { rejectFinalSymlink }).absolutePath;
+    const relativePath = path.relative(repoRoot, absolutePath).split(path.sep).join("/");
+
+    if (relativePath.length === 0) {
+      throw new AgentMemoryError(`Path must name a file inside the repository: ${targetPath}`);
+    }
+
+    return relativePath;
+  } catch (error) {
+    if (!(error instanceof PathContainmentError)) throw error;
+    const throughSymlink = error.reason === "symlink_escape" || error.reason === "final_symlink";
+    throw new AgentMemoryError(
+      throughSymlink
+        ? `Path escapes repository root through a symlink: ${targetPath}`
+        : `Path escapes repository root: ${targetPath}`,
+      {
+        details: ["Choose a repository-relative path that stays inside the repository."],
+        cause: error
+      }
+    );
+  }
+}
+
 export { isPathInside };

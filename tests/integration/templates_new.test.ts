@@ -80,6 +80,8 @@ describe("new claim command", () => {
     const claimPath = path.join(repoRoot, "docs/agent-memory/claims/auth/student-oauth-uid-is-tenant-scoped.md");
     const content = fs.readFileSync(claimPath, "utf8");
     expect(content).toContain("type: fact");
+    expect(content).toContain("status: needs_review");
+    expect(content).toContain("confidence: low");
     expect(content).toContain("severity: normal");
     expect(content).toContain("Student OAuth identity resolution depends on tenant ID.");
     expect(content).toContain("- bun test");
@@ -127,6 +129,157 @@ describe("new claim command", () => {
     expect(content).toContain("severity: critical");
   });
 
+  test("rejects explicit source files excluded by claim source policy", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+    const config = fs.readFileSync(configPath, "utf8").replace(
+      "claim_sources:\n  allow: []\n  deny: []",
+      "claim_sources:\n  allow:\n    - src/**\n  deny:\n    - src/generated/**\n    - vendor/**"
+    );
+    fs.writeFileSync(configPath, config);
+
+    await expect(
+      dispatch(
+        [
+          "new",
+          "claim",
+          "--type=fact",
+          "--system=generated",
+          "--title=Generated client behavior",
+          "--source-file=src/generated/client.ts"
+        ],
+        { cwd: repoRoot }
+      )
+    ).rejects.toThrow("denied by claim_sources.deny pattern src/generated/**");
+
+    await expect(
+      dispatch(
+        [
+          "new",
+          "claim",
+          "--type=fact",
+          "--system=vendor",
+          "--title=Vendor secret behavior",
+          "--source-file=src/../vendor/secret.ts"
+        ],
+        { cwd: repoRoot }
+      )
+    ).rejects.toThrow("denied by claim_sources.deny pattern vendor/**");
+
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/generated/generated-client-behavior.md"))).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/vendor/vendor-secret-behavior.md"))).toBe(false);
+  });
+
+  test("normalizes source paths and rejects paths outside the repository", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+
+    await dispatch(
+      [
+        "new",
+        "claim",
+        "--type=fact",
+        "--system=auth",
+        "--title=Normalized source",
+        "--source-file=src/../lib/auth.ts"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const claimPath = path.join(repoRoot, "docs/agent-memory/claims/auth/normalized-source.md");
+    expect(fs.readFileSync(claimPath, "utf8")).toContain("  - lib/auth.ts");
+
+    for (const sourceFile of [path.join(os.tmpdir(), "outside.ts"), "../outside.ts", "C:\\outside\\source.ts"]) {
+      await expect(
+        dispatch(
+          [
+            "new",
+            "claim",
+            "--type=fact",
+            "--system=invalid",
+            `--title=Outside ${sourceFile}`,
+            `--source-file=${sourceFile}`
+          ],
+          { cwd: repoRoot }
+        )
+      ).rejects.toThrow(/Path (?:must be repository-relative|escapes repository root)/);
+    }
+
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/claims/invalid"))).toBe(false);
+  });
+
+  test("accepts contained source-file symlinks and rejects escaping symlinks", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    fs.mkdirSync(path.join(repoRoot, "src/public"), { recursive: true });
+    fs.mkdirSync(path.join(repoRoot, "src/private"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "src/private/auth.ts"), "export const auth = true;\n");
+    fs.symlinkSync("../private/auth.ts", path.join(repoRoot, "src/public/auth-link.ts"), "file");
+
+    await dispatch(
+      [
+        "new",
+        "claim",
+        "--type=fact",
+        "--system=auth",
+        "--title=Symlink source",
+        "--source-file=src/public/auth-link.ts"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const claimPath = path.join(repoRoot, "docs/agent-memory/claims/auth/symlink-source.md");
+    expect(fs.readFileSync(claimPath, "utf8")).toContain("  - src/public/auth-link.ts");
+    expect((await dispatch(["validate"], { cwd: repoRoot })).exitCode).toBe(0);
+
+    const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+    fs.writeFileSync(
+      configPath,
+      fs.readFileSync(configPath, "utf8").replace(
+        "claim_sources:\n  allow: []\n  deny: []",
+        "claim_sources:\n  allow: []\n  deny:\n    - src/private/**"
+      )
+    );
+
+    const validation = await dispatch(["validate"], { cwd: repoRoot });
+    expect(validation.exitCode).not.toBe(0);
+    expect(validation.stdout).toContain("claim.source_files.denied");
+    expect(validation.stdout).toContain("resolved target src/private/auth.ts");
+
+    await expect(
+      dispatch(
+        [
+          "new",
+          "claim",
+          "--type=fact",
+          "--system=auth",
+          "--title=Denied symlink source",
+          "--source-file=src/public/auth-link.ts"
+        ],
+        { cwd: repoRoot }
+      )
+    ).rejects.toThrow("resolved target src/private/auth.ts");
+
+    const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-outside-source-"));
+    fs.writeFileSync(path.join(outsideRoot, "outside.ts"), "export const outside = true;\n");
+    fs.symlinkSync(path.join(outsideRoot, "outside.ts"), path.join(repoRoot, "src/public/outside-link.ts"), "file");
+
+    await expect(
+      dispatch(
+        [
+          "new",
+          "claim",
+          "--type=fact",
+          "--system=auth",
+          "--title=Escaping symlink source",
+          "--source-file=src/public/outside-link.ts"
+        ],
+        { cwd: repoRoot }
+      )
+    ).rejects.toThrow("escapes repository root through a symlink");
+  });
+
   test("supports equals-form claim options and validates bad input", async () => {
     const repoRoot = makeGitRepo();
     await dispatch(["init", "--yes"], { cwd: repoRoot });
@@ -159,6 +312,218 @@ describe("new claim command", () => {
     expect(dispatch(["new", "claim", "--wat"], { cwd: repoRoot })).rejects.toThrow("Unknown new claim option: --wat");
   });
 });
+
+describe("new recipe command", () => {
+  test("creates a first-class recipe draft with repeatable options", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+
+    const result = await dispatch(
+      [
+        "new",
+        "recipe",
+        "--system= auth ",
+        "--title= Modify OAuth safely ",
+        "--trigger=change oauth",
+        "--source-file=src/auth.js",
+        "--step=Inspect current identity resolution.",
+        "--step=Preserve tenant scoping.",
+        "--verification-step=bun test"
+      ],
+      { cwd: repoRoot }
+    );
+
+    expect(result.stdout).toContain("Recipe draft created.");
+    expect(result.stdout).toContain("Status: needs_review");
+    expect(result.stdout).toContain("ID: recipe.auth.modify_oauth_safely");
+    const recipePath = path.join(repoRoot, "docs/agent-memory/recipes/auth/modify-oauth-safely.yaml");
+    const content = fs.readFileSync(recipePath, "utf8");
+    expect(content).toContain("status: needs_review");
+    expect(content).toContain('title: "Modify OAuth safely"');
+    expect(content).toContain('  - "change oauth"');
+    expect(content).toContain("  - src/auth.js");
+    expect(content).toContain('  - "Preserve tenant scoping."');
+
+    const validation = await dispatch(["validate"], { cwd: repoRoot });
+    expect(validation.exitCode).toBe(0);
+  });
+
+  test("avoids recipe ID and path collisions and validates options", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    await dispatch(["new", "recipe", "--system", "auth", "--title", "OAuth Review"], { cwd: repoRoot });
+    const second = await dispatch(["new", "recipe", "--system", "auth", "--title", "OAuth Review"], { cwd: repoRoot });
+
+    expect(second.stdout).toContain("ID: recipe.auth.oauth_review_2");
+    expect(second.stdout).toContain("recipes/auth/oauth-review-2.yaml");
+    expect(dispatch(["new", "recipe"], { cwd: repoRoot })).rejects.toThrow("Missing required new recipe options");
+    expect(dispatch(["new", "recipe", "--system=auth", "--title=Bad", "--wat"], { cwd: repoRoot })).rejects.toThrow(
+      "Unknown new recipe option: --wat"
+    );
+  });
+
+  test("rejects blank recipe options without writing a recipe", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+
+    for (const [option, title] of [
+      ["--trigger=", "Blank trigger"],
+      ["--step=", "Blank step"],
+      ["--verification-step=   ", "Blank verification"]
+    ] as const) {
+      await expect(
+        dispatch(["new", "recipe", "--system=auth", `--title=${title}`, option], { cwd: repoRoot })
+      ).rejects.toThrow("requires a non-blank value");
+    }
+
+    for (const args of [
+      ["--system=   ", "--title=Blank system"],
+      ["--system=auth", "--title=   "],
+      ["--system=auth", "--title=Blank ID", "--id=   "]
+    ]) {
+      await expect(dispatch(["new", "recipe", ...args], { cwd: repoRoot })).rejects.toThrow(
+        "requires a non-blank value"
+      );
+    }
+
+    const recipeFiles = fs
+      .readdirSync(path.join(repoRoot, "docs/agent-memory/recipes"), { recursive: true })
+      .filter((file) => String(file).endsWith(".yaml"));
+    expect(recipeFiles).toEqual([]);
+  });
+
+  test("keeps the recipe ID stable when force overwrites the same generated recipe", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    await dispatch(
+      ["new", "recipe", "--system=auth", "--title=OAuth Review", "--step=Inspect the existing OAuth flow."],
+      { cwd: repoRoot }
+    );
+
+    const forced = await dispatch(
+      ["new", "recipe", "--system=auth", "--title=OAuth Review", "--step=Inspect tenant-scoped OAuth.", "--force"],
+      { cwd: repoRoot }
+    );
+    const recipeDirectory = path.join(repoRoot, "docs/agent-memory/recipes/auth");
+    const recipeFiles = fs.readdirSync(recipeDirectory).filter((file) => file.endsWith(".yaml"));
+    const content = fs.readFileSync(path.join(recipeDirectory, "oauth-review.yaml"), "utf8");
+
+    expect(forced.stdout).toContain("ID: recipe.auth.oauth_review");
+    expect(forced.stdout).not.toContain("recipe.auth.oauth_review_2");
+    expect(recipeFiles).toEqual(["oauth-review.yaml"]);
+    expect(content).toContain('  - "Inspect tenant-scoped OAuth."');
+    expect(content).not.toContain("Inspect the existing OAuth flow.");
+  });
+
+  test("creates recipe drafts under an absolute external memory root", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-external-recipes-"));
+    updateMemoryRoot(repoRoot, externalRoot);
+
+    const result = await dispatch(["new", "recipe", "--system=auth", "--title=External OAuth Review"], {
+      cwd: repoRoot
+    });
+    const expectedPath = path.join(externalRoot, "recipes/auth/external-oauth-review.yaml");
+    const incorrectPath = path.join(repoRoot, expectedPath);
+
+    expect(result.stdout).toContain(`Path: ${expectedPath}`);
+    expect(fs.existsSync(expectedPath)).toBe(true);
+    expect(fs.existsSync(incorrectPath)).toBe(false);
+  });
+
+  test("creates the first recipe under missing local and external memory roots", async () => {
+    const externalParent = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-missing-recipe-root-"));
+
+    for (const configuredRoot of ["custom/memory", path.join(externalParent, "external-memory")]) {
+      const repoRoot = makeGitRepo();
+      await dispatch(["init", "--yes"], { cwd: repoRoot });
+      updateMemoryRoot(repoRoot, configuredRoot);
+      const memoryRoot = path.isAbsolute(configuredRoot) ? configuredRoot : path.join(repoRoot, configuredRoot);
+
+      const result = await dispatch(["new", "recipe", "--system=auth", "--title=Bootstrap Recipe"], {
+        cwd: repoRoot
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(fs.existsSync(path.join(memoryRoot, "recipes/auth/bootstrap-recipe.yaml"))).toBe(true);
+    }
+  });
+
+  test("rejects recipe output paths that escape the memory root through symlinks", async () => {
+    for (const symlinkLocation of ["recipes", "system", "file"] as const) {
+      const repoRoot = makeGitRepo();
+      await dispatch(["init", "--yes"], { cwd: repoRoot });
+      const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-outside-recipes-"));
+      const recipesRoot = path.join(repoRoot, "docs/agent-memory/recipes");
+      const systemRoot = path.join(recipesRoot, "auth");
+      const outsideFile = path.join(outsideRoot, "symlink-escape.yaml");
+
+      if (symlinkLocation === "recipes") {
+        fs.rmSync(recipesRoot, { recursive: true });
+        fs.symlinkSync(outsideRoot, recipesRoot, "dir");
+      } else if (symlinkLocation === "system") {
+        fs.symlinkSync(outsideRoot, systemRoot, "dir");
+      } else {
+        fs.mkdirSync(systemRoot, { recursive: true });
+        fs.symlinkSync(outsideFile, path.join(systemRoot, "symlink-escape.yaml"), "file");
+      }
+
+      await expect(
+        dispatch(["new", "recipe", "--system=auth", "--title=Symlink Escape"], { cwd: repoRoot })
+      ).rejects.toThrow("Recipe output path must stay inside the configured memory root");
+
+      expect(fs.existsSync(outsideFile)).toBe(false);
+    }
+  });
+
+  test("normalizes recipe source paths and rejects paths outside the repository", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+
+    await dispatch(
+      ["new", "recipe", "--system=auth", "--title=Normalized Recipe Source", "--source-file=src/../lib/auth.ts"],
+      { cwd: repoRoot }
+    );
+    const recipePath = path.join(repoRoot, "docs/agent-memory/recipes/auth/normalized-recipe-source.yaml");
+
+    expect(fs.readFileSync(recipePath, "utf8")).toContain("  - lib/auth.ts");
+
+    for (const sourceFile of [path.join(os.tmpdir(), "outside.ts"), "../outside.ts", "C:\\outside\\source.ts"]) {
+      await expect(
+        dispatch(
+          ["new", "recipe", "--system=invalid", `--title=Outside ${sourceFile}`, `--source-file=${sourceFile}`],
+          { cwd: repoRoot }
+        )
+      ).rejects.toThrow(/Path (?:must be repository-relative|escapes repository root)/);
+    }
+
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory/recipes/invalid"))).toBe(false);
+  });
+
+  test("accepts contained symlinks as recipe source files", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    fs.mkdirSync(path.join(repoRoot, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "src/auth.ts"), "export const auth = true;\n");
+    fs.symlinkSync("auth.ts", path.join(repoRoot, "src/auth-link.ts"), "file");
+
+    await dispatch(
+      ["new", "recipe", "--system=auth", "--title=Symlink Recipe Source", "--source-file=src/auth-link.ts"],
+      { cwd: repoRoot }
+    );
+
+    const recipePath = path.join(repoRoot, "docs/agent-memory/recipes/auth/symlink-recipe-source.yaml");
+    expect(fs.readFileSync(recipePath, "utf8")).toContain("  - src/auth-link.ts");
+    expect((await dispatch(["validate"], { cwd: repoRoot })).exitCode).toBe(0);
+  });
+});
+
+function updateMemoryRoot(repoRoot: string, memoryRoot: string): void {
+  const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+  const config = fs.readFileSync(configPath, "utf8");
+  fs.writeFileSync(configPath, config.replace(/^memory_root:.*$/m, `memory_root: ${JSON.stringify(memoryRoot)}`));
+}
 
 function makeGitRepo(): string {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-phase3-"));

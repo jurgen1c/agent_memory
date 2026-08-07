@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ConfigError } from "./errors";
-import { findRepoRoot, resolveInsideRepo } from "./repo";
+import { findRepoRoot, normalizeRepoRelativeOutputPath, normalizeRepoRelativePath, resolveInsideRepo } from "./repo";
 import type { AgentMemoryConfig, LoadedConfig, RepoInfo } from "./types";
 import { parseYaml } from "./yaml";
 
@@ -16,6 +16,9 @@ const DEFAULT_CONFIG: AgentMemoryConfig = {
   plans: ["plans/**/*.yaml"],
   profiles: ["profiles/**/*.yaml"],
   waivers: ["waivers/**/*.yaml"],
+  agent_instructions: {
+    paths: ["AGENTS.md"]
+  },
   agent_skills: {
     codex: {
       enabled: true,
@@ -25,6 +28,10 @@ const DEFAULT_CONFIG: AgentMemoryConfig = {
       enabled: true,
       path: "docs/agent-memory/AGENT_SKILL.md"
     }
+  },
+  claim_sources: {
+    allow: [],
+    deny: []
   },
   git: {
     install_hooks: true,
@@ -70,7 +77,7 @@ export function loadConfig(options: LoadConfigOptions = {}): LoadedConfig {
 
   const raw = fs.readFileSync(configPath, "utf8");
   const parsed = parseYaml(raw);
-  const config = normalizeConfig(parsed);
+  const config = normalizeConfig(parsed, repo.root);
 
   return {
     config,
@@ -122,6 +129,10 @@ ${renderStringArrayField("profiles", config.profiles)}
 # Coverage waiver YAML files. Use these for intentional memory coverage exceptions.
 ${renderStringArrayField("waivers", config.waivers)}
 
+# Managed repository instruction files. init and upgrade preserve local content outside each managed section.
+agent_instructions:
+${renderStringArrayField("paths", config.agent_instructions.paths, 2)}
+
 # Agent instruction output paths. Disable an agent or change where its skill file is installed.
 agent_skills:
   codex:
@@ -130,6 +141,11 @@ agent_skills:
   generic:
     enabled: ${config.agent_skills.generic.enabled}
     path: ${renderYamlScalar(config.agent_skills.generic.path)}
+
+# Repo-relative source paths eligible for claims. Empty allow means all paths; deny always wins.
+claim_sources:
+${renderStringArrayField("allow", config.claim_sources.allow, 2)}
+${renderStringArrayField("deny", config.claim_sources.deny, 2)}
 
 # Git hook settings. install-hooks reads this list when creating non-blocking sync hooks.
 git:
@@ -172,7 +188,7 @@ function resolveRepo(options: LoadConfigOptions): RepoInfo {
   return findRepoRoot(options.cwd);
 }
 
-function normalizeConfig(value: unknown): AgentMemoryConfig {
+function normalizeConfig(value: unknown, repoRoot: string): AgentMemoryConfig {
   if (!isRecord(value)) {
     throw new ConfigError("Config root must be a YAML mapping.");
   }
@@ -196,13 +212,50 @@ function normalizeConfig(value: unknown): AgentMemoryConfig {
     plans: readStringArray(value, "plans", DEFAULT_CONFIG.plans),
     profiles: readStringArray(value, "profiles", DEFAULT_CONFIG.profiles),
     waivers: readStringArray(value, "waivers", DEFAULT_CONFIG.waivers),
+    agent_instructions: readAgentInstructions(value, repoRoot),
     agent_skills: {
       codex: readAgentSkill(value, "codex", DEFAULT_CONFIG.agent_skills.codex),
       generic: readAgentSkill(value, "generic", DEFAULT_CONFIG.agent_skills.generic)
     },
+    claim_sources: readClaimSources(value, repoRoot),
     git: readGit(value),
     validation: readValidation(value),
     context: readContext(value)
+  };
+}
+
+function readAgentInstructions(root: Record<string, unknown>, repoRoot: string) {
+  const value = readRecord(root, "agent_instructions", {});
+  const legacyPath = value.path;
+
+  if (value.paths === undefined && legacyPath !== undefined && typeof legacyPath !== "string") {
+    throw new ConfigError("Config field agent_instructions.path must be a string.");
+  }
+
+  const paths =
+    value.paths !== undefined
+      ? readStringArray(value, "paths", DEFAULT_CONFIG.agent_instructions.paths)
+      : typeof legacyPath === "string"
+        ? [legacyPath]
+        : [...DEFAULT_CONFIG.agent_instructions.paths];
+
+  if (paths.length === 0 || paths.some((instructionPath) => instructionPath.trim().length === 0)) {
+    throw new ConfigError("Config field agent_instructions.paths must contain at least one non-empty path.");
+  }
+
+  const normalizedPaths = paths.map((instructionPath) => {
+    try {
+      return normalizeRepoRelativeOutputPath(repoRoot, instructionPath);
+    } catch (error) {
+      throw new ConfigError(
+        `Config field agent_instructions.paths must contain repository-relative paths inside the repository: ${instructionPath}`,
+        { cause: error }
+      );
+    }
+  });
+
+  return {
+    paths: Array.from(new Set(normalizedPaths))
   };
 }
 
@@ -214,6 +267,36 @@ function readAgentSkill(root: Record<string, unknown>, key: "codex" | "generic",
     enabled: readBoolean(value, "enabled", fallback.enabled),
     path: readString(value, "path", fallback.path)
   };
+}
+
+function readClaimSources(root: Record<string, unknown>, repoRoot: string) {
+  const value = readRecord(root, "claim_sources", {});
+
+  return {
+    allow: readClaimSourceGlobs(value, "allow", DEFAULT_CONFIG.claim_sources.allow, repoRoot),
+    deny: readClaimSourceGlobs(value, "deny", DEFAULT_CONFIG.claim_sources.deny, repoRoot)
+  };
+}
+
+function readClaimSourceGlobs(
+  value: Record<string, unknown>,
+  key: "allow" | "deny",
+  fallback: string[],
+  repoRoot: string
+): string[] {
+  const globs = readStringArray(value, key, fallback);
+  const normalized = globs.map((glob) => {
+    try {
+      return normalizeRepoRelativePath(repoRoot, glob);
+    } catch (error) {
+      throw new ConfigError(
+        `Config field claim_sources.${key} must contain repository-relative glob patterns inside the repository: ${glob}`,
+        { cause: error }
+      );
+    }
+  });
+
+  return Array.from(new Set(normalized));
 }
 
 function readGit(root: Record<string, unknown>) {

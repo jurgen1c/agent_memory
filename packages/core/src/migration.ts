@@ -5,10 +5,12 @@ import {
   nearestExistingAncestor,
   resolveContainedPath
 } from "@jurgen1c/agent-core/repository";
+import { describeClaimSourcePolicyDecision, evaluateClaimSourcePath } from "./claim_sources";
 import { loadConfig, renderYamlScalar } from "./config";
 import { AgentMemoryError } from "./errors";
 import { resolveConfiguredPath, toPosix } from "./files";
 import { resolveRepoOutputPath } from "./repo";
+import type { ClaimSourcePolicy } from "./types";
 import { parseYaml } from "./yaml";
 
 export type MigrationMode = "plan" | "automatic";
@@ -156,6 +158,7 @@ export function migrateDocs(options: MigrateDocsOptions): MigrateDocsResult {
   const docs = planDocs(repoRoot, memoryRoot, system, discoverMigratableDocs(sourceRoot));
 
   if (mode === "automatic") {
+    assertMigratedDocSourcesEligible(repoRoot, docs, loaded.config.claim_sources);
     for (const doc of docs) {
       writeDraftClaim(repoRoot, memoryRoot, doc, Boolean(options.force));
     }
@@ -253,6 +256,7 @@ export function migrateDocsFromSystemMap(options: MigrateDocsSystemMapOptions): 
   const docs = planDocsFromMappings(repoRoot, memoryRoot, systemMap.mappings);
 
   if (mode === "automatic") {
+    assertMigratedDocSourcesEligible(repoRoot, docs, loaded.config.claim_sources);
     for (const doc of docs) {
       writeDraftClaim(repoRoot, memoryRoot, doc, Boolean(options.force));
     }
@@ -371,6 +375,18 @@ function writeDraftClaim(repoRoot: string, memoryRoot: string, doc: MigratedDocP
   fs.mkdirSync(path.dirname(absoluteTarget), { recursive: true });
   fs.writeFileSync(absoluteTarget, draftClaimTemplate(doc));
   doc.status = existedBefore ? "overwritten" : "created";
+}
+
+function assertMigratedDocSourcesEligible(repoRoot: string, docs: MigratedDocPlan[], policy: ClaimSourcePolicy): void {
+  for (const doc of docs) {
+    const decision = evaluateClaimSourcePath(doc.sourcePath, policy, repoRoot);
+
+    if (!decision.eligible) {
+      throw new AgentMemoryError(describeClaimSourcePolicyDecision(doc.sourcePath, decision), {
+        details: ["Update claim_sources in agent-memory.config.yaml only when this path should become eligible for durable claims."]
+      });
+    }
+  }
 }
 
 function uniqueMigrationSlug(system: string, sourceSlug: string, allocatedIds: Set<string>, allocatedPaths: Set<string>): string {
@@ -669,7 +685,7 @@ function draftClaimTemplate(doc: MigratedDocPlan): string {
 id: ${doc.suggestedId}
 type: fact
 system: ${systemSafeFromId(doc.suggestedId)}
-status: current
+status: needs_review
 confidence: low
 severity: normal
 
@@ -703,7 +719,7 @@ Legacy documentation at \`${doc.sourcePath}\` describes ${doc.title}. Review the
 ## Migration Notes
 
 - Source document: \`${doc.sourcePath}\`
-- Migration status: current
+- Migration status: needs_review
 - Confidence: low
 
 ## Verification

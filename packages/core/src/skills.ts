@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildAgentCommands } from "./agent_commands";
+import { renderClaimSourcePolicy } from "./claim_sources";
 import { loadConfig } from "./config";
 import { AgentMemoryError } from "./errors";
 import { resolveRepoOutputPath } from "./repo";
@@ -91,7 +92,7 @@ export function installAgentSkill(options: InstallAgentSkillOptions): SkillInsta
   );
 
   if (options.agent === "codex" && skillAction.status !== "skipped") {
-    writeCodexSkillReferences(repo.root, absolutePath, kind, Boolean(options.force), actions);
+    writeCodexSkillReferences(repo.root, absolutePath, kind, Boolean(options.force), actions, loaded.config);
   }
 
   return {
@@ -121,6 +122,7 @@ export function renderAgentSkill(options: RenderAgentSkillOptions): string {
 For deeper task guidance, read:
 
 - \`references/claims.md\`
+- \`references/memory-worthiness.md\`
 - \`references/contextual-workflows.md\`
 - \`references/recipes.md\`
 - \`references/plans.md\`
@@ -186,7 +188,7 @@ Use the returned contextual workflows:
 
 - If context includes matched recipes, follow their required claims, verification, and memory-update prompts.
 - If context includes a plan stage, work that stage unless the user broadens scope.
-- If context includes profile traits, treat them as repository guidance below system, developer, user, and AGENTS.md instructions.
+- If context includes profile traits, treat them as repository guidance below system, developer, user, and repository instruction-file guidance.
 - For multi-stage work, use \`${options.commandPrefix} plans suggest --task "<task>"\` and create a local run only when it adds value.
 
 ## Available Commands
@@ -201,9 +203,33 @@ Use templates instead of inventing claim structure:
 ${options.commandPrefix} templates list
 ${options.commandPrefix} templates show claim:fact
 ${options.commandPrefix} new claim --type fact --system <system> --title "<title>"
+${options.commandPrefix} new recipe --system <system> --title "<title>"
 \`\`\`
 
-Create one Markdown file per claim. Keep claims atomic and include verification steps.
+New claims and recipes are safe drafts. Claims start as \`needs_review\` with low confidence. Replace every TODO, run verification, and only then promote a claim or recipe to \`current\`. Current artifacts containing TODO placeholders fail validation.
+
+## Decide Whether to Write Memory
+
+Search for existing claims and recipes before creating new memory. Update or deprecate an existing artifact when it already owns the knowledge.
+
+Create durable memory only when the knowledge is repository-specific, likely to matter in future work, durable beyond the current task, consequential if forgotten, and supported by concrete evidence. A new claim should normally satisfy at least four of those five tests.
+
+- Use a claim for one durable truth or invariant.
+- Use a recipe for a repeatable agent procedure with repository-specific steps, ordering, safeguards, or verification.
+- Use an index for discoverability or file ownership.
+- Use a local plan run for one-off execution state.
+- Use a waiver for a reviewed, time-boxed coverage exception.
+- Create nothing for temporary observations, routine refactors, generic advice, or facts obvious from one local definition.
+
+A claim tells future agents what is true or must remain true. A recipe tells future agents how to perform a recurring task safely. Never create placeholder memory merely because code changed or coverage reported a gap.
+
+When claim verification succeeds, set \`last_verified_commit\` to the tested full Git commit object ID, never a movable ref such as a branch or \`HEAD\`. Use \`confidence: verified\` only with that commit recorded. Audit warns when supporting files changed after the recorded commit.
+
+Claim source eligibility comes from \`claim_sources\` in \`agent-memory.config.yaml\`:
+
+${renderClaimSourcePolicy(options.config.claim_sources)}
+
+Deny patterns win over allow patterns. Do not reference policy-excluded paths through either \`source_files\` or \`related_files\`.
 
 ## Relationship Graphs
 
@@ -300,7 +326,7 @@ ${options.commandPrefix} migrate-docs --from <existing-docs> --system <system> -
 ${options.commandPrefix} migrate-docs --system-map .agent-memory/migrations/<source>.yaml --automatic
 \`\`\`
 
-Automatic migration creates \`current\`, low-confidence claim drafts. Treat them as starting points that still need review and verification.
+Automatic migration creates \`needs_review\`, low-confidence claim drafts. Treat them as starting points that still need review and verification.
 
 ## Agent Duties
 
@@ -359,7 +385,7 @@ export function defaultSkillLocation(agent: AgentTarget): string {
   return agent === "codex" ? DEFAULT_CODEX_SKILL_LOCATION : "docs/agent-memory";
 }
 
-export function codexSkillReferenceFiles(kind: AgentSkillKind): SkillReferenceFile[] {
+export function codexSkillReferenceFiles(kind: AgentSkillKind, config?: AgentMemoryConfig): SkillReferenceFile[] {
   if (kind === "migration") {
     return [
       { path: "references/migration-workflow.md", content: migrationWorkflowReference() },
@@ -370,6 +396,7 @@ export function codexSkillReferenceFiles(kind: AgentSkillKind): SkillReferenceFi
 
   return [
     { path: "references/claims.md", content: claimsReference() },
+    { path: "references/memory-worthiness.md", content: memoryWorthinessReference(config) },
     { path: "references/contextual-workflows.md", content: contextualWorkflowsReference() },
     { path: "references/recipes.md", content: recipesReference() },
     { path: "references/plans.md", content: plansReference() },
@@ -393,11 +420,12 @@ export function writeCodexSkillReferences(
   absoluteSkillPath: string,
   kind: AgentSkillKind,
   force: boolean,
-  actions: SkillReferenceWriteActionAccumulator
+  actions: SkillReferenceWriteActionAccumulator,
+  config?: AgentMemoryConfig
 ): void {
   const skillDir = path.dirname(absoluteSkillPath);
 
-  for (const reference of codexSkillReferenceFiles(kind)) {
+  for (const reference of codexSkillReferenceFiles(kind, config)) {
     const absolutePath = path.join(skillDir, reference.path);
     writeFile(absolutePath, displayRepoPath(repoRoot, absolutePath), reference.content, force, actions);
   }
@@ -493,8 +521,13 @@ Good claims:
 - name source files, routes, symbols, or tests when known
 - include concrete verification steps
 - use low confidence until checked against code
+- record knowledge that is costly, risky, or time-consuming to rediscover
 
-Avoid broad summaries. Split a document that describes several behaviors into several claims.
+Avoid broad summaries, temporary implementation notes, and claims that merely restate one obvious local definition. Split a document that describes several behaviors into several claims.
+
+A workflow claim describes a durable lifecycle or invariant, such as required state transitions. It does not replace a YAML recipe. The legacy \`claim:recipe\` template remains available for compatibility, but use first-class recipes for procedures agents should execute.
+
+\`new claim\` creates a \`needs_review\`, low-confidence draft. Replace all TODO fields and run its verification before changing it to \`current\`. Set \`last_verified_commit\` to the full tested Git commit object ID when verification succeeds; \`confidence: verified\` requires that commit.
 `;
 }
 
@@ -504,18 +537,98 @@ function recipesReference(): string {
 
 Recipes capture repeatable workflows for implementation, debugging, release, review, or operations.
 
-Create recipes when a task has reusable steps that future agents should follow. Keep one workflow per recipe and link related claims by ID instead of copying claim text.
+Create recipes when a task has reusable steps that future agents should follow. A useful recipe is repository-specific, likely to recur, and contains non-obvious ordering, safeguards, decision points, or verification. Keep one workflow per recipe and link related claims by ID instead of copying claim text.
 
 Prefer recipes for procedures and claims for facts. If a recipe depends on a constraint, represent that constraint as a claim and connect it through graph relationships.
+
+Do not create a recipe for a one-off incident, a generic development loop such as "edit, test, commit," or a single command whose usage is already obvious.
 
 Useful commands:
 
 \`\`\`bash
+agent-memory new recipe --system auth --title "Modify student OAuth safely"
 agent-memory recipes list
 agent-memory recipes search "student oauth"
 agent-memory recipes show recipe.auth.modify_student_oauth
 agent-memory context --recipe recipe.auth.modify_student_oauth
 \`\`\`
+`;
+}
+
+function memoryWorthinessReference(config?: AgentMemoryConfig): string {
+  const policy = config
+    ? renderClaimSourcePolicy(config.claim_sources)
+    : "- Allowed claim sources: all repository paths\n- Denied claim sources: none";
+
+  return `${generatedReferenceHeader("repo-memory/memory-worthiness.md")}
+# Memory Worthiness
+
+Durable memory should reduce future uncertainty, rework, or risk. It should not become a changelog or a transcription of the codebase.
+
+## Before Creating Anything
+
+1. Search existing claims and recipes. Update, deprecate, or extend the artifact that already owns the knowledge.
+2. Identify the smallest durable proposition or repeatable procedure.
+3. Check the repository's claim source policy.
+4. Choose the narrowest artifact that represents the knowledge without duplication.
+
+## Claim Threshold
+
+A new claim should normally pass at least four of these five tests:
+
+1. **Repository-specific**: this is not generic engineering knowledge.
+2. **Future-relevant**: a later implementation, debugging, review, release, or operations task is likely to need it.
+3. **Durable**: it should remain true after the current branch or task is complete.
+4. **Consequential**: forgetting it could cause an incorrect change, security or reliability risk, repeated investigation, or a broken workflow.
+5. **Evidence-backed**: code, tests, configuration, committed documentation, or another concrete source can verify it.
+
+Atomicity and verification are necessary but not sufficient. A perfectly formatted claim can still be noise.
+
+## Choose the Artifact
+
+- **Update an existing claim** when the same durable truth changed or gained better evidence.
+- **Create a claim** for one durable fact, rule, constraint, decision, risk, or lifecycle invariant.
+- **Create a recipe** for a recurring agent procedure with repository-specific steps, ordering, safeguards, decision points, or verification.
+- **Update an index** for discoverability, ownership, watched files, routes, jobs, models, tags, or search terms.
+- **Use a local plan run** for one-off task execution state.
+- **Use a waiver** for an intentional, reviewed, time-boxed coverage exception.
+- **Create nothing** for formatting-only work, routine refactors, temporary debugging observations, generic best practices, speculative assumptions, or facts obvious from one local definition.
+
+## Claim or Recipe?
+
+A claim tells a future agent **what is true or must remain true**. A recipe tells a future agent **how to perform a recurring task safely**.
+
+Good claim:
+
+> OAuth identity resolution requires both the provider identifier and tenant context.
+
+Noisy claim:
+
+> The OAuth controller calls \`Student.find_by\`.
+
+Good recipe:
+
+> Rotate the signing key by updating credentials, regenerating fixtures, running compatibility tests, and verifying that old tokens fail.
+
+Noisy recipe:
+
+> Edit the file, run tests, and commit.
+
+Use a workflow claim for a durable lifecycle or mandatory transition. Use a first-class YAML recipe for steps an agent performs. The legacy \`claim:recipe\` template is compatibility-only and should not be the default for new procedures.
+
+Both \`new claim\` and \`new recipe\` create \`needs_review\` drafts. Replace all TODO values and complete verification before promotion to \`current\`. A current artifact containing TODO placeholders is invalid.
+
+## Coverage Is Not Evidence of Worth
+
+A changed watched file or coverage gap is a prompt to review memory, not proof that a new claim is needed. The correct response may be to update existing memory, improve an index, add a justified waiver, change the claim source policy, or make no memory change. Never create filler claims or false graph relationships to clear a check.
+
+## Claim Source Policy
+
+\`claim_sources.allow\` and \`claim_sources.deny\` contain repo-relative glob patterns. An empty allow list permits every repository path. Deny patterns always win.
+
+${policy}
+
+Policy-excluded paths cannot appear in claim \`source_files\` or \`related_files\`, and changed files excluded by the policy do not require claim coverage. Do not bypass the policy by attaching an excluded path indirectly to an otherwise allowed claim.
 `;
 }
 
@@ -608,7 +721,9 @@ Use \`coverage --git-diff\` for non-trivial code changes. If watched files chang
 
 ## Stale Review
 
-Run \`audit --git-diff\` when canonical memory files changed. Strong duplicate signals block; shared tags and weak file overlap are advisory. Resolve failures by reviewing the exact shared values and then updating or deprecating a claim, or adding any semantically accurate explicit graph relationship. Never invent \`replaces\` or \`conflicts_with\` solely to clear an audit finding. Repositories that intentionally depend on the legacy all-overlap gate can run \`audit --git-diff --strict\`.
+Run \`audit --git-diff\` when canonical memory files changed. Strong duplicate signals block; shared tags and weak file overlap are advisory. Audit requires \`last_verified_commit\` values to be full immutable Git commit object IDs and warns when supporting files changed afterward. Re-run verification and record the full tested commit object ID, or move the claim to \`needs_verification\`. Resolve failures by reviewing the exact shared values and then updating or deprecating a claim, or adding any semantically accurate explicit graph relationship. Never invent \`replaces\` or \`conflicts_with\` solely to clear an audit finding. Repositories that intentionally depend on the legacy all-overlap gate can run \`audit --git-diff --strict\`.
+
+All Git subprocesses are bounded. If a restricted subprocess stalls, agent-memory terminates it and follows the command's documented warning or fallback behavior. Audit conservatively retains current-tree overlap findings when baseline memory cannot be loaded.
 
 Generated files under \`.agent-memory/\` are cache data and must not be committed.
 `;
@@ -696,7 +811,7 @@ function reviewingDraftsReference(): string {
   return `${generatedReferenceHeader("repo-memory-migration/reviewing-drafts.md")}
 # Reviewing Drafts
 
-Automatic migration writes low-confidence current drafts. They are placeholders, not finished memory.
+Automatic migration writes low-confidence \`needs_review\` drafts. They are placeholders, not finished memory.
 
 For each draft:
 

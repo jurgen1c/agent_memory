@@ -38,6 +38,10 @@ describe("upgrade command", () => {
     const agents = fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8");
     const skill = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"), "utf8");
     const claimsReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/claims.md"), "utf8");
+    const memoryWorthinessReference = fs.readFileSync(
+      path.join(repoRoot, ".codex/skills/repo-memory/references/memory-worthiness.md"),
+      "utf8"
+    );
     const contextualReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/contextual-workflows.md"), "utf8");
     const plansReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/plans.md"), "utf8");
     const profilesReference = fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/references/profiles.md"), "utf8");
@@ -49,6 +53,8 @@ describe("upgrade command", () => {
     expect(result.stdout).toContain("upgrade applied");
     expect(configText).toContain("# Defaults for agent-memory context when command flags are omitted.");
     expect(configText).toContain("max_claim_frontmatter_length: 900");
+    expect(configText).toContain("agent_instructions:");
+    expect(configText).toContain("claim_sources:");
     expect(loaded.config.memory_root).toBe("memory");
     expect(loaded.config.validation.require_source_files).toBe(false);
     expect(loaded.config.context.default_budget).toBe("full");
@@ -67,15 +73,69 @@ describe("upgrade command", () => {
     expect(skill).not.toContain("`cache/plans`");
     expect(skill).toContain("If context includes matched recipes");
     expect(skill).toContain("references/claims.md");
+    expect(skill).toContain("references/memory-worthiness.md");
     expect(skill).toContain("references/contextual-workflows.md");
     expect(skill).toContain("references/delegation.md");
     expect(claimsReference).toContain("<!-- agent-memory:generated-reference repo-memory/claims.md -->");
+    expect(memoryWorthinessReference).toContain("## Claim Threshold");
+    expect(memoryWorthinessReference).toContain("Coverage Is Not Evidence of Worth");
     expect(contextualReference).toContain("<!-- agent-memory:generated-reference repo-memory/contextual-workflows.md -->");
     expect(contextualReference).toContain("Selected Profile Traits");
     expect(plansReference).toContain("plans finish");
     expect(profilesReference).toContain("profiles match");
     expect(coverageReference).toContain("## Stale Review");
+    expect(coverageReference).toContain("All Git subprocesses are bounded");
     expect(delegationReference).toContain("Subagent prompt contract");
+  });
+
+  test("refreshes the configured instruction file instead of assuming AGENTS.md", async () => {
+    const repoRoot = makeRepo(`${oldConfig()}
+agent_instructions:
+  path: CLAUDE.md
+claim_sources:
+  allow:
+    - app/**
+  deny:
+    - app/generated/**
+`);
+    const instructionsPath = path.join(repoRoot, "CLAUDE.md");
+    fs.writeFileSync(instructionsPath, "# Claude Instructions\n\nKeep Claude-specific guidance.\n");
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+    const instructions = fs.readFileSync(instructionsPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("CLAUDE.md");
+    expect(instructions).toContain("Keep Claude-specific guidance.");
+    expect(instructions).toContain("### Memory-Worthiness Gate");
+    expect(instructions).toContain("Allowed claim sources: `app/**`");
+    expect(instructions).toContain("Denied claim sources: `app/generated/**`");
+    expect(fs.existsSync(path.join(repoRoot, "AGENTS.md"))).toBe(false);
+    expect(loadConfig({ repoRoot }).config.agent_instructions.paths).toEqual(["CLAUDE.md"]);
+    expect(fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8")).toContain(
+      "agent_instructions:\n  paths:\n    - CLAUDE.md"
+    );
+    expect(result.stdout).toContain("agent_instructions.path was migrated to agent_instructions.paths");
+  });
+
+  test("refreshes every configured instruction file", async () => {
+    const repoRoot = makeRepo(`${oldConfig()}
+agent_instructions:
+  paths:
+    - AGENTS.md
+    - CLAUDE.md
+`);
+    fs.writeFileSync(path.join(repoRoot, "AGENTS.md"), "# Agents\n\nKeep shared guidance.\n");
+    fs.writeFileSync(path.join(repoRoot, "CLAUDE.md"), "# Claude\n\nKeep Claude guidance.\n");
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")).toContain("Keep shared guidance.");
+    expect(fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")).toContain("### Memory-Worthiness Gate");
+    expect(fs.readFileSync(path.join(repoRoot, "CLAUDE.md"), "utf8")).toContain("Keep Claude guidance.");
+    expect(fs.readFileSync(path.join(repoRoot, "CLAUDE.md"), "utf8")).toContain("### Memory-Worthiness Gate");
+    expect(loadConfig({ repoRoot }).config.agent_instructions.paths).toEqual(["AGENTS.md", "CLAUDE.md"]);
   });
 
   test("does not add gitkeep files to populated memory directories", async () => {
@@ -136,6 +196,21 @@ describe("upgrade command", () => {
     expect(result.stdout).toContain("refreshed bun wrapper");
     expect(wrapper).toBe(wrapperTemplate("bun"));
     expect(wrapper).toContain("bunx @jurgen1c/agent-memory-cli");
+  });
+
+  test("refreshes previously generated wrappers with an unbounded scoped fallback", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
+    fs.writeFileSync(wrapperPath, unboundedGeneratedWrapper("npm"));
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+    const wrapper = fs.readFileSync(wrapperPath, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("refreshed npm wrapper");
+    expect(wrapper).toBe(wrapperTemplate("npm"));
+    expect(wrapper).toContain("AGENT_MEMORY_ALLOW_NPX");
   });
 
   test("refreshes generated wrappers with EOF whitespace drift", async () => {
@@ -563,6 +638,32 @@ set -euo pipefail
 
 if [ -n "\${AGENT_MEMORY_CLI:-}" ]; then
   exec "\${AGENT_MEMORY_CLI}" "$@"
+fi
+
+if command -v agent-memory >/dev/null 2>&1; then
+  exec agent-memory "$@"
+fi
+
+exec ${fallback} "$@"
+`;
+}
+
+function unboundedGeneratedWrapper(packageManager: "npm" | "bun"): string {
+  const fallback = packageManager === "bun" ? "bunx @jurgen1c/agent-memory-cli" : "npx -y @jurgen1c/agent-memory-cli";
+
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "\${AGENT_MEMORY_CLI:-}" ]; then
+  exec "\${AGENT_MEMORY_CLI}" "$@"
+fi
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "\${SCRIPT_DIR}/.." && pwd)"
+LOCAL_CLI="\${REPO_ROOT}/node_modules/.bin/agent-memory"
+
+if [ -x "\${LOCAL_CLI}" ]; then
+  exec "\${LOCAL_CLI}" "$@"
 fi
 
 if command -v agent-memory >/dev/null 2>&1; then

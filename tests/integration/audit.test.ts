@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dispatch, runCli } from "../../packages/cli/src/router";
+import { auditMemory } from "../../packages/core/src/audit";
 
 const repoRoot = path.resolve(".");
 const mockApp = path.join(repoRoot, "examples/mock-app");
@@ -979,8 +980,306 @@ describe("audit command", () => {
       );
 
       expect(exitCode).toBe(1);
-      expect(stderr).toContain("Could not resolve audit base ref: missing-audit-base");
+      expect(stderr).toContain("Could not read Git diff for base ref missing-audit-base");
     }
+  });
+
+  test("warns when claim sources changed after last_verified_commit", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const verifiedCommit = gitOutput(cwd, ["rev-parse", "HEAD"]);
+    const claimPath = path.join(
+      cwd,
+      "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md"
+    );
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${verifiedCommit}`)
+    );
+    commitAll(cwd, "Record claim verification");
+    fs.appendFileSync(path.join(cwd, "src/auth.js"), "\n// changed after verification\n");
+
+    const result = await dispatch(["audit", "--changed-files", "src/auth.js", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as {
+      findings: Array<{ code: string; claimIds: string[]; shared_values: { source_files?: string[] } }>;
+    };
+    const finding = parsed.findings.find((item) => item.code === "claim.verification_outdated");
+
+    expect(result.exitCode).toBe(0);
+    expect(finding?.claimIds).toEqual(["auth.student_oauth.uid_is_tenant_scoped"]);
+    expect(finding?.shared_values.source_files).toEqual(["src/auth.js"]);
+  });
+
+  test("warns when the target of a symlinked claim source changes", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const claimPath = path.join(cwd, "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md");
+    fs.symlinkSync("auth.js", path.join(cwd, "src/auth-link.js"), "file");
+    fs.writeFileSync(claimPath, fs.readFileSync(claimPath, "utf8").replace("src/auth.js", "src/auth-link.js"));
+    commitAll(cwd, "Record symlinked claim source");
+    const verifiedCommit = gitOutput(cwd, ["rev-parse", "HEAD"]);
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${verifiedCommit}`)
+    );
+    commitAll(cwd, "Record claim verification");
+    fs.appendFileSync(path.join(cwd, "src/auth.js"), "\n// target changed after verification\n");
+
+    const result = await dispatch(["audit", "--changed-files", "src/auth.js", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as {
+      findings: Array<{ code: string; shared_values: { source_files?: string[] } }>;
+    };
+    const finding = parsed.findings.find((item) => item.code === "claim.verification_outdated");
+
+    expect(result.exitCode).toBe(0);
+    expect(finding?.shared_values.source_files).toEqual(["src/auth.js"]);
+  });
+
+  test("warns when a claim source is renamed after last_verified_commit", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const verifiedCommit = gitOutput(cwd, ["rev-parse", "HEAD"]);
+    const claimPath = path.join(cwd, "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md");
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${verifiedCommit}`)
+    );
+    commitAll(cwd, "Record claim verification");
+    fs.renameSync(path.join(cwd, "src/auth.js"), path.join(cwd, "src/auth-renamed.js"));
+    commitAll(cwd, "Rename verified source");
+
+    const result = await dispatch(["audit", "--changed-files", "src/auth-renamed.js", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as {
+      findings: Array<{ code: string; shared_values: { source_files?: string[] } }>;
+    };
+    const finding = parsed.findings.find((item) => item.code === "claim.verification_outdated");
+
+    expect(finding?.shared_values.source_files).toEqual(["src/auth.js"]);
+  });
+
+  test("warns when a claim source has an uncommitted rename", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const verifiedCommit = gitOutput(cwd, ["rev-parse", "HEAD"]);
+    const claimPath = path.join(cwd, "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md");
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${verifiedCommit}`)
+    );
+    commitAll(cwd, "Record claim verification");
+    fs.renameSync(path.join(cwd, "src/auth.js"), path.join(cwd, "src/auth-renamed.js"));
+
+    const result = await dispatch(["audit", "--changed-files", "src/auth-renamed.js", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as {
+      findings: Array<{ code: string; shared_values: { source_files?: string[] } }>;
+    };
+    const finding = parsed.findings.find((item) => item.code === "claim.verification_outdated");
+
+    expect(finding?.shared_values.source_files).toEqual(["src/auth.js"]);
+  });
+
+  test("normalizes claim source dot segments before verification matching", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const verifiedCommit = gitOutput(cwd, ["rev-parse", "HEAD"]);
+    const claimPath = path.join(cwd, "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md");
+    fs.writeFileSync(
+      claimPath,
+      fs
+        .readFileSync(claimPath, "utf8")
+        .replace("  - src/auth.js", "  - src/../src/auth.js")
+        .replace("last_verified_commit: null", `last_verified_commit: ${verifiedCommit}`)
+    );
+    commitAll(cwd, "Record normalized claim verification");
+    fs.appendFileSync(path.join(cwd, "src/auth.js"), "\n// changed after normalized verification\n");
+
+    const result = await dispatch(["audit", "--changed-files", "src/auth.js", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as { findings: Array<{ code: string }> };
+
+    expect(parsed.findings.some((finding) => finding.code === "claim.verification_outdated")).toBe(true);
+  });
+
+  test("rejects malformed last_verified_commit values", async () => {
+    const malformedValues = ["''", "123", "[]", "{}"];
+
+    for (const malformedValue of malformedValues) {
+      const cwd = copyFixture(mockApp);
+      const relativeClaimPath = "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md";
+      const claimPath = path.join(cwd, relativeClaimPath);
+      fs.writeFileSync(
+        claimPath,
+        fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${malformedValue}`)
+      );
+
+      const result = await dispatch(["audit", "--changed-files", relativeClaimPath], { cwd });
+
+      expect(result.exitCode).toBe(6);
+      expect(result.stdout).toContain("claim.last_verified_commit_invalid");
+      expect(result.stdout).toContain("malformed last_verified_commit");
+    }
+  });
+
+  test("rejects invalid last_verified_commit values on inactive claims", async () => {
+    for (const status of ["stale", "deprecated", "rejected"]) {
+      const cwd = copyFixture(mockApp);
+      const relativeClaimPath = "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md";
+      const claimPath = path.join(cwd, relativeClaimPath);
+      fs.writeFileSync(
+        claimPath,
+        fs
+          .readFileSync(claimPath, "utf8")
+          .replace("status: current", `status: ${status}`)
+          .replace("last_verified_commit: null", "last_verified_commit: HEAD")
+      );
+
+      const result = await dispatch(["audit", "--changed-files", relativeClaimPath, "--json"], { cwd });
+      const parsed = JSON.parse(result.stdout) as {
+        findings: Array<{ code: string; claimIds: string[] }>;
+      };
+      const finding = parsed.findings.find((item) => item.code === "claim.last_verified_commit_invalid");
+
+      expect(result.exitCode).toBe(6);
+      expect(finding?.claimIds).toEqual(["auth.student_oauth.uid_is_tenant_scoped"]);
+    }
+  });
+
+  test("rejects abbreviated commit IDs in SHA-256 repositories", async () => {
+    const cwd = copyFixture(mockApp);
+    git(cwd, ["init", "--object-format=sha256"]);
+    commitAll(cwd, "Initial SHA-256 commit");
+    const abbreviatedCommit = gitOutput(cwd, ["rev-parse", "HEAD"]).slice(0, 40);
+    const relativeClaimPath = "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md";
+    const claimPath = path.join(cwd, relativeClaimPath);
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${abbreviatedCommit}`)
+    );
+
+    const result = await dispatch(["audit", "--changed-files", relativeClaimPath], { cwd });
+
+    expect(result.exitCode).toBe(6);
+    expect(result.stdout).toContain("claim.last_verified_commit_invalid");
+    expect(result.stdout).toContain("repository's full immutable Git commit object ID");
+  });
+
+  test("rejects an unknown last_verified_commit", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const relativeClaimPath = "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md";
+    const claimPath = path.join(cwd, relativeClaimPath);
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", "last_verified_commit: missing-commit")
+    );
+
+    const result = await dispatch(["audit", "--changed-files", relativeClaimPath], { cwd });
+
+    expect(result.exitCode).toBe(6);
+    expect(result.stdout).toContain("claim.last_verified_commit_invalid");
+    expect(result.stdout).toContain("missing-commit");
+  });
+
+  test("rejects movable last_verified_commit references", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const relativeClaimPath = "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md";
+    const claimPath = path.join(cwd, relativeClaimPath);
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", "last_verified_commit: HEAD")
+    );
+    commitAll(cwd, "Record movable verification reference");
+    fs.appendFileSync(path.join(cwd, "src/auth.js"), "\n// committed after movable verification\n");
+    commitAll(cwd, "Change source after verification");
+
+    const result = await dispatch(["audit", "--changed-files", "src/auth.js"], { cwd });
+
+    expect(result.exitCode).toBe(6);
+    expect(result.stdout).toContain("claim.last_verified_commit_invalid");
+    expect(result.stdout).toContain("full immutable Git commit object ID");
+  });
+
+  test("caches shared verification commit resolutions and failures", () => {
+    for (const resolves of [true, false]) {
+      const cwd = copyFixture(mockApp);
+      const verificationCommit = (resolves ? "a" : "b").repeat(40);
+      const invocationLog = path.join(cwd, "git-invocations.log");
+      const fakeGit = path.join(cwd, "verification-git");
+      const resolutionCommand = `rev-parse --verify ${verificationCommit}^{commit}`;
+      fs.writeFileSync(
+        fakeGit,
+        `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> ${JSON.stringify(invocationLog)}
+case "$*" in
+  ${JSON.stringify(resolutionCommand)}) ${resolves ? `printf '%s\\n' "${verificationCommit}"` : "exit 9"} ;;
+  *) exit 9 ;;
+esac
+`
+      );
+      fs.chmodSync(fakeGit, 0o755);
+
+      for (const relativeClaimPath of [
+        "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md",
+        "docs/agent-memory/claims/tenancy/current_tenant_required_for_student_auth.md"
+      ]) {
+        const claimPath = path.join(cwd, relativeClaimPath);
+        fs.writeFileSync(
+          claimPath,
+          fs
+            .readFileSync(claimPath, "utf8")
+            .replace("status: current", "status: stale")
+            .replace("last_verified_commit: null", `last_verified_commit: ${verificationCommit}`)
+        );
+      }
+
+      const result = auditMemory({ cwd, changedFiles: ["README.md"], gitBinary: fakeGit });
+      const resolutionCalls = fs.readFileSync(invocationLog, "utf8").trim().split("\n").filter((line) => line === resolutionCommand);
+      const invalidFindings = result.findings.filter((finding) => finding.code === "claim.last_verified_commit_invalid");
+
+      expect(resolutionCalls).toHaveLength(1);
+      expect(invalidFindings).toHaveLength(resolves ? 0 : 2);
+    }
+  });
+
+  test("stops verification after the first unavailable Git subprocess", () => {
+    const cwd = copyFixture(mockApp);
+    const stalledGit = path.join(cwd, "stalled-git");
+    const verificationCommit = "a".repeat(40);
+    fs.writeFileSync(
+      stalledGit,
+      `#!/usr/bin/env bash
+case "$*" in
+  "rev-parse --verify ${verificationCommit}^{commit}") printf '%s\\n' "${verificationCommit}" ;;
+  "diff --no-renames --name-only ${verificationCommit}..HEAD") exit 0 ;;
+  "rev-parse --is-inside-work-tree") while true; do :; done ;;
+  *) exit 9 ;;
+esac
+`
+    );
+    fs.chmodSync(stalledGit, 0o755);
+
+    for (const relativeClaimPath of [
+      "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md",
+      "docs/agent-memory/claims/tenancy/current_tenant_required_for_student_auth.md"
+    ]) {
+      const claimPath = path.join(cwd, relativeClaimPath);
+      fs.writeFileSync(
+        claimPath,
+        fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${verificationCommit}`)
+      );
+    }
+
+    const result = auditMemory({
+      cwd,
+      changedFiles: ["src/auth.js"],
+      gitBinary: stalledGit,
+      gitTimeoutMs: 50
+    });
+    const unavailable = result.findings.filter((finding) => finding.code === "claim.verification_check_unavailable");
+
+    expect(result.ok).toBe(false);
+    expect(unavailable).toHaveLength(1);
+    expect(unavailable[0].message).toContain("timed out after 50ms");
   });
 });
 

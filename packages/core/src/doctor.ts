@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config";
 import { canonicalMemoryFileInventory, discoverCanonicalMemoryFiles, resolveConfiguredPath } from "./files";
+import { runGit } from "./git";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
 import { PACKAGE_VERSION } from "./version";
 import { parseYaml } from "./yaml";
@@ -162,11 +162,7 @@ function isDatabaseFresh(
 
 function currentGitCommit(repoRoot: string): string {
   try {
-    return execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
-    }).trim();
+    return runGit(repoRoot, ["rev-parse", "HEAD"]);
   } catch {
     return "unknown";
   }

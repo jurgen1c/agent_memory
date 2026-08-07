@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import { describeClaimSourcePolicyDecision, evaluateClaimSourcePath } from "./claim_sources";
 import { AgentMemoryError, NotFoundError } from "./errors";
 import { loadConfig } from "./config";
 import { resolveConfiguredPath } from "./files";
+import { normalizeRepoRelativePath } from "./repo";
 
 export const CLAIM_TYPES = [
   "fact",
@@ -63,7 +65,7 @@ const TEMPLATE_DESCRIPTIONS: Record<ClaimType, string> = {
   rule: "A critical rule agents must follow.",
   constraint: "A durable implementation or process constraint.",
   workflow: "A repeatable workflow claim.",
-  recipe: "A claim documenting a repeatable recipe.",
+  recipe: "Legacy recipe claim compatibility; prefer a first-class YAML recipe for agent procedures.",
   risk: "A durable risk and mitigation note.",
   decision: "A documented architecture or product decision.",
   deprecation: "A claim documenting deprecated behavior and replacement."
@@ -74,8 +76,8 @@ const CLAIM_TEMPLATES: Record<ClaimType, string> = {
 id: {{id}}
 type: fact
 system: {{system}}
-status: current
-confidence: medium
+status: {{status}}
+confidence: {{confidence}}
 severity: {{severity}}
 
 title: {{title}}
@@ -121,8 +123,8 @@ last_verified_commit: null
 id: {{id}}
 type: constraint
 system: {{system}}
-status: current
-confidence: medium
+status: {{status}}
+confidence: {{confidence}}
 severity: {{severity}}
 
 title: {{title}}
@@ -166,8 +168,8 @@ last_verified_commit: null
 id: {{id}}
 type: rule
 system: {{system}}
-status: current
-confidence: medium
+status: {{status}}
+confidence: {{confidence}}
 severity: {{severity}}
 
 title: {{title}}
@@ -211,8 +213,8 @@ Critical unless changed in frontmatter.
 id: {{id}}
 type: workflow
 system: {{system}}
-status: current
-confidence: medium
+status: {{status}}
+confidence: {{confidence}}
 severity: {{severity}}
 
 title: {{title}}
@@ -258,8 +260,8 @@ last_verified_commit: null
 id: {{id}}
 type: recipe
 system: {{system}}
-status: current
-confidence: medium
+status: {{status}}
+confidence: {{confidence}}
 severity: {{severity}}
 
 title: {{title}}
@@ -301,8 +303,8 @@ last_verified_commit: null
 id: {{id}}
 type: risk
 system: {{system}}
-status: current
-confidence: medium
+status: {{status}}
+confidence: {{confidence}}
 severity: {{severity}}
 
 title: {{title}}
@@ -346,8 +348,8 @@ last_verified_commit: null
 id: {{id}}
 type: decision
 system: {{system}}
-status: current
-confidence: medium
+status: {{status}}
+confidence: {{confidence}}
 severity: {{severity}}
 
 title: {{title}}
@@ -391,8 +393,8 @@ last_verified_commit: null
 id: {{id}}
 type: deprecation
 system: {{system}}
-status: deprecated
-confidence: medium
+status: {{status}}
+confidence: {{confidence}}
 severity: {{severity}}
 
 title: {{title}}
@@ -467,8 +469,10 @@ export function createClaim(options: NewClaimOptions): NewClaimResult {
   const loaded = loadConfig({ cwd: options.cwd });
   const memoryRoot = resolveConfiguredPath(loaded.repo.root, loaded.config.memory_root);
   const normalizedSystem = normalizeSystem(options.system);
-  const sourceFile = options.sourceFile ?? "TODO_SOURCE_FILE";
-  const verificationStep = options.verificationStep ?? "TODO: Add a concrete verification step.";
+  const sourceFile = options.sourceFile
+    ? normalizeRepoRelativePath(loaded.repo.root, options.sourceFile)
+    : "TODO_SOURCE_FILE";
+  const verificationStep = options.verificationStep ?? "TODO - Add a concrete verification step.";
   const claimText = options.claim ?? `TODO: Document ${options.title}.`;
   const explicitId = options.id;
   const generatedBaseId = explicitId ?? `${normalizedSystem}.${slugify(options.title, "_")}`;
@@ -477,6 +481,16 @@ export function createClaim(options: NewClaimOptions): NewClaimResult {
   const baseSlug = explicitId ? slugFromClaimId(claimId, normalizedSystem) : slugify(options.title, "-");
   const relativePath = nextAvailableClaimPath(loaded.repo.root, loaded.config.memory_root, normalizedSystem, baseSlug, options.force);
   const absolutePath = path.join(loaded.repo.root, relativePath);
+
+  if (options.sourceFile) {
+    const sourceDecision = evaluateClaimSourcePath(sourceFile, loaded.config.claim_sources, loaded.repo.root);
+
+    if (!sourceDecision.eligible) {
+      throw new AgentMemoryError(describeClaimSourcePolicyDecision(sourceFile, sourceDecision), {
+        details: ["Update claim_sources in agent-memory.config.yaml only when this path should become eligible for durable claims."]
+      });
+    }
+  }
 
   if (fs.existsSync(absolutePath) && !options.force) {
     throw new AgentMemoryError(`Refusing to overwrite existing claim file: ${absolutePath}`);
@@ -487,6 +501,8 @@ export function createClaim(options: NewClaimOptions): NewClaimResult {
     system: normalizedSystem,
     title: options.title,
     severity: options.severity ?? defaultSeverity(options.type),
+    status: "needs_review",
+    confidence: "low",
     claim: claimText,
     rule: claimText,
     workflow_summary: claimText,

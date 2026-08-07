@@ -3,7 +3,13 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { findRepoRoot, isPathInside, resolveRepoOutputPath } from "../../packages/core/src/repo";
+import {
+  findRepoRoot,
+  isPathInside,
+  normalizeRepoRelativeOutputPath,
+  normalizeRepoRelativePath,
+  resolveRepoOutputPath
+} from "../../packages/core/src/repo";
 
 describe("findRepoRoot", () => {
   test("uses cwd with a warning outside git repositories", () => {
@@ -44,5 +50,16 @@ describe("findRepoRoot", () => {
 
     expect(() => resolveRepoOutputPath(repoRoot, "external/output.md")).toThrow("escapes repository root through a symlink");
     expect(resolveRepoOutputPath(repoRoot, path.join(outsideRoot, "output.md"))).toBe(path.join(outsideRoot, "output.md"));
+  });
+
+  test("allows contained final symlinks for references but rejects them for output targets", () => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-repo-"));
+    fs.writeFileSync(path.join(repoRoot, "source.ts"), "export const source = true;\n");
+    fs.symlinkSync("source.ts", path.join(repoRoot, "source-link.ts"), "file");
+
+    expect(normalizeRepoRelativePath(repoRoot, "source-link.ts")).toBe("source-link.ts");
+    expect(() => normalizeRepoRelativeOutputPath(repoRoot, "source-link.ts")).toThrow(
+      "escapes repository root through a symlink"
+    );
   });
 });
