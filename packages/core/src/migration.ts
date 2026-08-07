@@ -158,7 +158,7 @@ export function migrateDocs(options: MigrateDocsOptions): MigrateDocsResult {
   const docs = planDocs(repoRoot, memoryRoot, system, discoverMigratableDocs(sourceRoot));
 
   if (mode === "automatic") {
-    assertMigratedDocSourcesEligible(docs, loaded.config.claim_sources);
+    assertMigratedDocSourcesEligible(repoRoot, docs, loaded.config.claim_sources);
     for (const doc of docs) {
       writeDraftClaim(repoRoot, memoryRoot, doc, Boolean(options.force));
     }
@@ -256,7 +256,7 @@ export function migrateDocsFromSystemMap(options: MigrateDocsSystemMapOptions): 
   const docs = planDocsFromMappings(repoRoot, memoryRoot, systemMap.mappings);
 
   if (mode === "automatic") {
-    assertMigratedDocSourcesEligible(docs, loaded.config.claim_sources);
+    assertMigratedDocSourcesEligible(repoRoot, docs, loaded.config.claim_sources);
     for (const doc of docs) {
       writeDraftClaim(repoRoot, memoryRoot, doc, Boolean(options.force));
     }
@@ -377,9 +377,9 @@ function writeDraftClaim(repoRoot: string, memoryRoot: string, doc: MigratedDocP
   doc.status = existedBefore ? "overwritten" : "created";
 }
 
-function assertMigratedDocSourcesEligible(docs: MigratedDocPlan[], policy: ClaimSourcePolicy): void {
+function assertMigratedDocSourcesEligible(repoRoot: string, docs: MigratedDocPlan[], policy: ClaimSourcePolicy): void {
   for (const doc of docs) {
-    const decision = evaluateClaimSourcePath(doc.sourcePath, policy);
+    const decision = evaluateClaimSourcePath(doc.sourcePath, policy, repoRoot);
 
     if (!decision.eligible) {
       throw new AgentMemoryError(describeClaimSourcePolicyDecision(doc.sourcePath, decision), {

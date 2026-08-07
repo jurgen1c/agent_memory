@@ -118,7 +118,8 @@ export async function checkCoverage(options: CoverageOptions = {}): Promise<Cove
         waivers,
         database,
         memoryRootRelative,
-        loaded.config.claim_sources
+        loaded.config.claim_sources,
+        repoRoot
       )
     );
     warnings.push(...workflowCoverageWarnings(repoRoot, changedFiles, changedFileSet, database, memoryRootRelative));
@@ -146,9 +147,10 @@ function coverageForFile(
   waivers: CoverageWaiver[],
   database: SqliteDatabase,
   memoryRootRelative: string,
-  claimSourcePolicy: AgentMemoryConfig["claim_sources"]
+  claimSourcePolicy: AgentMemoryConfig["claim_sources"],
+  repoRoot: string
 ): CoverageChange {
-  const sourceDecision = evaluateClaimSourcePath(file, claimSourcePolicy);
+  const sourceDecision = evaluateClaimSourcePath(file, claimSourcePolicy, repoRoot);
 
   if (!sourceDecision.eligible) {
     return {

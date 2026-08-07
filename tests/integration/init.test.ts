@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dispatch } from "../../packages/cli/src/router";
-import { loadConfig } from "../../packages/core/src/config";
+import { defaultConfig, loadConfig, renderConfigTemplate } from "../../packages/core/src/config";
 import { initRepository } from "../../packages/core/src/init";
 
 describe("init command", () => {
@@ -481,6 +481,41 @@ Keep this footer too.
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("No installed agent-memory CLI was found in this non-interactive environment.");
     expect(result.stderr).toContain("AGENT_MEMORY_ALLOW_NPX=1");
+  });
+
+  test("preserves persisted paths and enabled agent targets when init is rerun", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const config = defaultConfig();
+    config.memory_root = "custom-memory";
+    config.database_path = ".agent-memory/custom.sqlite";
+    config.context.default_budget = "full";
+    config.agent_skills.codex.enabled = false;
+    config.agent_skills.generic.enabled = true;
+    config.agent_skills.generic.path = ".agents/skills/custom-memory/SKILL.md";
+    fs.writeFileSync(path.join(repoRoot, "agent-memory.config.yaml"), renderConfigTemplate(config));
+    fs.rmSync(path.join(repoRoot, "docs/agent-memory"), { recursive: true });
+    fs.rmSync(path.join(repoRoot, ".codex/skills/repo-memory"), { recursive: true });
+
+    const result = await dispatch(["init", "--yes", "--instructions-file", "CLAUDE.md"], { cwd: repoRoot });
+    const persisted = loadConfig({ repoRoot }).config;
+
+    expect(result.exitCode).toBe(0);
+    expect(persisted.memory_root).toBe("custom-memory");
+    expect(persisted.database_path).toBe(".agent-memory/custom.sqlite");
+    expect(persisted.context.default_budget).toBe("full");
+    expect(persisted.agent_skills.codex.enabled).toBe(false);
+    expect(persisted.agent_skills.generic.enabled).toBe(true);
+    expect(persisted.agent_skills.generic.path).toBe(".agents/skills/custom-memory/SKILL.md");
+    expect(persisted.agent_instructions.paths).toEqual(["CLAUDE.md"]);
+    expect(fs.existsSync(path.join(repoRoot, "custom-memory/README.md"))).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, "custom-memory/claims/.gitkeep"))).toBe(true);
+    expect(fs.existsSync(path.join(repoRoot, "docs/agent-memory"))).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"))).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, ".agents/skills/custom-memory/SKILL.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(repoRoot, "CLAUDE.md"), "utf8")).toContain(
+      "Durable repository knowledge lives in `custom-memory/`"
+    );
   });
 
   test("can install non-blocking git hooks during init", async () => {

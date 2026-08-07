@@ -431,20 +431,21 @@ function validateClaimFields(
 
   validateRepoPathReferences(claim.sourceFiles, "claim.source_files", pathContext, claim.relativePath, claim.id, true, issues);
   validateRepoPathReferences(claim.relatedFiles, "claim.related_files", pathContext, claim.relativePath, claim.id, true, issues);
-  validateClaimSourcePolicy(claim.sourceFiles, "claim.source_files", claimSourcePolicy, claim.relativePath, claim.id, issues);
-  validateClaimSourcePolicy(claim.relatedFiles, "claim.related_files", claimSourcePolicy, claim.relativePath, claim.id, issues);
+  validateClaimSourcePolicy(claim.sourceFiles, "claim.source_files", claimSourcePolicy, pathContext.repoRoot, claim.relativePath, claim.id, issues);
+  validateClaimSourcePolicy(claim.relatedFiles, "claim.related_files", claimSourcePolicy, pathContext.repoRoot, claim.relativePath, claim.id, issues);
 }
 
 function validateClaimSourcePolicy(
   references: string[],
   fieldCode: "claim.source_files" | "claim.related_files",
   policy: AgentMemoryConfig["claim_sources"],
+  repoRoot: string,
   relativePath: string,
   id: string,
   issues: ValidationIssue[]
 ): void {
   for (const reference of references) {
-    const decision = evaluateClaimSourcePath(reference, policy);
+    const decision = evaluateClaimSourcePath(reference, policy, repoRoot);
 
     if (!decision.eligible) {
       addError(

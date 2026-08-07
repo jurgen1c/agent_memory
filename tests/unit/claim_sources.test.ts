@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { evaluateClaimSourcePath, renderClaimSourcePolicy } from "../../packages/core/src/claim_sources";
 
 describe("claim source policy", () => {
@@ -54,6 +57,45 @@ describe("claim source policy", () => {
     ).toEqual({
       eligible: false,
       reason: "not_allowed"
+    });
+  });
+
+  test("applies allow and deny rules to contained symlink targets", () => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-claim-policy-"));
+    fs.mkdirSync(path.join(repoRoot, "src/public"), { recursive: true });
+    fs.mkdirSync(path.join(repoRoot, "src/private"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "src/private/secret.ts"), "export const secret = true;\n");
+    fs.symlinkSync("../private/secret.ts", path.join(repoRoot, "src/public/alias.ts"), "file");
+    fs.symlinkSync("private", path.join(repoRoot, "src/public-dir"), "dir");
+
+    expect(
+      evaluateClaimSourcePath(
+        "src/public/alias.ts",
+        { allow: ["src/public/**"], deny: ["src/private/**"] },
+        repoRoot
+      )
+    ).toEqual({
+      eligible: false,
+      reason: "denied",
+      pattern: "src/private/**",
+      resolvedPath: "src/private/secret.ts"
+    });
+
+    expect(
+      evaluateClaimSourcePath("src/public/alias.ts", { allow: ["src/public/**"], deny: [] }, repoRoot)
+    ).toEqual({
+      eligible: false,
+      reason: "not_allowed",
+      resolvedPath: "src/private/secret.ts"
+    });
+
+    expect(
+      evaluateClaimSourcePath("src/public-dir/*.ts", { allow: [], deny: ["src/private/**"] }, repoRoot)
+    ).toEqual({
+      eligible: false,
+      reason: "denied",
+      pattern: "src/private/**",
+      resolvedPath: "src/private/*.ts"
     });
   });
 

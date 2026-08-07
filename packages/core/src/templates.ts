@@ -483,7 +483,7 @@ export function createClaim(options: NewClaimOptions): NewClaimResult {
   const absolutePath = path.join(loaded.repo.root, relativePath);
 
   if (options.sourceFile) {
-    const sourceDecision = evaluateClaimSourcePath(sourceFile, loaded.config.claim_sources);
+    const sourceDecision = evaluateClaimSourcePath(sourceFile, loaded.config.claim_sources, loaded.repo.root);
 
     if (!sourceDecision.eligible) {
       throw new AgentMemoryError(describeClaimSourcePolicyDecision(sourceFile, sourceDecision), {

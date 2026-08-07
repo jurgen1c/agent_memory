@@ -3,6 +3,7 @@ import path from "node:path";
 import { renderClaimSourcePolicy } from "./claim_sources";
 import { defaultConfig, loadConfig, renderConfigTemplate } from "./config";
 import { AgentMemoryError } from "./errors";
+import { resolveConfiguredPath } from "./files";
 import { installMemoryHooks } from "./hooks";
 import { findRepoRoot, normalizeRepoRelativeOutputPath, resolveRepoOutputPath } from "./repo";
 import { parseAgentTarget, renderAgentSkill, skillPathForLocation, writeCodexSkillReferences, type AgentTarget } from "./skills";
@@ -38,15 +39,15 @@ export function initRepository(options: InitOptions): InitResult {
   const repo = findRepoRoot(options.cwd);
   const actions: InitAction[] = [];
   const warnings = [...repo.warnings];
-  const agents = options.agents.length > 0 ? options.agents : (["codex", "generic"] satisfies AgentTarget[]);
-  const config = defaultConfig();
   const existingConfigPath = path.join(repo.root, "agent-memory.config.yaml");
-
-  if (!options.force && fs.existsSync(existingConfigPath)) {
-    const existingConfig = loadConfig({ repoRoot: repo.root }).config;
-    config.agent_instructions = structuredClone(existingConfig.agent_instructions);
-    config.claim_sources = structuredClone(existingConfig.claim_sources);
-  }
+  const config =
+    !options.force && fs.existsSync(existingConfigPath)
+      ? structuredClone(loadConfig({ repoRoot: repo.root }).config)
+      : defaultConfig();
+  const agents =
+    options.agents.length > 0
+      ? options.agents
+      : (["codex", "generic"] satisfies AgentTarget[]).filter((agent) => config.agent_skills[agent].enabled);
 
   if (options.skillLocation && agents.length !== 1) {
     throw new AgentMemoryError("skillLocation requires exactly one agent target.");
@@ -78,21 +79,22 @@ export function initRepository(options: InitOptions): InitResult {
     Boolean(options.instructionsFiles && options.instructionsFiles.length > 0),
     actions
   );
-  writeFile(repo.root, "docs/agent-memory/README.md", memoryReadmeTemplate(), options.force, actions);
+  const memoryRoot = resolveConfiguredPath(repo.root, config.memory_root);
+  writeFile(repo.root, path.join(memoryRoot, "README.md"), memoryReadmeTemplate(), options.force, actions);
   for (const instructionPath of config.agent_instructions.paths) {
     ensureAgentInstructionsSection(repo.root, instructionPath, config, actions);
   }
 
   for (const gitkeepPath of [
-    "docs/agent-memory/claims/.gitkeep",
-    "docs/agent-memory/graph/.gitkeep",
-    "docs/agent-memory/indexes/.gitkeep",
-    "docs/agent-memory/recipes/.gitkeep",
-    "docs/agent-memory/plans/.gitkeep",
-    "docs/agent-memory/profiles/.gitkeep",
-    "docs/agent-memory/waivers/.gitkeep"
+    "claims/.gitkeep",
+    "graph/.gitkeep",
+    "indexes/.gitkeep",
+    "recipes/.gitkeep",
+    "plans/.gitkeep",
+    "profiles/.gitkeep",
+    "waivers/.gitkeep"
   ]) {
-    writeFile(repo.root, gitkeepPath, "", options.force, actions);
+    writeFile(repo.root, path.join(memoryRoot, gitkeepPath), "", options.force, actions);
   }
 
   writeExecutable(repo.root, "bin/memory", wrapperTemplate(options.packageManager), options.force, actions);
@@ -347,12 +349,14 @@ Generated memory lives in \`.agent-memory/\` and should not be committed.
 }
 
 function agentsMemorySection(config: AgentMemoryConfig): string {
+  const memoryRoot = config.memory_root.replace(/[\\/]+$/, "");
+
   return `<!-- agent-memory:start -->
 ## Agent Memory Knowledge Base
 
 Use the repo-memory skill or instruction file whenever it is available. This section is the repo-level fallback and requirement.
 
-Durable repository knowledge lives in \`docs/agent-memory/\` and must stay versioned and reviewable. Generated memory lives in \`.agent-memory/\` and must not be committed.
+Durable repository knowledge lives in \`${memoryRoot}/\` and must stay versioned and reviewable. Generated memory lives in \`.agent-memory/\` and must not be committed.
 
 Memory artifacts:
 

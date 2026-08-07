@@ -1010,6 +1010,31 @@ describe("audit command", () => {
     expect(finding?.shared_values.source_files).toEqual(["src/auth.js"]);
   });
 
+  test("warns when the target of a symlinked claim source changes", async () => {
+    const cwd = copyFixture(mockApp);
+    initGitHistory(cwd);
+    const claimPath = path.join(cwd, "docs/agent-memory/claims/auth/student_oauth_uid_is_tenant_scoped.md");
+    fs.symlinkSync("auth.js", path.join(cwd, "src/auth-link.js"), "file");
+    fs.writeFileSync(claimPath, fs.readFileSync(claimPath, "utf8").replace("src/auth.js", "src/auth-link.js"));
+    commitAll(cwd, "Record symlinked claim source");
+    const verifiedCommit = gitOutput(cwd, ["rev-parse", "HEAD"]);
+    fs.writeFileSync(
+      claimPath,
+      fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${verifiedCommit}`)
+    );
+    commitAll(cwd, "Record claim verification");
+    fs.appendFileSync(path.join(cwd, "src/auth.js"), "\n// target changed after verification\n");
+
+    const result = await dispatch(["audit", "--changed-files", "src/auth.js", "--json"], { cwd });
+    const parsed = JSON.parse(result.stdout) as {
+      findings: Array<{ code: string; shared_values: { source_files?: string[] } }>;
+    };
+    const finding = parsed.findings.find((item) => item.code === "claim.verification_outdated");
+
+    expect(result.exitCode).toBe(0);
+    expect(finding?.shared_values.source_files).toEqual(["src/auth.js"]);
+  });
+
   test("warns when a claim source is renamed after last_verified_commit", async () => {
     const cwd = copyFixture(mockApp);
     initGitHistory(cwd);

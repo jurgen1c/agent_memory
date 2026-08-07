@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { normalizeChangedFiles, readGitDiffSelection } from "./changes";
-import { normalizeClaimSourcePath } from "./claim_sources";
+import { claimSourcePathCandidates } from "./claim_sources";
 import { loadConfig } from "./config";
 import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, configuredPathRelativeToRepo, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
@@ -141,9 +141,9 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
     : overlapFindings;
   const findings = uniqueFindings([
     ...filteredOverlapFindings,
-    ...findUnreviewedRelatedSourceClaims(claims, changedFileSet, memoryRootRelative, memoryFiles, strict),
-    ...findInvalidDeprecatedBy(claims, claimsById, changedFileSet, memoryRootRelative, memoryFiles),
-    ...findUnreviewedActiveConflicts(claimsById, explicitRelations, changedFileSet, memoryRootRelative, memoryFiles),
+    ...findUnreviewedRelatedSourceClaims(repoRoot, claims, changedFileSet, memoryRootRelative, memoryFiles, strict),
+    ...findInvalidDeprecatedBy(repoRoot, claims, claimsById, changedFileSet, memoryRootRelative, memoryFiles),
+    ...findUnreviewedActiveConflicts(repoRoot, claimsById, explicitRelations, changedFileSet, memoryRootRelative, memoryFiles),
     ...findCurrentRecipesWithInactiveClaims(memory.recipes, claimsById, changedFileSet, memoryRootRelative),
     ...findCurrentPlansWithInactiveRecipes(memory.plans, memory.recipes, changedFileSet, memoryRootRelative),
     ...findUnsafeCriticalProfiles(memory.profiles, changedFileSet, memoryRootRelative),
@@ -295,7 +295,7 @@ function findOutdatedVerifiedClaims(
       }
     }
 
-    const changedSources = changedFiles.filter((file) => claimMentionsFile(claim, file));
+    const changedSources = changedFiles.filter((file) => claimMentionsFile(repoRoot, claim, file));
 
     if (changedSources.length === 0) {
       continue;
@@ -714,6 +714,7 @@ function findOverlappingChangedClaims(
 }
 
 function findUnreviewedRelatedSourceClaims(
+  repoRoot: string,
   claims: ClaimRecord[],
   changedFiles: Set<string>,
   memoryRootRelative: string,
@@ -725,7 +726,7 @@ function findUnreviewedRelatedSourceClaims(
   const findings: AuditFinding[] = [];
 
   for (const sourceFile of changedSourceFiles) {
-    const relatedClaims = activeClaims.filter((claim) => claimMentionsFile(claim, sourceFile));
+    const relatedClaims = activeClaims.filter((claim) => claimMentionsFile(repoRoot, claim, sourceFile));
     const changedRelatedClaims = relatedClaims.filter((claim) => changedFiles.has(memoryPath(memoryRootRelative, claim.sourcePath)));
 
     if (relatedClaims.length === 0 || changedRelatedClaims.length === 0) {
@@ -753,6 +754,7 @@ function findUnreviewedRelatedSourceClaims(
 }
 
 function findInvalidDeprecatedBy(
+  repoRoot: string,
   claims: ClaimRecord[],
   claimsById: Map<string, ClaimRecord>,
   changedFiles: Set<string>,
@@ -771,8 +773,8 @@ function findInvalidDeprecatedBy(
     const replacement = claimsById.get(replacementId);
 
     if (
-      !claimTouchedByChangedFiles(claim, changedFiles, memoryRootRelative, memoryFiles) &&
-      (!replacement || !claimTouchedByChangedFiles(replacement, changedFiles, memoryRootRelative, memoryFiles))
+      !claimTouchedByChangedFiles(repoRoot, claim, changedFiles, memoryRootRelative, memoryFiles) &&
+      (!replacement || !claimTouchedByChangedFiles(repoRoot, replacement, changedFiles, memoryRootRelative, memoryFiles))
     ) {
       continue;
     }
@@ -816,6 +818,7 @@ function findInvalidDeprecatedBy(
 }
 
 function findUnreviewedActiveConflicts(
+  repoRoot: string,
   claimsById: Map<string, ClaimRecord>,
   explicitRelations: ExplicitRelation[],
   changedFiles: Set<string>,
@@ -847,8 +850,8 @@ function findUnreviewedActiveConflicts(
 
     if (
       !changedFiles.has(memoryPath(memoryRootRelative, relation.sourcePath)) &&
-      !claimTouchedByChangedFiles(source, changedFiles, memoryRootRelative, memoryFiles) &&
-      !claimTouchedByChangedFiles(target, changedFiles, memoryRootRelative, memoryFiles)
+      !claimTouchedByChangedFiles(repoRoot, source, changedFiles, memoryRootRelative, memoryFiles) &&
+      !claimTouchedByChangedFiles(repoRoot, target, changedFiles, memoryRootRelative, memoryFiles)
     ) {
       continue;
     }
@@ -1009,12 +1012,17 @@ function overlapSeverity(left: ClaimRecord, right: ClaimRecord, shared: AuditSha
   return "info";
 }
 
-function claimMentionsFile(claim: ClaimRecord, sourceFile: string): boolean {
-  const normalizedSourceFile = normalizeClaimSourcePath(sourceFile);
+function claimMentionsFile(repoRoot: string, claim: ClaimRecord, sourceFile: string): boolean {
+  const sourcePaths = claimSourcePathCandidates(sourceFile, repoRoot);
 
   return [...claim.sourceFiles, ...claim.relatedFiles].some((pattern) => {
-    const normalizedPattern = normalizeClaimSourcePath(pattern);
-    return normalizedPattern === normalizedSourceFile || pathMatchesPattern(normalizedPattern, normalizedSourceFile);
+    const patternPaths = claimSourcePathCandidates(pattern, repoRoot);
+    return patternPaths.some((normalizedPattern) =>
+      sourcePaths.some(
+        (normalizedSourceFile) =>
+          normalizedPattern === normalizedSourceFile || pathMatchesPattern(normalizedPattern, normalizedSourceFile)
+      )
+    );
   });
 }
 
@@ -1059,6 +1067,7 @@ function verificationUnavailableFinding(
 }
 
 function claimTouchedByChangedFiles(
+  repoRoot: string,
   claim: ClaimRecord,
   changedFiles: Set<string>,
   memoryRootRelative: string,
@@ -1070,7 +1079,7 @@ function claimTouchedByChangedFiles(
 
   return Array.from(changedFiles)
     .filter((file) => !isMemoryFile(file, memoryFiles))
-    .some((file) => claimMentionsFile(claim, file));
+    .some((file) => claimMentionsFile(repoRoot, claim, file));
 }
 
 function hasReviewDecision(left: ClaimRecord, right: ClaimRecord, explicitRelations: ExplicitRelation[], strict: boolean): boolean {

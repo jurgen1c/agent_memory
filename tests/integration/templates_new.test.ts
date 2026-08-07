@@ -212,9 +212,10 @@ describe("new claim command", () => {
   test("accepts contained source-file symlinks and rejects escaping symlinks", async () => {
     const repoRoot = makeGitRepo();
     await dispatch(["init", "--yes"], { cwd: repoRoot });
-    fs.mkdirSync(path.join(repoRoot, "src"), { recursive: true });
-    fs.writeFileSync(path.join(repoRoot, "src/auth.ts"), "export const auth = true;\n");
-    fs.symlinkSync("auth.ts", path.join(repoRoot, "src/auth-link.ts"), "file");
+    fs.mkdirSync(path.join(repoRoot, "src/public"), { recursive: true });
+    fs.mkdirSync(path.join(repoRoot, "src/private"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "src/private/auth.ts"), "export const auth = true;\n");
+    fs.symlinkSync("../private/auth.ts", path.join(repoRoot, "src/public/auth-link.ts"), "file");
 
     await dispatch(
       [
@@ -223,18 +224,46 @@ describe("new claim command", () => {
         "--type=fact",
         "--system=auth",
         "--title=Symlink source",
-        "--source-file=src/auth-link.ts"
+        "--source-file=src/public/auth-link.ts"
       ],
       { cwd: repoRoot }
     );
 
     const claimPath = path.join(repoRoot, "docs/agent-memory/claims/auth/symlink-source.md");
-    expect(fs.readFileSync(claimPath, "utf8")).toContain("  - src/auth-link.ts");
+    expect(fs.readFileSync(claimPath, "utf8")).toContain("  - src/public/auth-link.ts");
     expect((await dispatch(["validate"], { cwd: repoRoot })).exitCode).toBe(0);
+
+    const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+    fs.writeFileSync(
+      configPath,
+      fs.readFileSync(configPath, "utf8").replace(
+        "claim_sources:\n  allow: []\n  deny: []",
+        "claim_sources:\n  allow: []\n  deny:\n    - src/private/**"
+      )
+    );
+
+    const validation = await dispatch(["validate"], { cwd: repoRoot });
+    expect(validation.exitCode).not.toBe(0);
+    expect(validation.stdout).toContain("claim.source_files.denied");
+    expect(validation.stdout).toContain("resolved target src/private/auth.ts");
+
+    await expect(
+      dispatch(
+        [
+          "new",
+          "claim",
+          "--type=fact",
+          "--system=auth",
+          "--title=Denied symlink source",
+          "--source-file=src/public/auth-link.ts"
+        ],
+        { cwd: repoRoot }
+      )
+    ).rejects.toThrow("resolved target src/private/auth.ts");
 
     const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-outside-source-"));
     fs.writeFileSync(path.join(outsideRoot, "outside.ts"), "export const outside = true;\n");
-    fs.symlinkSync(path.join(outsideRoot, "outside.ts"), path.join(repoRoot, "src/outside-link.ts"), "file");
+    fs.symlinkSync(path.join(outsideRoot, "outside.ts"), path.join(repoRoot, "src/public/outside-link.ts"), "file");
 
     await expect(
       dispatch(
@@ -244,7 +273,7 @@ describe("new claim command", () => {
           "--type=fact",
           "--system=auth",
           "--title=Escaping symlink source",
-          "--source-file=src/outside-link.ts"
+          "--source-file=src/public/outside-link.ts"
         ],
         { cwd: repoRoot }
       )
