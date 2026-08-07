@@ -361,6 +361,26 @@ describe("new recipe command", () => {
     );
   });
 
+  test("rejects blank workflow options without writing a recipe", async () => {
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+
+    for (const [option, title] of [
+      ["--trigger=", "Blank trigger"],
+      ["--step=", "Blank step"],
+      ["--verification-step=   ", "Blank verification"]
+    ] as const) {
+      await expect(
+        dispatch(["new", "recipe", "--system=auth", `--title=${title}`, option], { cwd: repoRoot })
+      ).rejects.toThrow("requires a non-blank value");
+    }
+
+    const recipeFiles = fs
+      .readdirSync(path.join(repoRoot, "docs/agent-memory/recipes"), { recursive: true })
+      .filter((file) => String(file).endsWith(".yaml"));
+    expect(recipeFiles).toEqual([]);
+  });
+
   test("keeps the recipe ID stable when force overwrites the same generated recipe", async () => {
     const repoRoot = makeGitRepo();
     await dispatch(["init", "--yes"], { cwd: repoRoot });

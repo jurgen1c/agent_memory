@@ -34,6 +34,7 @@ export interface NewRecipeResult {
 }
 
 export function createRecipe(options: NewRecipeOptions): NewRecipeResult {
+  assertNonBlankRepeatedOptions(options);
   const loaded = loadConfig({ cwd: options.cwd });
   const memoryRoot = resolveConfiguredPath(loaded.repo.root, loaded.config.memory_root);
   const system = slugify(options.system, "_");
@@ -140,6 +141,22 @@ function renderListField(field: string, values: string[]): string {
 
 function nonEmpty(values: string[] | undefined, fallback: string): string[] {
   return values && values.length > 0 ? values : [fallback];
+}
+
+function assertNonBlankRepeatedOptions(options: NewRecipeOptions): void {
+  const repeatedOptions = [
+    ["--trigger", options.intentTriggers],
+    ["--source-file", options.relevantFiles],
+    ["--required-claim", options.requiredClaims],
+    ["--step", options.steps],
+    ["--verification-step", options.verification]
+  ] as const;
+
+  for (const [option, values] of repeatedOptions) {
+    if (values?.some((value) => value.trim().length === 0)) {
+      throw new AgentMemoryError(`${option} requires a non-blank value.`);
+    }
+  }
 }
 
 function collectExistingRecipeIds(memoryRoot: string, patterns: string[]): Set<string> {
