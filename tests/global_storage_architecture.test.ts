@@ -9,6 +9,7 @@ describe("global storage architecture contract", () => {
   test("keeps canonical memory and plan runs repository-local", () => {
     const architecture = readArchitecture();
 
+    expect(architecture).toContain("approved AM-65 architecture contract for the AM-66 through AM-76 implementation sequence");
     expect(architecture).toContain("<repo>/docs/agent-memory/");
     expect(architecture).toContain("<repo>/.agent-memory/plans/");
     expect(architecture).toContain("Global SQLite and registry data must never be treated as canonical memory");

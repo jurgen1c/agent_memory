@@ -1,6 +1,6 @@
 # Global Storage Architecture
 
-Status: approved design for the AM-64 implementation sequence
+Status: approved AM-65 architecture contract for the AM-66 through AM-76 implementation sequence
 
 ## Purpose
 
