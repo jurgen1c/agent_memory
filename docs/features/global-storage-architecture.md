@@ -229,13 +229,24 @@ The registry also stores one credential-free repository identity on each memory
 record for collision classification and safe cache reuse. Resolve it without
 network access in this order:
 
-1. When `origin` exists, normalize its SSH or HTTPS URL to a protocol-qualified
-   identity such as `remote:https:<host>/<repository>` or
-   `remote:ssh:<account>@<host>/<repository>`. Remove secrets such as embedded
-   passwords or tokens, query strings, fragments, trailing `.git`, and redundant
-   separators, and compare it case-insensitively where the host does. Retain the
-   SSH account because SCP-style paths can be relative to that account's home;
-   an SSH remote without an unambiguous account and repository path fails closed.
+1. When `origin` exists, parse its SSH or HTTPS URL into a normalized host and
+   repository path. Remove secrets such as embedded passwords or tokens, query
+   strings, fragments, trailing `.git`, and redundant separators, and compare
+   components case-insensitively where the host does. Equivalent transports must
+   produce the shared `remote:<host>/<repository>` identity when a deterministic
+   host rule proves that the SSH account is transport-only and the path names the
+   same repository namespace. For example, `https://github.com/org/repo.git` and
+   `git@github.com:org/repo.git` both normalize to
+   `remote:github.com/org/repo`.
+
+   Do not discard an SSH account merely because the remaining host and path text
+   match. When the path is account-relative and no host rule proves the account
+   transport-only, retain it in an account-qualified identity such as
+   `remote:ssh-account:alice@host/repo`; therefore `alice@host:repo.git` and
+   `bob@host:repo.git` remain distinct. An SSH remote without an unambiguous
+   account, host, and repository path fails closed. Host equivalence rules are
+   explicit, deterministic, credential-free, and covered by fixtures; unknown
+   hosts never infer cross-transport equivalence.
 2. Otherwise, derive a user-local `checkout:<digest>` identity from the
    filesystem identity of the Git common directory or repository root. This
    fallback intentionally does not identify separate clones as the same
@@ -262,7 +273,7 @@ shape is:
   "version": 1,
   "memories": {
     "jurgen1c-agent-memory": {
-      "repository_identity": "remote:https:github.com/jurgen1c/agent_memory",
+      "repository_identity": "remote:github.com/jurgen1c/agent_memory",
       "checkouts": {
         "3f786850e387550fdab836ed": {
           "repo_root": "/Users/example/src/agent_memory",

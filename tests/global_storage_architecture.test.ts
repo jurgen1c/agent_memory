@@ -46,8 +46,11 @@ describe("global storage architecture contract", () => {
     expect(architecture).toContain("Fail closed; require one repository to choose a new key");
     expect(architecture).toContain("exact non-null repository identity");
     expect(architecture).toContain("Root commits therefore never authorize cross-checkout cache reuse");
-    expect(architecture).toContain('"repository_identity": "remote:https:github.com/jurgen1c/agent_memory"');
-    expect(architecture).toContain("SSH account because SCP-style paths");
+    expect(architecture).toContain('"repository_identity": "remote:github.com/jurgen1c/agent_memory"');
+    expect(architecture).toContain("both normalize to");
+    expect(architecture).toContain("`remote:github.com/org/repo`");
+    expect(architecture).toContain("`alice@host:repo.git` and");
+    expect(architecture).toContain("`bob@host:repo.git` remain distinct");
     expect(architecture).toContain("`repository_identity` must not also appear on checkout");
     expect(architecture).toContain("Stored `database_path` values are diagnostic metadata, not trusted path input.");
     expect(architecture).toContain("verifies symlink-aware containment beneath global home");
