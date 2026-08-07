@@ -1,1 +1,1 @@
-export const GENERATED_PACKAGE_VERSION = "0.3.1";
+export const GENERATED_PACKAGE_VERSION = "0.4.0";
