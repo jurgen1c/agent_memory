@@ -290,6 +290,17 @@ claim_sources:
     expect(fs.existsSync(path.join(repoRoot, "agent-memory.config.yaml"))).toBe(false);
   });
 
+  test("rejects blank instruction files before writing configuration", async () => {
+    const repoRoot = makeGitRepo();
+
+    await expect(dispatch(["init", "--yes", "--instructions-file", "   "], { cwd: repoRoot })).rejects.toThrow(
+      "Agent instruction file must not be blank"
+    );
+
+    expect(fs.existsSync(path.join(repoRoot, "agent-memory.config.yaml"))).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, "   "))).toBe(false);
+  });
+
   test("rejects dangling symlink instruction files before writing their targets", async () => {
     const repoRoot = makeGitRepo();
     const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-outside-instructions-"));

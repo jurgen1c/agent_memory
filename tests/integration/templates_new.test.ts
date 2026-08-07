@@ -322,8 +322,8 @@ describe("new recipe command", () => {
       [
         "new",
         "recipe",
-        "--system=auth",
-        "--title=Modify OAuth safely",
+        "--system= auth ",
+        "--title= Modify OAuth safely ",
         "--trigger=change oauth",
         "--source-file=src/auth.js",
         "--step=Inspect current identity resolution.",
@@ -339,6 +339,7 @@ describe("new recipe command", () => {
     const recipePath = path.join(repoRoot, "docs/agent-memory/recipes/auth/modify-oauth-safely.yaml");
     const content = fs.readFileSync(recipePath, "utf8");
     expect(content).toContain("status: needs_review");
+    expect(content).toContain('title: "Modify OAuth safely"');
     expect(content).toContain('  - "change oauth"');
     expect(content).toContain("  - src/auth.js");
     expect(content).toContain('  - "Preserve tenant scoping."');
@@ -361,7 +362,7 @@ describe("new recipe command", () => {
     );
   });
 
-  test("rejects blank workflow options without writing a recipe", async () => {
+  test("rejects blank recipe options without writing a recipe", async () => {
     const repoRoot = makeGitRepo();
     await dispatch(["init", "--yes"], { cwd: repoRoot });
 
@@ -373,6 +374,16 @@ describe("new recipe command", () => {
       await expect(
         dispatch(["new", "recipe", "--system=auth", `--title=${title}`, option], { cwd: repoRoot })
       ).rejects.toThrow("requires a non-blank value");
+    }
+
+    for (const args of [
+      ["--system=   ", "--title=Blank system"],
+      ["--system=auth", "--title=   "],
+      ["--system=auth", "--title=Blank ID", "--id=   "]
+    ]) {
+      await expect(dispatch(["new", "recipe", ...args], { cwd: repoRoot })).rejects.toThrow(
+        "requires a non-blank value"
+      );
     }
 
     const recipeFiles = fs

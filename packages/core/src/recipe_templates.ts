@@ -34,31 +34,32 @@ export interface NewRecipeResult {
 }
 
 export function createRecipe(options: NewRecipeOptions): NewRecipeResult {
+  const scalarOptions = normalizeRecipeScalarOptions(options);
   assertNonBlankRepeatedOptions(options);
   const loaded = loadConfig({ cwd: options.cwd });
   const memoryRoot = resolveConfiguredPath(loaded.repo.root, loaded.config.memory_root);
-  const system = slugify(options.system, "_");
-  const titleSlug = slugify(options.title, "-");
-  const idSlug = slugify(options.title, "_");
+  const system = slugify(scalarOptions.system, "_");
+  const titleSlug = slugify(scalarOptions.title, "-");
+  const idSlug = slugify(scalarOptions.title, "_");
   const existingIds = collectExistingRecipeIds(memoryRoot, loaded.config.recipes);
-  const baseId = options.id ?? `recipe.${system}.${idSlug}`;
-  const baseSlug = options.id ? slugify(recipeIdTail(options.id, system), "-") : titleSlug;
+  const baseId = scalarOptions.id ?? `recipe.${system}.${idSlug}`;
+  const baseSlug = scalarOptions.id ? slugify(recipeIdTail(scalarOptions.id, system), "-") : titleSlug;
   const forcedAbsolutePath = recipeBasePath(memoryRoot, system, baseSlug);
   assertRecipeOutputPath(memoryRoot, forcedAbsolutePath);
   const replacingExistingRecipe = Boolean(options.force && fs.existsSync(forcedAbsolutePath));
   const existingTargetId = replacingExistingRecipe ? readRecipeId(forcedAbsolutePath) : null;
 
-  if (options.id && existingTargetId && options.id !== existingTargetId) {
+  if (scalarOptions.id && existingTargetId && scalarOptions.id !== existingTargetId) {
     throw new AgentMemoryError(
-      `Refusing to change recipe ID during forced overwrite: ${existingTargetId} would become ${options.id}.`,
+      `Refusing to change recipe ID during forced overwrite: ${existingTargetId} would become ${scalarOptions.id}.`,
       { details: ["Use the existing recipe ID or choose a different title/path for the new recipe."] }
     );
   }
 
   const id = replacingExistingRecipe
     ? existingTargetId ?? assertAvailableRecipeId(baseId, existingIds)
-    : options.id
-      ? assertAvailableRecipeId(options.id, existingIds)
+    : scalarOptions.id
+      ? assertAvailableRecipeId(scalarOptions.id, existingIds)
       : nextAvailableRecipeId(baseId, existingIds);
   const absolutePath = assertRecipeOutputPath(
     memoryRoot,
@@ -76,7 +77,7 @@ export function createRecipe(options: NewRecipeOptions): NewRecipeResult {
   const content = renderRecipe({
     id,
     system,
-    title: options.title,
+    title: scalarOptions.title,
     intentTriggers: nonEmpty(options.intentTriggers, "TODO: Describe when this recipe should be used."),
     relevantFiles,
     requiredClaims: options.requiredClaims ?? [],
@@ -157,6 +158,24 @@ function assertNonBlankRepeatedOptions(options: NewRecipeOptions): void {
       throw new AgentMemoryError(`${option} requires a non-blank value.`);
     }
   }
+}
+
+function normalizeRecipeScalarOptions(options: NewRecipeOptions): { system: string; title: string; id?: string } {
+  const system = options.system.trim();
+  const title = options.title.trim();
+  const id = options.id?.trim();
+
+  for (const [option, value] of [
+    ["--system", system],
+    ["--title", title],
+    ["--id", id]
+  ] as const) {
+    if (value !== undefined && value.length === 0) {
+      throw new AgentMemoryError(`${option} requires a non-blank value.`);
+    }
+  }
+
+  return { system, title, ...(id === undefined ? {} : { id }) };
 }
 
 function collectExistingRecipeIds(memoryRoot: string, patterns: string[]): Set<string> {

@@ -438,6 +438,12 @@ Update targets:
 }
 
 function normalizeInstructionFilePath(repoRoot: string, instructionPath: string): string {
+  if (instructionPath.trim().length === 0) {
+    throw new AgentMemoryError("Agent instruction file must not be blank.", {
+      details: ["Example: --instructions-file CLAUDE.md"]
+    });
+  }
+
   let normalizedPath: string;
 
   try {
