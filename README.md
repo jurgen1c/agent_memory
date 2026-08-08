@@ -12,7 +12,7 @@ The source of truth stays in the consuming repository:
 - `docs/agent-memory/profiles/**/*.yaml`
 - `docs/agent-memory/waivers/**/*.yaml`
 
-The generated cache lives at `.agent-memory/memory.sqlite` by default and should not be committed.
+Fresh initialization uses a user-local global SQLite cache resolved from the committed `memory_key` and checkout identity. Explicit `--local` compatibility mode uses `.agent-memory/memory.sqlite`. Neither cache should be committed.
 Generated one-off plan runs live under `.agent-memory/plans/` and should not be committed unless they are explicitly promoted into reusable plan templates.
 
 ## API and Architecture
@@ -46,17 +46,17 @@ Install the package in a repository that should own its memory:
 npm install --save-dev @jurgen1c/agent-memory-cli
 ```
 
-Initialize memory files, a `bin/memory` wrapper, repository guidance, and agent skills:
+Initialize global-mode memory files, repository guidance, and agent skills:
 
 ```bash
-npx agent-memory init --yes --package-manager npm --agent codex --install-hooks
+npx agent-memory init --yes --wrapper --agent codex --install-hooks
 ```
 
 For Bun-based applications:
 
 ```bash
 bun add --dev @jurgen1c/agent-memory-cli
-bunx @jurgen1c/agent-memory-cli init --yes --package-manager bun --agent codex --install-hooks
+bunx @jurgen1c/agent-memory-cli init --yes --wrapper --agent codex --install-hooks
 ```
 
 For a global CLI install:
@@ -72,7 +72,7 @@ agent-memory --help
 
 - `agent-memory.config.yaml`: memory paths, validation defaults, context defaults, and agent skill locations.
 - `docs/agent-memory/`: canonical memory root with `claims/`, `graph/`, `indexes/`, `recipes/`, `plans/`, `profiles/`, and `waivers/`.
-- `bin/memory`: repository-local wrapper around the installed or globally available CLI.
+- Optional `bin/memory`: repository-local wrapper created only by `--wrapper` or fresh `--local` compatibility mode.
 - `.gitignore`: adds `.agent-memory/` so generated SQLite stays out of commits.
 - Repository instruction files: creates or refreshes a managed Agent Memory section in `AGENTS.md` by default, or one or more files selected by repeating `--instructions-file`.
 - Agent instructions: installs Codex and generic instructions by default, unless `--agent` narrows the target.
@@ -85,13 +85,16 @@ Init options:
 | Option | Meaning |
 | --- | --- |
 | `--yes`, `-y` | Run as a non-interactive setup command. |
-| `--package-manager npm` | Generate `bin/memory` with an `npx agent-memory` fallback. |
-| `--package-manager bun` | Generate `bin/memory` with a `bunx agent-memory` fallback. |
+| `--local` | Create a fresh version 1 local-mode config and `bin/memory` wrapper. Existing version 2 configs remain version 2 when deliberately switched local with `--force`. |
+| `--wrapper` | Create `bin/memory` while retaining global storage mode. |
+| `--memory-key <key>` | Override the stable global memory key derived offline from the repository identity. |
+| `--package-manager npm` | Use an `npx agent-memory` fallback when a wrapper is requested. |
+| `--package-manager bun` | Use a `bunx agent-memory` fallback when a wrapper is requested. |
 | `--agent codex` | Install only the Codex repo-memory skill. Repeat `--agent` to install multiple targets. |
 | `--agent generic` | Install only the generic agent instruction file. |
 | `--skill-location .agents` | Install the selected agent skill under `.agents/skills/repo-memory/SKILL.md` and write that path to config. Requires exactly one `--agent`. |
 | `--instructions-file CLAUDE.md` | Append managed repository guidance to this file and persist it for upgrades. Repeat the option to manage files such as both `AGENTS.md` and `CLAUDE.md`. |
-| `--install-hooks` | Install non-blocking git hooks that run `bin/memory sync` after checkout, merge, or rewrite. |
+| `--install-hooks` | Install non-blocking git hooks using `agent-memory`, or `bin/memory` when that wrapper exists. |
 | `--force` | Overwrite existing scaffold files and hooks where supported. |
 
 ### Claim Relevance and Source Policy
@@ -162,13 +165,13 @@ Use `agent-memory help <command>` for full usage and examples.
 
 | Command | Purpose |
 | --- | --- |
-| `init` | Scaffold config, canonical memory folders, wrapper, gitignore entry, configurable repository guidance, and optional agent skills/hooks. |
+| `init` | Scaffold config, canonical memory folders, optional wrapper, gitignore entry, configurable repository guidance, and optional agent skills/hooks. |
 | `templates list` | List built-in claim templates. |
 | `templates show claim:fact` | Print a built-in claim template. |
 | `new claim` | Create one low-confidence atomic claim draft in `needs_review`. |
 | `new recipe` | Create one first-class YAML recipe draft in `needs_review`. |
 | `validate` | Validate config, claims, graphs, indexes, recipes, plans, profiles, and waivers. |
-| `compile` | Build the repo-local SQLite cache from canonical memory. |
+| `compile` | Build the configured local or user-global SQLite cache from canonical memory. |
 | `query` | Search compiled memory by text and metadata. |
 | `show` | Show one claim and optionally graph-related claims. |
 | `system` | Summarize claims, recipes, watched files, and graph activity for one system. |
@@ -181,7 +184,7 @@ Use `agent-memory help <command>` for full usage and examples.
 | `doctor` | Check whether the compiled database exists, is fresh, and is compatible. |
 | `sync` | Compile, validate, and doctor memory in one command. |
 | `upgrade` | Refresh generated config comments, the configured managed instruction file, and generated agent skill files after package upgrades. |
-| `install-hooks` | Install non-blocking git hooks that run `bin/memory sync`. |
+| `install-hooks` | Install non-blocking git hooks using the available `agent-memory` command or wrapper. |
 | `ui` | Serve a local browser UI for inspecting and reviewing repository memory. |
 | `install-skill` | Install repository memory instructions under `.codex`, `.agents`, `.claude`, or a custom path. |
 | `migrate-docs` | Plan or create starter memory drafts from existing repository docs. |

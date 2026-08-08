@@ -1,4 +1,6 @@
 import { AgentMemoryError } from "../../../core/src/errors";
+import { findRepoRoot } from "../../../core/src/repo";
+import { commandPrefixForRepo } from "../../../core/src/skills";
 import {
   blockPlanStage,
   completePlanStage,
@@ -41,7 +43,8 @@ export async function runPlansCommand(args: string[], context: PlansCommandConte
   if (command === "new") {
     const options = parseNewArgs(rest);
     const result = await createPlanRun({ cwd: context.cwd, task: options.task, templateId: options.templateId });
-    return { exitCode: 0, stdout: options.json ? JSON.stringify(result, null, 2) : renderNew(result.run, result.path, result.warnings) };
+    const commandPrefix = commandPrefixForRepo(findRepoRoot(context.cwd).root);
+    return { exitCode: 0, stdout: options.json ? JSON.stringify(result, null, 2) : renderNew(result.run, result.path, result.warnings, commandPrefix) };
   }
 
   if (command === "show") {
@@ -145,14 +148,19 @@ function renderSuggest(result: Awaited<ReturnType<typeof suggestPlans>>): string
   return lines.join("\n");
 }
 
-function renderNew(run: PlanRunDetail, filePath: string, warnings: string[]): string {
+function renderNew(
+  run: PlanRunDetail,
+  filePath: string,
+  warnings: string[],
+  commandPrefix: "agent-memory" | "bin/memory"
+): string {
   return [
     "Plan run created.",
     "",
     `ID: ${run.id}`,
     `Path: ${filePath}`,
     `Current stage: ${run.currentStage}`,
-    `Context: bin/memory context --plan ${run.id} --stage ${run.currentStage}`,
+    `Context: ${commandPrefix} context --plan ${run.id} --stage ${run.currentStage}`,
     ...warnings.map((warning) => `Warning: ${warning}`)
   ].join("\n");
 }

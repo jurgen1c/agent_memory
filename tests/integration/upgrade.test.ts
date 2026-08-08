@@ -88,6 +88,23 @@ describe("upgrade command", () => {
     expect(delegationReference).toContain("Subagent prompt contract");
   });
 
+  test("preserves wrapper-less global CLI-first mode", async () => {
+    const repoRoot = makeRepo(`version: 2
+memory_root: memory
+database_path: .agent-memory/memory.sqlite
+memory_key: global-repository
+database_scope: global
+`);
+    fs.writeFileSync(path.join(repoRoot, "AGENTS.md"), oldAgents());
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("global CLI-first mode has no wrapper");
+    expect(fs.existsSync(path.join(repoRoot, "bin/memory"))).toBe(false);
+    expect(fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")).toContain("Run `agent-memory sync`.");
+  });
+
   test("refreshes the configured instruction file instead of assuming AGENTS.md", async () => {
     const repoRoot = makeRepo(`${oldConfig()}
 agent_instructions:

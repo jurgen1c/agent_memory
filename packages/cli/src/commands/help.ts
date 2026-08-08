@@ -24,8 +24,11 @@ const TOPICS: HelpTopic[] = [
     purpose: "Scaffold memory files and agent instructions in a consuming repository.",
     usage: [
       "agent-memory init --yes",
-      "agent-memory init --yes --package-manager npm",
-      "agent-memory init --yes --package-manager bun",
+      "agent-memory init --yes --memory-key org-repository",
+      "agent-memory init --yes --local",
+      "agent-memory init --yes --wrapper",
+      "agent-memory init --yes --local --package-manager npm",
+      "agent-memory init --yes --wrapper --package-manager bun",
       "agent-memory init --yes --agent codex",
       "agent-memory init --yes --agent generic",
       "agent-memory init --yes --agent codex --skill-location .agents",
@@ -35,18 +38,20 @@ const TOPICS: HelpTopic[] = [
       "agent-memory init --yes --force"
     ],
     examples: [
+      "agent-memory init --yes --memory-key org-repository",
+      "agent-memory init --yes --local --package-manager npm",
       "agent-memory init --yes --agent codex",
       "agent-memory init --yes --instructions-file AGENTS.md --instructions-file CLAUDE.md",
-      "agent-memory init --package-manager bun"
+      "agent-memory init --yes --wrapper --package-manager bun"
     ],
     agentNotes: [
-      "Safe to run repeatedly. Existing files are skipped unless --force is passed; configured instruction files keep local content and refresh only the managed agent-memory section. Repeat --instructions-file for multiple agent instruction targets. Use --skill-location with exactly one --agent target."
+      "Fresh init defaults to global storage and the agent-memory command. Use --local for version 1 local compatibility, --wrapper to add bin/memory in global mode, and --memory-key to override offline key derivation. Safe to run repeatedly. Existing files are skipped unless --force is passed; configured instruction files keep local content and refresh only the managed agent-memory section. Repeat --instructions-file for multiple agent instruction targets. Use --skill-location with exactly one --agent target."
     ],
     phase: "Phase 2"
   },
   {
     name: "compile",
-    purpose: "Compile canonical Markdown and YAML memory into repo-local SQLite.",
+    purpose: "Compile canonical Markdown and YAML memory into the configured SQLite cache.",
     usage: ["agent-memory compile", "agent-memory compile --db .agent-memory/memory.sqlite", "agent-memory compile --json", "agent-memory compile --verbose"],
     examples: ["agent-memory compile --json", "agent-memory compile --db .agent-memory/memory.sqlite"],
     agentNotes: ["SQLite is generated cache and should not be committed."],
@@ -378,7 +383,7 @@ export function renderHelp(topicName?: string): string {
     "  templates            List, show, and copy built-in templates.",
     "  new                  Create a safe claim or recipe draft.",
     "  validate             Validate canonical memory files.",
-    "  compile              Build the repo-local SQLite memory cache.",
+    "  compile              Build the configured SQLite memory cache.",
     "  query                Search compiled claims.",
     "  show                 Show one compiled claim.",
     "  system               Summarize compiled memory for one system.",
@@ -407,7 +412,7 @@ export function renderHelp(topicName?: string): string {
     "  agent-memory --version",
     "",
     "Agent Notes:",
-    "  Canonical memory will live in docs/agent-memory; generated SQLite will live in .agent-memory/.",
+    "  Canonical memory lives in docs/agent-memory; generated SQLite follows the configured local or global scope.",
     "  Do not treat SQLite as source of truth.",
     "  Use command help instead of inventing file formats."
   ].join("\n");

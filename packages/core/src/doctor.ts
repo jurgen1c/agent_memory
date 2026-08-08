@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config";
-import { resolveDatabaseLocation } from "./database";
+import { assertGlobalDatabaseProvenance, resolveConfiguredDatabaseLocation } from "./database";
 import { canonicalMemoryFileInventory, discoverCanonicalMemoryFiles, resolveConfiguredPath } from "./files";
 import { runGit } from "./git";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
@@ -47,7 +47,8 @@ export async function doctorMemory(options: DoctorOptions = {}): Promise<DoctorR
   const loaded = loadConfig({ cwd: options.cwd });
   const repoRoot = loaded.repo.root;
   const memoryRoot = resolveConfiguredPath(repoRoot, loaded.config.memory_root);
-  const databasePath = resolveDatabaseLocation({ config: loaded.config, repoRoot }).path;
+  const databaseLocation = resolveConfiguredDatabaseLocation({ loaded });
+  const databasePath = databaseLocation.path;
   const checks: DoctorCheck[] = [];
 
   if (!fs.existsSync(databasePath)) {
@@ -60,6 +61,7 @@ export async function doctorMemory(options: DoctorOptions = {}): Promise<DoctorR
   const database = await openSqliteDatabase(databasePath, { readonly: true });
 
   try {
+    assertGlobalDatabaseProvenance(database, databaseLocation, loaded);
     const metadataTableExists = tableExists(database, "compile_metadata");
     const metadata = metadataTableExists ? readMetadata(database) : new Map<string, string>();
 

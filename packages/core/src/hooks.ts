@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { runGit } from "./git";
 import { findRepoRoot } from "./repo";
+import { commandPrefixForRepo } from "./skills";
 import type { RepoInfo } from "./types";
 
 export const DEFAULT_HOOKS = ["post-merge", "post-checkout", "post-rewrite"] as const;
@@ -15,6 +16,7 @@ export interface HookInstallAction {
 export interface HookInstallOptions {
   cwd?: string;
   force?: boolean;
+  commandPrefix?: "agent-memory" | "bin/memory";
 }
 
 export interface HookInstallResult {
@@ -27,6 +29,7 @@ export function installMemoryHooks(options: HookInstallOptions = {}): HookInstal
   const repo = findRepoRoot(options.cwd);
   const actions: HookInstallAction[] = [];
   const warnings = [...repo.warnings];
+  const commandPrefix = options.commandPrefix ?? commandPrefixForRepo(repo.root);
 
   if (repo.detectedBy !== "git") {
     warnings.push("Git hooks were requested, but this directory is not inside a Git repository.");
@@ -41,7 +44,7 @@ export function installMemoryHooks(options: HookInstallOptions = {}): HookInstal
       continue;
     }
 
-    writeExecutable(hookPath.absolutePath, hookPath.actionPath, hookTemplate(), Boolean(options.force), actions);
+    writeExecutable(hookPath.absolutePath, hookPath.actionPath, hookTemplate(commandPrefix), Boolean(options.force), actions);
   }
 
   return { repo, actions, warnings };
@@ -76,12 +79,15 @@ function writeExecutable(absolutePath: string, actionPath: string, content: stri
   actions.push({ path: actionPath, status: existedBefore ? "overwritten" : "created" });
 }
 
-function hookTemplate(): string {
+function hookTemplate(commandPrefix: "agent-memory" | "bin/memory"): string {
+  const availabilityCheck = commandPrefix === "bin/memory"
+    ? "[ -x bin/memory ]"
+    : "command -v agent-memory >/dev/null 2>&1";
   return `#!/usr/bin/env bash
 
-if [ -x bin/memory ]; then
+if ${availabilityCheck}; then
   echo "Refreshing agent memory..."
-  bin/memory sync || echo "Warning: agent memory sync failed. Run bin/memory sync manually."
+  ${commandPrefix} sync || echo "Warning: agent memory sync failed. Run ${commandPrefix} sync manually."
 fi
 `;
 }

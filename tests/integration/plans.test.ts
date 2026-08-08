@@ -104,6 +104,12 @@ describe("plans command", () => {
     expect(parsed.run.currentStage).toBe("inspect");
     expect(fs.existsSync(parsed.path)).toBe(true);
 
+    const createdText = await dispatch(
+      ["plans", "new", "--template", "plan_template.auth.oauth_change", "--task", "change another provider"],
+      { cwd }
+    );
+    expect(createdText.stdout).toContain("Context: agent-memory context --plan");
+
     const next = await dispatch(["plans", "next", parsed.run.id], { cwd });
     expect(next.exitCode).toBe(0);
     expect(next.stdout).toContain(`Context: agent-memory context --plan ${parsed.run.id} --stage inspect`);
@@ -111,6 +117,11 @@ describe("plans command", () => {
     const wrapperPath = path.join(cwd, "bin/memory");
     fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
     fs.writeFileSync(wrapperPath, "#!/usr/bin/env bash\nexec agent-memory \"$@\"\n");
+    const createdWithWrapper = await dispatch(
+      ["plans", "new", "--template", "plan_template.auth.oauth_change", "--task", "change wrapped provider"],
+      { cwd }
+    );
+    expect(createdWithWrapper.stdout).toContain("Context: bin/memory context --plan");
     const nextWithWrapper = await dispatch(["plans", "next", parsed.run.id], { cwd });
     expect(nextWithWrapper.exitCode).toBe(0);
     expect(nextWithWrapper.stdout).toContain(`Context: bin/memory context --plan ${parsed.run.id} --stage inspect`);

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { loadConfig } from "./config";
-import { resolveDatabaseLocation } from "./database";
+import { assertGlobalDatabaseProvenance, resolveConfiguredDatabaseLocation } from "./database";
 import { NotFoundError } from "./errors";
 import { pathMatchesPattern } from "./files";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
@@ -434,7 +434,8 @@ function isProfileIntent(value: string): value is ProfileIntent {
 
 async function openConfiguredDatabase(cwd?: string): Promise<{ database: SqliteDatabase; databasePath: string }> {
   const loaded = loadConfig({ cwd });
-  const databasePath = resolveDatabaseLocation({ config: loaded.config, repoRoot: loaded.repo.root }).path;
+  const databaseLocation = resolveConfiguredDatabaseLocation({ loaded });
+  const databasePath = databaseLocation.path;
 
   if (!fs.existsSync(databasePath)) {
     throw new NotFoundError(`Compiled memory database not found at ${databasePath}`, {
@@ -442,8 +443,17 @@ async function openConfiguredDatabase(cwd?: string): Promise<{ database: SqliteD
     });
   }
 
+  const database = await openSqliteDatabase(databasePath, { readonly: true });
+
+  try {
+    assertGlobalDatabaseProvenance(database, databaseLocation, loaded);
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+
   return {
-    database: await openSqliteDatabase(databasePath, { readonly: true }),
+    database,
     databasePath
   };
 }

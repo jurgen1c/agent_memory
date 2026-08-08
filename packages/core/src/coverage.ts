@@ -3,7 +3,7 @@ import path from "node:path";
 import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
 import { describeClaimSourcePolicyDecision, evaluateClaimSourcePath } from "./claim_sources";
 import { loadConfig } from "./config";
-import { resolveDatabaseLocation } from "./database";
+import { assertGlobalDatabaseProvenance, resolveConfiguredDatabaseLocation } from "./database";
 import { configuredPathRelativeToRepo, discoverFiles, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
 import { parseYaml } from "./yaml";
 import { NotFoundError } from "./errors";
@@ -85,7 +85,8 @@ export async function checkCoverage(options: CoverageOptions = {}): Promise<Cove
   const repoRoot = loaded.repo.root;
   const memoryRoot = resolveConfiguredPath(repoRoot, loaded.config.memory_root);
   const memoryRootRelative = configuredPathRelativeToRepo(repoRoot, loaded.config.memory_root);
-  const databasePath = resolveDatabaseLocation({ config: loaded.config, repoRoot }).path;
+  const databaseLocation = resolveConfiguredDatabaseLocation({ loaded });
+  const databasePath = databaseLocation.path;
 
   if (!fs.existsSync(databasePath)) {
     throw new NotFoundError(`Compiled memory database not found at ${databasePath}`, {
@@ -105,6 +106,7 @@ export async function checkCoverage(options: CoverageOptions = {}): Promise<Cove
   const database = await openSqliteDatabase(databasePath, { readonly: true });
 
   try {
+    assertGlobalDatabaseProvenance(database, databaseLocation, loaded);
     const indexes = loadCoverageIndexes(database);
     const claims = database.all<MemoryFile>("SELECT id, source_path AS sourcePath FROM claims");
     const recipes = loadRecipeCoverageFiles(database);

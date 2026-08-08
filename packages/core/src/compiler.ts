@@ -1,11 +1,12 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { resolveDatabaseLocation } from "./database";
+import { resolveConfiguredDatabaseLocation } from "./database";
 import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, resolveConfiguredPath } from "./files";
 import { runGit } from "./git";
 import { loadMemory, type LoadedMemory, type MemoryClaim, type MemoryGraphEdge, type MemoryPlanTemplate, type MemoryProfileTrait } from "./memory";
+import { canonicalRepositoryRoot } from "./registry";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
 import { validateRepository, type ValidationResult } from "./validator";
 import { PACKAGE_VERSION } from "./version";
@@ -58,15 +59,18 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
 
   const memory = loadMemory(options.cwd);
   const repoRoot = memory.loadedConfig.repo.root;
-  const databasePath = resolveDatabaseLocation({
-    config: memory.loadedConfig.config,
-    repoRoot,
+  const databaseLocation = resolveConfiguredDatabaseLocation({
+    loaded: memory.loadedConfig,
     dbPath: options.dbPath
-  }).path;
+  });
+  const databasePath = databaseLocation.path;
   const memoryRoot = resolveConfiguredPath(repoRoot, memory.loadedConfig.config.memory_root);
   const tempDatabasePath = temporaryDatabasePath(databasePath);
 
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
+  if (databaseLocation.scope === "global" && databaseLocation.source === "global_registry") {
+    createPrivateDatabaseFile(tempDatabasePath);
+  }
 
   let replaced = false;
 
@@ -78,7 +82,7 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
     try {
       createSchema(database);
       insertMemory(database, memory);
-      insertMetadata(database, memory, databasePath);
+      insertMetadata(database, memory, databaseLocation);
 
       const explicitRelations = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claim_relations WHERE origin = 'explicit'")?.count ?? 0;
       const inferredRelations = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claim_relations WHERE origin = 'inferred'")?.count ?? 0;
@@ -113,6 +117,9 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
       database.close();
     }
 
+    if (databaseLocation.scope === "global" && databaseLocation.source === "global_registry") {
+      fs.chmodSync(tempDatabasePath, 0o600);
+    }
     replaceDatabase(tempDatabasePath, databasePath);
     replaced = true;
     return result;
@@ -607,26 +614,50 @@ function relationKey(relation: RelationRow): string {
   return `${relation.source}\0${relation.target}\0${relation.relation}`;
 }
 
-function insertMetadata(database: SqliteDatabase, memory: LoadedMemory, databasePath: string): void {
+function insertMetadata(
+  database: SqliteDatabase,
+  memory: LoadedMemory,
+  databaseLocation: ReturnType<typeof resolveConfiguredDatabaseLocation>
+): void {
   const configPath = memory.loadedConfig.path;
-  const memoryRoot = resolveConfiguredPath(memory.loadedConfig.repo.root, memory.loadedConfig.config.memory_root);
+  const repoRoot = memory.loadedConfig.repo.root;
+  const memoryRoot = resolveConfiguredPath(repoRoot, memory.loadedConfig.config.memory_root);
   const canonicalFileInventory = canonicalMemoryFileInventory(memoryRoot, memory.loadedConfig.config);
   const metadata: Record<string, string> = {
     schema_version: "1",
     package_version: PACKAGE_VERSION,
-    git_commit: currentGitCommit(memory.loadedConfig.repo.root),
-    repo_root: memory.loadedConfig.repo.root,
+    git_commit: currentGitCommit(repoRoot),
+    repo_root: databaseLocation.source === "global_registry" ? canonicalRepositoryRoot(repoRoot) : repoRoot,
     compiled_at: new Date().toISOString(),
     memory_root: memory.loadedConfig.config.memory_root,
     config_hash: sha256(fs.readFileSync(configPath, "utf8")),
     canonical_files_hash: sha256(JSON.stringify(canonicalFileInventory)),
     canonical_files_count: String(canonicalFileInventory.length),
-    database_path: databasePath
+    database_path: databaseLocation.path
   };
+
+  if (databaseLocation.source === "global_registry") {
+    metadata.memory_key = requireDatabaseProvenance(databaseLocation.memoryKey, "memory key");
+    metadata.checkout_fingerprint = requireDatabaseProvenance(
+      databaseLocation.checkoutFingerprint,
+      "checkout fingerprint"
+    );
+    metadata.repository_identity = requireDatabaseProvenance(
+      databaseLocation.repositoryIdentity,
+      "repository identity"
+    );
+  }
 
   for (const [key, value] of Object.entries(metadata)) {
     database.run("INSERT INTO compile_metadata (key, value) VALUES (?, ?)", [key, value]);
   }
+}
+
+function requireDatabaseProvenance(value: string | undefined, field: string): string {
+  if (!value) {
+    throw new AgentMemoryError(`Global database location is missing ${field} provenance.`);
+  }
+  return value;
 }
 
 function currentGitCommit(repoRoot: string): string {
@@ -644,6 +675,15 @@ function sha256(value: string): string {
 function temporaryDatabasePath(databasePath: string): string {
   const random = crypto.randomBytes(8).toString("hex");
   return path.join(path.dirname(databasePath), `.${path.basename(databasePath)}.${process.pid}.${Date.now()}.${random}.tmp`);
+}
+
+function createPrivateDatabaseFile(databasePath: string): void {
+  const handle = fs.openSync(databasePath, "wx", 0o600);
+  try {
+    fs.fchmodSync(handle, 0o600);
+  } finally {
+    fs.closeSync(handle);
+  }
 }
 
 function backupDatabasePath(databasePath: string): string {
