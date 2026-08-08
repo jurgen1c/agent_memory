@@ -7,6 +7,7 @@ import { AgentMemoryError } from "./errors";
 import { resolveRepoOutputPath } from "./repo";
 import type { AgentMemoryConfig, RepoInfo } from "./types";
 import { PACKAGE_VERSION } from "./version";
+import { inspectRepositoryWrapper } from "./wrapper";
 
 export type AgentTarget = "codex" | "generic";
 export type AgentSkillKind = "repo" | "migration";
@@ -380,7 +381,7 @@ export function parseAgentSkillKind(value: string): AgentSkillKind {
 }
 
 export function commandPrefixForRepo(repoRoot: string): "agent-memory" | "bin/memory" {
-  return fs.existsSync(path.join(repoRoot, "bin/memory")) ? "bin/memory" : "agent-memory";
+  return inspectRepositoryWrapper(repoRoot).isUsable ? "bin/memory" : "agent-memory";
 }
 
 export function skillPathForLocation(agent: AgentTarget, location: string, kind: AgentSkillKind = "repo"): string {

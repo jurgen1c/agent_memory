@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dispatch, runCli } from "../../packages/cli/src/router";
+import { wrapperTemplate } from "../../packages/core/src/init";
 import { PACKAGE_VERSION } from "../../packages/core/src/version";
 
 describe("install-skill command", () => {
@@ -108,6 +109,7 @@ user-invocable: false
     expect(result.exitCode).toBe(0);
     expect(content).toContain("`tmp/custom-memory.sqlite`");
     expect(content).toContain("`.agent-memory/plans` for local one-off plan runs");
+    expect(content).toContain("bin/memory sync");
     expect(content).not.toContain("`tmp/plans`");
   });
 
@@ -381,6 +383,58 @@ describe("agent-manifest command", () => {
     ]);
   });
 
+  test("prefers the repository wrapper deterministically when a global CLI is also available", async () => {
+    const repoRoot = makeGitRepo();
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    const globalBin = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-global-bin-"));
+    const globalCli = path.join(globalBin, "agent-memory");
+    await dispatch(["init", "--yes", "--local"], { cwd: repoRoot });
+    fs.writeFileSync(globalCli, "#!/usr/bin/env bash\nexit 0\n");
+    fs.chmodSync(globalCli, 0o755);
+    expect(fs.readFileSync(wrapperPath, "utf8")).toBe(wrapperTemplate("npm"));
+
+    const result = spawnSync("bun", [path.resolve("packages/cli/src/index.ts"), "agent-manifest", "--json"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${globalBin}${path.delimiter}${process.env.PATH ?? ""}` }
+    });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.status).toBe(0);
+    expect(parsed.commandPrefix).toBe("bin/memory");
+    expect(parsed.commands.find((command: { name: string }) => command.name === "context").examples[0]).toContain(
+      "bin/memory"
+    );
+  });
+
+  test("uses the global command when a repository wrapper is not a usable regular file", async () => {
+    const repoRoot = makeGitRepo();
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    const globalHome = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-unusable-wrapper-global-")), "home");
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    fs.mkdirSync(wrapperPath, { recursive: true });
+
+    const directoryResult = await runCliWithGlobalHome(repoRoot, globalHome);
+
+    expect(directoryResult.exitCode).toBe(0);
+    expect(JSON.parse(directoryResult.stdout).commandPrefix).toBe("agent-memory");
+
+    fs.rmdirSync(wrapperPath);
+    fs.writeFileSync(wrapperPath, "#!/usr/bin/env bash\nexec agent-memory \"$@\"\n");
+    fs.chmodSync(wrapperPath, 0o640);
+
+    const nonExecutableResult = await runCliWithGlobalHome(repoRoot, globalHome);
+
+    expect(nonExecutableResult.exitCode).toBe(0);
+    expect(JSON.parse(nonExecutableResult.stdout).commandPrefix).toBe("agent-memory");
+
+    fs.chmodSync(wrapperPath, 0o750);
+    const executableResult = await runCliWithGlobalHome(repoRoot, globalHome);
+
+    expect(executableResult.exitCode).toBe(0);
+    expect(JSON.parse(executableResult.stdout).commandPrefix).toBe("bin/memory");
+  });
+
   test("renders command help for phase 10 commands", async () => {
     const installSkill = await dispatch(["help", "install-skill"]);
     const manifest = await dispatch(["help", "agent-manifest"]);
@@ -398,6 +452,16 @@ function makeGitRepo(): string {
   const init = spawnSync("git", ["init"], { cwd: repoRoot, encoding: "utf8" });
   expect(init.status).toBe(0);
   return repoRoot;
+}
+
+function runCliWithGlobalHome(repoRoot: string, globalHome: string): { exitCode: number | null; stdout: string } {
+  const result = spawnSync("bun", [path.resolve("packages/cli/src/index.ts"), "agent-manifest", "--json"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, AGENT_MEMORY_HOME: globalHome }
+  });
+
+  return { exitCode: result.status, stdout: result.stdout };
 }
 
 function rewriteGenericSkillPath(repoRoot: string, skillPath: string): void {

@@ -34,4 +34,5 @@ export * from "./ui_server";
 export * from "./upgrade";
 export * from "./validator";
 export * from "./version";
+export * from "./wrapper";
 export * from "./yaml";

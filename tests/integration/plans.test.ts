@@ -117,6 +117,7 @@ describe("plans command", () => {
     const wrapperPath = path.join(cwd, "bin/memory");
     fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
     fs.writeFileSync(wrapperPath, "#!/usr/bin/env bash\nexec agent-memory \"$@\"\n");
+    fs.chmodSync(wrapperPath, 0o755);
     const createdWithWrapper = await dispatch(
       ["plans", "new", "--template", "plan_template.auth.oauth_change", "--task", "change wrapped provider"],
       { cwd }

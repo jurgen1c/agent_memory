@@ -194,7 +194,7 @@ Command usage cheat sheet:
 
 | Command | Required input | Useful flags |
 | --- | --- | --- |
-| `init` | None; use `--yes` for non-interactive setup. | `--package-manager npm`, `--package-manager bun`, `--agent codex`, `--agent generic`, `--skill-location <dir>`, `--install-hooks`, `--force` |
+| `init` | None; use `--yes` for non-interactive setup. | `--local`, `--wrapper`, `--memory-key <key>`, `--package-manager npm`, `--package-manager bun`, `--agent codex`, `--agent generic`, `--skill-location <dir>`, `--install-hooks`, `--force` |
 | `templates list` | None. | None. |
 | `templates show` | Template name, such as `claim:fact`. | None. |
 | `templates copy` | Template name and `--to <path>`. | `--force` |

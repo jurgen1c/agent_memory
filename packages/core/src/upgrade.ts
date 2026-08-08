@@ -12,6 +12,7 @@ import {
   type AgentTarget
 } from "./skills";
 import type { AgentMemoryConfig, RepoInfo } from "./types";
+import { inspectRepositoryWrapper, tryReadRepositoryWrapper } from "./wrapper";
 import { mergeYamlMissingValues, parseYaml } from "./yaml";
 
 export interface UpgradeOptions {
@@ -135,9 +136,9 @@ export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
     actions
   });
   upgradeMemoryScaffold(repo.root, config, options, actions, warnings);
-  upgradeAgentInstructionsFile(repo.root, config, options, actions, warnings);
-  upgradeMemoryWrapper(repo.root, config, options, actions, warnings);
-  upgradeSkillFiles(repo.root, config, options, actions, warnings);
+  const commandPrefix = upgradeMemoryWrapper(repo.root, config, options, actions, warnings);
+  upgradeAgentInstructionsFile(repo.root, config, commandPrefix, options, actions, warnings);
+  upgradeSkillFiles(repo.root, config, commandPrefix, options, actions, warnings);
 
   return {
     repo,
@@ -214,14 +215,21 @@ function upgradeMemoryWrapper(
   options: UpgradeOptions,
   actions: UpgradeAction[],
   warnings: string[]
-): void {
+): "agent-memory" | "bin/memory" {
   const relativePath = "bin/memory";
-  const absolutePath = path.join(repoRoot, relativePath);
-  const existing = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : null;
+  const wrapper = inspectRepositoryWrapper(repoRoot);
+  const absolutePath = wrapper.path;
+  const existing = tryReadRepositoryWrapper(wrapper);
 
-  if (existing === null && config.database_scope === "global") {
+  if (wrapper.exists && existing === null) {
+    warnings.push("bin/memory is not a readable regular file; skipping to avoid overwriting user content.");
+    actions.push({ path: relativePath, status: "skipped", detail: "custom wrapper requires manual review" });
+    return "agent-memory";
+  }
+
+  if (!wrapper.exists && config.database_scope === "global") {
     actions.push({ path: relativePath, status: "skipped", detail: "global CLI-first mode has no wrapper" });
-    return;
+    return "agent-memory";
   }
 
   const detectedPackageManager = existing === null ? null : detectGeneratedWrapperPackageManager(existing);
@@ -229,7 +237,7 @@ function upgradeMemoryWrapper(
   if (existing !== null && detectedPackageManager === null) {
     warnings.push("bin/memory does not look generated; skipping to avoid overwriting user content.");
     actions.push({ path: relativePath, status: "skipped", detail: "custom wrapper requires manual review" });
-    return;
+    return commandPrefixForRepo(repoRoot);
   }
 
   const packageManager = detectedPackageManager ?? "npm";
@@ -240,15 +248,15 @@ function upgradeMemoryWrapper(
       if (options.write) {
         fs.chmodSync(absolutePath, 0o755);
         actions.push({ path: relativePath, status: "updated", detail: "made wrapper executable" });
-        return;
+        return "bin/memory";
       }
 
       actions.push({ path: relativePath, status: "would_update", detail: "make wrapper executable" });
-      return;
+      return "bin/memory";
     }
 
     actions.push({ path: relativePath, status: "skipped", detail: "already current" });
-    return;
+    return "bin/memory";
   }
 
   if (options.write) {
@@ -260,7 +268,7 @@ function upgradeMemoryWrapper(
       status: existing === null ? "created" : "updated",
       detail: existing === null ? "installed wrapper" : `refreshed ${packageManager} wrapper`
     });
-    return;
+    return "bin/memory";
   }
 
   actions.push({
@@ -268,6 +276,7 @@ function upgradeMemoryWrapper(
     status: existing === null ? "would_create" : "would_update",
     detail: existing === null ? "install wrapper" : `refresh ${packageManager} wrapper`
   });
+  return "bin/memory";
 }
 
 function isExecutable(filePath: string): boolean {
@@ -338,12 +347,13 @@ function deprecatedReplacementPaths(parsedConfig: unknown): string[] {
 function upgradeAgentInstructionsFile(
   repoRoot: string,
   config: AgentMemoryConfig,
+  commandPrefix: "agent-memory" | "bin/memory",
   options: UpgradeOptions,
   actions: UpgradeAction[],
   warnings: string[]
 ): void {
   for (const configuredPath of config.agent_instructions.paths) {
-    upgradeOneAgentInstructionsFile(repoRoot, configuredPath, config, options, actions, warnings);
+    upgradeOneAgentInstructionsFile(repoRoot, configuredPath, config, commandPrefix, options, actions, warnings);
   }
 }
 
@@ -351,6 +361,7 @@ function upgradeOneAgentInstructionsFile(
   repoRoot: string,
   configuredPath: string,
   config: AgentMemoryConfig,
+  commandPrefix: "agent-memory" | "bin/memory",
   options: UpgradeOptions,
   actions: UpgradeAction[],
   warnings: string[]
@@ -378,7 +389,6 @@ function upgradeOneAgentInstructionsFile(
   }
 
   const existing = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : "";
-  const commandPrefix = config.database_scope === "local" ? "bin/memory" : commandPrefixForRepo(repoRoot);
   const update = buildAgentsMemoryContent(existing, config, commandPrefix);
 
   if (update.status === "skipped") {
@@ -399,6 +409,7 @@ function upgradeOneAgentInstructionsFile(
 function upgradeSkillFiles(
   repoRoot: string,
   config: AgentMemoryConfig,
+  commandPrefix: "agent-memory" | "bin/memory",
   options: UpgradeOptions,
   actions: UpgradeAction[],
   warnings: string[]
@@ -419,7 +430,7 @@ function upgradeSkillFiles(
 
     const { absolutePath, relativePath } = resolvedPath;
     const existing = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : null;
-    const next = renderAgentSkill({ agent, config, commandPrefix: commandPrefixForRepo(repoRoot) });
+    const next = renderAgentSkill({ agent, config, commandPrefix });
 
     if (existing === next) {
       actions.push({ path: relativePath, status: "skipped", detail: "already current" });
