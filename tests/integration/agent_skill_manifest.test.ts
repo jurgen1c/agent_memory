@@ -28,12 +28,13 @@ user-invocable: false
 <!-- agent-memory:generated-skill repo-memory -->
 # Repo Memory Skill
 `)).toBe(true);
-    expect(content).toContain("bin/memory sync");
-    expect(content).toContain("bin/memory audit --git-diff");
-    expect(content).toContain(".agent-memory/memory.sqlite");
+    expect(content).toContain("agent-memory sync");
+    expect(content).toContain("agent-memory audit --git-diff");
+    expect(content).toContain("User-local global SQLite cache resolved at runtime");
+    expect(content).not.toContain("`.agent-memory/memory.sqlite`");
     expect(content).toContain("templates show claim:fact");
     expect(content).toContain("Relationship Graphs");
-    expect(content).toContain("Do not edit or commit the SQLite database");
+    expect(content).toContain("Do not edit or commit the user-local global SQLite cache");
     expect(content).toContain("references/claims.md");
     expect(content).toContain("references/memory-worthiness.md");
     expect(content).toContain("references/contextual-workflows.md");
@@ -88,7 +89,7 @@ user-invocable: false
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("docs/custom/AGENT_MEMORY.md");
     expect(fs.existsSync(skillPath)).toBe(true);
-    expect(fs.readFileSync(skillPath, "utf8")).toContain("bin/memory context --git-diff");
+    expect(fs.readFileSync(skillPath, "utf8")).toContain("agent-memory context --git-diff");
     expect(fs.readFileSync(skillPath, "utf8")).toContain("If context includes matched recipes");
     expect(fs.readFileSync(skillPath, "utf8")).toContain("plans finish <id>");
     expect(fs.readFileSync(skillPath, "utf8")).not.toContain("references/claims.md");
@@ -96,7 +97,7 @@ user-invocable: false
 
   test("documents the fixed local plan-run path when database_path is customized", async () => {
     const repoRoot = makeGitRepo();
-    const init = await dispatch(["init", "--yes", "--agent", "generic"], { cwd: repoRoot });
+    const init = await dispatch(["init", "--yes", "--local", "--agent", "generic"], { cwd: repoRoot });
     expect(init.exitCode).toBe(0);
     rewriteDatabasePath(repoRoot, "tmp/custom-memory.sqlite");
 
@@ -121,7 +122,7 @@ user-invocable: false
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain(".agent-skills/skills/repo-memory/SKILL.md");
     expect(fs.existsSync(skillPath)).toBe(true);
-    expect(fs.readFileSync(skillPath, "utf8")).toContain("bin/memory sync");
+    expect(fs.readFileSync(skillPath, "utf8")).toContain("agent-memory sync");
   });
 
   test("installs generic skills under the standard skills directory for custom locations", async () => {
@@ -271,7 +272,7 @@ user-invocable: false
 describe("agent-manifest command", () => {
   test("supports human-readable output and rejects unknown options", async () => {
     const repoRoot = makeGitRepo();
-    const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const init = await dispatch(["init", "--yes", "--local"], { cwd: repoRoot });
     expect(init.exitCode).toBe(0);
 
     const result = await dispatch(["agent-manifest"], { cwd: repoRoot });
@@ -284,21 +285,28 @@ describe("agent-manifest command", () => {
     const repoRoot = makeGitRepo();
     const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
     expect(init.exitCode).toBe(0);
+    const globalHome = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-manifest-global-")), "home");
+    const cliPath = path.resolve("packages/cli/src/index.ts");
 
-    const result = await dispatch(["agent-manifest", "--json"], { cwd: repoRoot });
+    const result = spawnSync("bun", [cliPath, "agent-manifest", "--json"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { ...process.env, AGENT_MEMORY_HOME: globalHome }
+    });
     const parsed = JSON.parse(result.stdout);
 
-    expect(result.exitCode).toBe(0);
+    expect(result.status).toBe(0);
     expect(parsed.tool).toBe("agent-memory");
-    expect(parsed.commandPrefix).toBe("bin/memory");
-    expect(parsed.paths.database).toBe(".agent-memory/memory.sqlite");
+    expect(parsed.commandPrefix).toBe("agent-memory");
+    expect(parsed.paths.database).toStartWith(globalHome);
+    expect(parsed.paths.database).toEndWith("memory.sqlite");
     expect(parsed.paths.instructions).toBe("AGENTS.md");
     expect(parsed.paths.instruction_files).toEqual(["AGENTS.md"]);
     expect(parsed.paths.skills.codex).toBe(".codex/skills/repo-memory/SKILL.md");
     expect(parsed.commands.some((command: { name: string }) => command.name === "context")).toBe(true);
     expect(parsed.commands.some((command: { name: string }) => command.name === "audit")).toBe(true);
     expect(parsed.commands.some((command: { name: string }) => command.name === "new recipe")).toBe(true);
-    expect(parsed.commands.find((command: { name: string }) => command.name === "context").examples[0]).toContain("bin/memory");
+    expect(parsed.commands.find((command: { name: string }) => command.name === "context").examples[0]).toContain("agent-memory");
     expect(parsed.capabilities.contextual_workflows).toBe(true);
     expect(parsed.capabilities.recipes.commands).toContain("recipes search");
     expect(parsed.capabilities.recipes.commands).toContain("new recipe");
@@ -328,7 +336,7 @@ describe("agent-manifest command", () => {
 
   test("reports contextual workflow counts without requiring compile", async () => {
     const repoRoot = makeGitRepo();
-    const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const init = await dispatch(["init", "--yes", "--local"], { cwd: repoRoot });
     expect(init.exitCode).toBe(0);
     writeWorkflowArtifact(repoRoot, "docs/agent-memory/recipes/auth/oauth.yaml", "id: recipe.auth.oauth\n");
     writeWorkflowArtifact(repoRoot, "docs/agent-memory/plans/auth/oauth.yaml", "id: plan_template.auth.oauth\n");
@@ -356,7 +364,7 @@ describe("agent-manifest command", () => {
 
   test("reports plan-run warnings in deterministic path order", async () => {
     const repoRoot = makeGitRepo();
-    const init = await dispatch(["init", "--yes"], { cwd: repoRoot });
+    const init = await dispatch(["init", "--yes", "--local"], { cwd: repoRoot });
     expect(init.exitCode).toBe(0);
     writeWorkflowArtifact(repoRoot, ".agent-memory/plans/z-last.yaml", "- invalid\n");
     writeWorkflowArtifact(repoRoot, ".agent-memory/plans/a-first.yaml", "- invalid\n");

@@ -16,6 +16,7 @@ export * from "./markdown";
 export * from "./memory";
 export * from "./manifest";
 export * from "./migration";
+export * from "./memory_key";
 export * from "./plans";
 export * from "./profiles";
 export * from "./repo";

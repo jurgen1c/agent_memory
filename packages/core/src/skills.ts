@@ -113,7 +113,10 @@ export function renderAgentSkill(options: RenderAgentSkillOptions): string {
 
   const title = options.agent === "codex" ? "Repo Memory Skill" : "Repository Memory Instructions";
   const memoryRoot = trimTrailingSlash(options.config.memory_root);
-  const databasePath = options.config.database_path;
+  const globalDatabase = options.config.database_scope === "global";
+  const databaseDescription = globalDatabase
+    ? "- User-local global SQLite cache resolved at runtime from `memory_key` and checkout identity"
+    : `- \`${options.config.database_path}\``;
   const planRunsPath = ".agent-memory/plans";
   const commands = buildAgentCommands(options.commandPrefix);
   const referenceLinks =
@@ -153,10 +156,12 @@ ${renderMemoryPatterns(memoryRoot, "waivers", options.config.waivers)}
 
 Generated memory lives in:
 
-- \`${databasePath}\`
+${databaseDescription}
 - \`${planRunsPath}\` for local one-off plan runs
 
-Do not edit or commit the SQLite database, local plan runs under \`${planRunsPath}\`, or other generated files under \`${path.dirname(databasePath)}\`.
+${globalDatabase
+  ? `Do not edit or commit the user-local global SQLite cache, local plan runs under \`${planRunsPath}\`, or other generated checkout state.`
+  : `Do not edit or commit the SQLite database, local plan runs under \`${planRunsPath}\`, or other generated files under \`${path.dirname(options.config.database_path)}\`.`}
 
 ## Before Work
 
@@ -278,6 +283,9 @@ If memory conflicts with code, trust code and update or deprecate memory.
 function renderMigrationSkill(options: RenderAgentSkillOptions): string {
   const title = options.agent === "codex" ? "Repo Memory Migration Skill" : "Repository Memory Migration Instructions";
   const memoryRoot = trimTrailingSlash(options.config.memory_root);
+  const generatedDatabase = options.config.database_scope === "global"
+    ? "Generated SQLite is a user-local global cache resolved at runtime from `memory_key` and checkout identity."
+    : `Generated memory lives in \`${options.config.database_path}\`.`;
   const referenceLinks =
     options.agent === "codex"
       ? `
@@ -302,7 +310,7 @@ ${renderMemoryPatterns(memoryRoot, "graphs", options.config.graphs)}
 ${renderMemoryPatterns(memoryRoot, "indexes", options.config.indexes)}
 ${renderMemoryPatterns(memoryRoot, "recipes", options.config.recipes)}
 
-Generated memory lives in \`${options.config.database_path}\`. Do not edit or commit generated SQLite.
+${generatedDatabase} Do not edit or commit generated SQLite.
 
 ## Migration Workflow
 
@@ -371,7 +379,7 @@ export function parseAgentSkillKind(value: string): AgentSkillKind {
   });
 }
 
-export function commandPrefixForRepo(repoRoot: string): string {
+export function commandPrefixForRepo(repoRoot: string): "agent-memory" | "bin/memory" {
   return fs.existsSync(path.join(repoRoot, "bin/memory")) ? "bin/memory" : "agent-memory";
 }
 

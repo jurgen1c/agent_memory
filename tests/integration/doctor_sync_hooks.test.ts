@@ -205,7 +205,7 @@ describe("install-hooks command", () => {
     for (const hookName of ["post-merge", "post-checkout", "post-rewrite"]) {
       const hookPath = path.join(cwd, ".git/hooks", hookName);
       expect(fs.existsSync(hookPath)).toBe(true);
-      expect(fs.readFileSync(hookPath, "utf8")).toContain("bin/memory sync");
+      expect(fs.readFileSync(hookPath, "utf8")).toContain("agent-memory sync");
       expect(fs.statSync(hookPath).mode & 0o111).toBeGreaterThan(0);
     }
   });
@@ -240,7 +240,7 @@ describe("install-hooks command", () => {
     for (const hookName of ["post-merge", "post-checkout", "post-rewrite"]) {
       const hookPath = gitPath(worktree, `hooks/${hookName}`);
       expect(fs.existsSync(hookPath)).toBe(true);
-      expect(fs.readFileSync(hookPath, "utf8")).toContain("bin/memory sync");
+      expect(fs.readFileSync(hookPath, "utf8")).toContain("agent-memory sync");
       expect(fs.statSync(hookPath).mode & 0o111).toBeGreaterThan(0);
     }
   });

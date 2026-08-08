@@ -68,6 +68,46 @@ describe("compile command", () => {
     expect(fs.existsSync(path.join(cwd, "tmp/custom-memory.sqlite"))).toBe(true);
   });
 
+  test("creates global database artifacts with user-only permissions", async () => {
+    if (typeof process.getuid !== "function") return;
+
+    const cwd = copyFixture(mockApp);
+    const globalHome = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-private-db-")), "home");
+    const configPath = path.join(cwd, "agent-memory.config.yaml");
+    const config = fs.readFileSync(configPath, "utf8")
+      .replace("version: 1", "version: 2\nmemory_key: private-database\ndatabase_scope: global");
+    fs.writeFileSync(configPath, config);
+    const previousHome = process.env.AGENT_MEMORY_HOME;
+    const previousUmask = process.umask(0o022);
+
+    try {
+      process.env.AGENT_MEMORY_HOME = globalHome;
+      const result = await dispatch(["compile", "--json"], { cwd });
+      const databasePath = JSON.parse(result.stdout).databasePath as string;
+
+      expect(fs.statSync(databasePath).mode & 0o777).toBe(0o600);
+
+      const database = new Database(databasePath);
+      try {
+        database.exec("BEGIN IMMEDIATE");
+        database.exec("CREATE TABLE private_mode_probe (id INTEGER)");
+        const journalPath = `${databasePath}-journal`;
+        expect(fs.existsSync(journalPath)).toBe(true);
+        expect(fs.statSync(journalPath).mode & 0o777).toBe(0o600);
+        database.exec("ROLLBACK");
+      } finally {
+        database.close();
+      }
+    } finally {
+      process.umask(previousUmask);
+      if (previousHome === undefined) {
+        delete process.env.AGENT_MEMORY_HOME;
+      } else {
+        process.env.AGENT_MEMORY_HOME = previousHome;
+      }
+    }
+  });
+
   test("compiles plan templates, profile traits, and workflow FTS rows", async () => {
     const cwd = copyFixture(mockApp);
     writeProfile(cwd, "docs/agent-memory/profiles/review/security_sensitive.yaml", {

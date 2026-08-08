@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildAgentCommands, type AgentCommandDescription } from "./agent_commands";
 import { loadConfig } from "./config";
+import { resolveConfiguredDatabaseLocation } from "./database";
 import { discoverFiles, resolveConfiguredPath } from "./files";
 import { commandPrefixForRepo } from "./skills";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "./version";
@@ -57,12 +58,14 @@ export interface AgentManifest {
 
 export interface BuildAgentManifestOptions {
   cwd?: string;
+  globalHome?: string;
 }
 
 export function buildAgentManifest(options: BuildAgentManifestOptions = {}): AgentManifest {
   const loaded = loadConfig({ cwd: options.cwd });
   const repoRoot = loaded.repo.root;
   const commandPrefix = commandPrefixForRepo(repoRoot);
+  const databaseLocation = resolveConfiguredDatabaseLocation({ loaded, globalHome: options.globalHome });
 
   const workflowSummary = buildWorkflowSummary(repoRoot, loaded.config);
 
@@ -74,7 +77,7 @@ export function buildAgentManifest(options: BuildAgentManifestOptions = {}): Age
     paths: {
       config: path.relative(repoRoot, loaded.path) || loaded.path,
       memoryRoot: loaded.config.memory_root,
-      database: loaded.config.database_path,
+      database: databaseLocation.path,
       instructions: loaded.config.agent_instructions.paths[0],
       instruction_files: loaded.config.agent_instructions.paths,
       skills: {

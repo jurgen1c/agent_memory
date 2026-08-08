@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ConfigError } from "./errors";
+import { isValidMemoryKey } from "./memory_key";
 import { findRepoRoot, normalizeRepoRelativeOutputPath, normalizeRepoRelativePath, resolveInsideRepo } from "./repo";
 import type { AgentMemoryConfig, LoadedConfig, RepoInfo } from "./types";
 import { parseYaml } from "./yaml";
@@ -100,7 +101,7 @@ export function defaultConfig(): AgentMemoryConfig {
 }
 
 export function renderConfigTemplate(config: AgentMemoryConfig = defaultConfig()): string {
-  return `# Config schema version. Leave this at 1 unless agent-memory documents an upgrade.
+  return `# Config schema version.
 version: ${config.version}${renderGlobalStorageFields(config)}
 
 # Canonical memory source directory. The file patterns below are relative to this path.
@@ -274,15 +275,6 @@ function readGlobalStorageConfig(
     database_scope: databaseScope,
     ...(memoryKey === undefined ? {} : { memory_key: memoryKey })
   };
-}
-
-function isValidMemoryKey(value: string): boolean {
-  if (!/^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9_-])?$/.test(value)) {
-    return false;
-  }
-
-  const basename = value.split(".", 1)[0];
-  return !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(basename);
 }
 
 function renderGlobalStorageFields(config: AgentMemoryConfig): string {

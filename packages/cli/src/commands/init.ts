@@ -24,6 +24,9 @@ function parseInitArgs(args: string[], cwd?: string): InitOptions {
   let force = false;
   let packageManager: PackageManager = "npm";
   let installHooks = false;
+  let local = false;
+  let wrapper = false;
+  let memoryKey: string | undefined;
   let skillLocation: string | undefined;
   const instructionsFiles: string[] = [];
   const agents: AgentTarget[] = [];
@@ -43,6 +46,27 @@ function parseInitArgs(args: string[], cwd?: string): InitOptions {
 
     if (arg === "--install-hooks") {
       installHooks = true;
+      continue;
+    }
+
+    if (arg === "--local") {
+      local = true;
+      continue;
+    }
+
+    if (arg === "--wrapper") {
+      wrapper = true;
+      continue;
+    }
+
+    if (arg === "--memory-key") {
+      memoryKey = readValue(args, index, "--memory-key");
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--memory-key=")) {
+      memoryKey = readInlineValue(arg, "--memory-key");
       continue;
     }
 
@@ -116,7 +140,10 @@ function parseInitArgs(args: string[], cwd?: string): InitOptions {
     agents: uniqueAgents,
     installHooks,
     skillLocation,
-    instructionsFiles: Array.from(new Set(instructionsFiles))
+    instructionsFiles: Array.from(new Set(instructionsFiles)),
+    local,
+    wrapper,
+    memoryKey
   };
 }
 
@@ -155,8 +182,8 @@ function renderInitResult(result: InitResult): string {
   }
 
   lines.push("", "Next:");
-  lines.push("  bin/memory help");
-  lines.push("  bin/memory sync");
+  lines.push(`  ${result.commandPrefix} sync`);
+  lines.push(`  ${result.commandPrefix} context --task "<task>"`);
 
   return lines.join("\n");
 }

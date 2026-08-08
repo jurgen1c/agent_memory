@@ -5,6 +5,7 @@ import { defaultConfig, loadConfig, renderConfigTemplate } from "./config";
 import { AgentMemoryError } from "./errors";
 import { resolveConfiguredPath } from "./files";
 import { installMemoryHooks } from "./hooks";
+import { deriveInitMemoryKey, deriveRepositoryIdentity } from "./memory_key";
 import { findRepoRoot, normalizeRepoRelativeOutputPath, resolveRepoOutputPath } from "./repo";
 import { parseAgentTarget, renderAgentSkill, skillPathForLocation, writeCodexSkillReferences, type AgentTarget } from "./skills";
 import type { AgentMemoryConfig, RepoInfo } from "./types";
@@ -21,6 +22,9 @@ export interface InitOptions {
   installHooks: boolean;
   skillLocation?: string;
   instructionsFiles?: string[];
+  local?: boolean;
+  wrapper?: boolean;
+  memoryKey?: string;
 }
 
 export interface InitAction {
@@ -33,6 +37,7 @@ export interface InitResult {
   repo: RepoInfo;
   actions: InitAction[];
   warnings: string[];
+  commandPrefix: "agent-memory" | "bin/memory";
 }
 
 export function initRepository(options: InitOptions): InitResult {
@@ -40,10 +45,16 @@ export function initRepository(options: InitOptions): InitResult {
   const actions: InitAction[] = [];
   const warnings = [...repo.warnings];
   const existingConfigPath = path.join(repo.root, "agent-memory.config.yaml");
-  const config =
-    !options.force && fs.existsSync(existingConfigPath)
-      ? structuredClone(loadConfig({ repoRoot: repo.root }).config)
-      : defaultConfig();
+  const hasExistingConfig = fs.existsSync(existingConfigPath);
+  const config = hasExistingConfig
+    ? existingInitConfig(repo.root, options)
+    : newInitConfig(repo.root, options);
+
+  assertCompatibleInitStorageOptions(config, options, hasExistingConfig);
+
+  const wrapperPath = path.join(repo.root, "bin/memory");
+  const writesWrapper = Boolean(options.wrapper || options.local || config.database_scope === "local");
+  const commandPrefix = writesWrapper || fs.existsSync(wrapperPath) ? "bin/memory" : "agent-memory";
   const agents =
     options.agents.length > 0
       ? options.agents
@@ -80,9 +91,9 @@ export function initRepository(options: InitOptions): InitResult {
     actions
   );
   const memoryRoot = resolveConfiguredPath(repo.root, config.memory_root);
-  writeFile(repo.root, path.join(memoryRoot, "README.md"), memoryReadmeTemplate(), options.force, actions);
+  writeFile(repo.root, path.join(memoryRoot, "README.md"), memoryReadmeTemplate(config), options.force, actions);
   for (const instructionPath of config.agent_instructions.paths) {
-    ensureAgentInstructionsSection(repo.root, instructionPath, config, actions);
+    ensureAgentInstructionsSection(repo.root, instructionPath, config, actions, commandPrefix);
   }
 
   for (const gitkeepPath of [
@@ -97,14 +108,16 @@ export function initRepository(options: InitOptions): InitResult {
     writeFile(repo.root, path.join(memoryRoot, gitkeepPath), "", options.force, actions);
   }
 
-  writeExecutable(repo.root, "bin/memory", wrapperTemplate(options.packageManager), options.force, actions);
+  if (writesWrapper) {
+    writeExecutable(repo.root, "bin/memory", wrapperTemplate(options.packageManager), options.force, actions);
+  }
   ensureGitignoreEntry(repo.root, ".agent-memory/", actions);
 
   if (agents.includes("codex")) {
     const skillAction = writeFile(
       repo.root,
       config.agent_skills.codex.path,
-      renderAgentSkill({ agent: "codex", config, commandPrefix: "bin/memory" }),
+      renderAgentSkill({ agent: "codex", config, commandPrefix }),
       options.force,
       actions
     );
@@ -124,14 +137,14 @@ export function initRepository(options: InitOptions): InitResult {
     writeFile(
       repo.root,
       config.agent_skills.generic.path,
-      renderAgentSkill({ agent: "generic", config, commandPrefix: "bin/memory" }),
+      renderAgentSkill({ agent: "generic", config, commandPrefix }),
       options.force,
       actions
     );
   }
 
   if (options.installHooks) {
-    const hookResult = installMemoryHooks({ cwd: repo.root, force: options.force });
+    const hookResult = installMemoryHooks({ cwd: repo.root, force: options.force, commandPrefix });
     actions.push(...hookResult.actions);
     warnings.push(...hookResult.warnings.filter((warning) => !warnings.includes(warning)));
   }
@@ -139,8 +152,73 @@ export function initRepository(options: InitOptions): InitResult {
   return {
     repo,
     actions,
-    warnings
+    warnings,
+    commandPrefix
   };
+}
+
+function existingInitConfig(repoRoot: string, options: InitOptions): AgentMemoryConfig {
+  let config: AgentMemoryConfig;
+  try {
+    config = structuredClone(loadConfig({ repoRoot }).config);
+  } catch (error) {
+    if (!options.force) throw error;
+    return newInitConfig(repoRoot, options);
+  }
+  if (!options.force) return config;
+
+  if (options.local) {
+    config.database_scope = "local";
+  } else if (options.memoryKey !== undefined) {
+    deriveRepositoryIdentity(repoRoot);
+    config.version = 2;
+    config.database_scope = "global";
+    config.memory_key = deriveInitMemoryKey({ repoRoot, explicitMemoryKey: options.memoryKey });
+  }
+
+  return config;
+}
+
+function newInitConfig(repoRoot: string, options: InitOptions): AgentMemoryConfig {
+  const config = defaultConfig();
+
+  if (options.local) {
+    return config;
+  }
+
+  config.version = 2;
+  config.database_scope = "global";
+  deriveRepositoryIdentity(repoRoot);
+  config.memory_key = deriveInitMemoryKey({ repoRoot, explicitMemoryKey: options.memoryKey });
+  return config;
+}
+
+function assertCompatibleInitStorageOptions(
+  config: AgentMemoryConfig,
+  options: InitOptions,
+  hasExistingConfig: boolean
+): void {
+  if (options.local && options.wrapper) {
+    throw new AgentMemoryError("--local cannot be combined with --wrapper.", {
+      details: ["Local compatibility mode already creates bin/memory; use --wrapper only with global storage."]
+    });
+  }
+
+  if (options.local && options.memoryKey !== undefined) {
+    throw new AgentMemoryError("--local cannot be combined with --memory-key.", {
+      details: ["Local compatibility mode writes a version 1 config without global storage fields."]
+    });
+  }
+
+  if (!hasExistingConfig || options.force) return;
+
+  if (options.local && config.database_scope !== "local") {
+    throw new AgentMemoryError("Existing config uses global database storage; --local requires --force to replace it.");
+  }
+
+  if (options.memoryKey !== undefined && options.memoryKey !== config.memory_key) {
+    throw new AgentMemoryError("Existing config has a different memory_key; --memory-key requires --force to replace it.");
+  }
 }
 
 function writeFile(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): InitAction {
@@ -234,12 +312,13 @@ export function ensureAgentInstructionsSection(
   repoRoot: string,
   instructionPath: string,
   config: AgentMemoryConfig,
-  actions: InitAction[]
+  actions: InitAction[],
+  commandPrefix: "agent-memory" | "bin/memory" = "bin/memory"
 ): void {
   const relativePath = normalizeInstructionFilePath(repoRoot, instructionPath);
   const absolutePath = resolveOutputPath(repoRoot, relativePath);
   const existing = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : "";
-  const update = buildAgentsMemoryContent(existing, config);
+  const update = buildAgentsMemoryContent(existing, config, commandPrefix);
 
   if (update.status !== "skipped") {
     fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
@@ -255,9 +334,10 @@ export function ensureAgentsMemorySection(repoRoot: string, actions: InitAction[
 
 export function buildAgentsMemoryContent(
   existing: string,
-  config: AgentMemoryConfig = defaultConfig()
+  config: AgentMemoryConfig = defaultConfig(),
+  commandPrefix: "agent-memory" | "bin/memory" = "bin/memory"
 ): { content: string; status: "created" | "skipped" | "updated"; detail: string } {
-  const section = agentsMemorySection(config);
+  const section = agentsMemorySection(config, commandPrefix);
 
   if (existing.includes(section)) {
     return { content: existing, status: "skipped", detail: "agent-memory section already present" };
@@ -330,7 +410,10 @@ function findStandaloneMarker(content: string, marker: string, fromIndex = 0): {
   return null;
 }
 
-function memoryReadmeTemplate(): string {
+function memoryReadmeTemplate(config: AgentMemoryConfig): string {
+  const generatedStorage = config.database_scope === "global"
+    ? "The SQLite cache is user-local global state resolved by `agent-memory`. Repository-local plan runs live in `.agent-memory/plans/`."
+    : "Generated memory lives in `.agent-memory/`.";
   return `# Agent Memory
 
 This repository uses \`agent-memory\` for durable agent-readable memory.
@@ -344,19 +427,22 @@ Canonical memory lives in:
 - \`plans/**/*.yaml\`
 - \`profiles/**/*.yaml\`
 
-Generated memory lives in \`.agent-memory/\` and should not be committed.
+${generatedStorage} Generated state should not be committed.
 `;
 }
 
-function agentsMemorySection(config: AgentMemoryConfig): string {
+function agentsMemorySection(config: AgentMemoryConfig, commandPrefix: "agent-memory" | "bin/memory"): string {
   const memoryRoot = config.memory_root.replace(/[\\/]+$/, "");
+  const generatedStorage = config.database_scope === "global"
+    ? "The SQLite cache is user-local global state resolved at runtime by `agent-memory`. Repository-local plan runs and other checkout state live in `.agent-memory/`."
+    : "Generated memory lives in `.agent-memory/`.";
 
   return `<!-- agent-memory:start -->
 ## Agent Memory Knowledge Base
 
 Use the repo-memory skill or instruction file whenever it is available. This section is the repo-level fallback and requirement.
 
-Durable repository knowledge lives in \`${memoryRoot}/\` and must stay versioned and reviewable. Generated memory lives in \`.agent-memory/\` and must not be committed.
+Durable repository knowledge lives in \`${memoryRoot}/\` and must stay versioned and reviewable. ${generatedStorage} Generated state must not be committed.
 
 Memory artifacts:
 
@@ -372,11 +458,11 @@ Memory artifacts:
 
 Before non-trivial work:
 
-1. Run \`bin/memory sync\`.
-2. Run \`bin/memory context --task "<task>"\`.
-3. If files are known, run \`bin/memory context --changed-files <file1> <file2>\`.
-4. If working from a diff, run \`bin/memory context --git-diff\`.
-5. Use \`bin/memory query\`, \`bin/memory show\`, or \`bin/memory system\` for precise claims, graph links, recipes, or watched-file context.
+1. Run \`${commandPrefix} sync\`.
+2. Run \`${commandPrefix} context --task "<task>"\`.
+3. If files are known, run \`${commandPrefix} context --changed-files <file1> <file2>\`.
+4. If working from a diff, run \`${commandPrefix} context --git-diff\`.
+5. Use \`${commandPrefix} query\`, \`${commandPrefix} show\`, or \`${commandPrefix} system\` for precise claims, graph links, recipes, or watched-file context.
 6. If context includes matched recipes, follow their required claims, verification, and memory-update prompts.
 7. If context includes a plan stage, work that stage unless the user broadens scope.
 8. If context includes profile traits, treat them as repo guidance below system, developer, user, and repository instruction-file guidance.
@@ -406,7 +492,7 @@ Choose the narrowest suitable artifact:
 
 A claim tells future agents what is true or must remain true. A recipe tells future agents how to perform a recurring task safely. Do not create a claim merely because code changed or coverage reported a gap, and do not create placeholder memory to satisfy coverage.
 
-\`bin/memory new claim\` and \`bin/memory new recipe\` create \`needs_review\` drafts. Claims start with low confidence. Replace every TODO, complete verification, and only then promote an artifact to \`current\`. Current claims or recipes containing TODO placeholders fail validation.
+\`${commandPrefix} new claim\` and \`${commandPrefix} new recipe\` create \`needs_review\` drafts. Claims start with low confidence. Replace every TODO, complete verification, and only then promote an artifact to \`current\`. Current claims or recipes containing TODO placeholders fail validation.
 
 When claim verification succeeds, record the tested full Git commit object ID in \`last_verified_commit\`. Do not use a movable ref such as a branch or \`HEAD\`. Use \`confidence: verified\` only when that commit is present. Audit warns when supporting files changed after the recorded verification commit.
 
@@ -421,9 +507,9 @@ Do not attach claims to denied paths indirectly through \`related_files\`. If a 
 After non-trivial work:
 
 1. Update memory in the same change when durable repository knowledge changed.
-2. Use \`bin/memory templates list\`, \`bin/memory new claim\`, or \`bin/memory new recipe\` instead of inventing artifact formats.
-3. Run \`bin/memory validate\` and \`bin/memory sync\` before finishing changes that touch memory.
-4. Run \`bin/memory audit --git-diff\` before finishing when canonical memory files changed.
+2. Use \`${commandPrefix} templates list\`, \`${commandPrefix} new claim\`, or \`${commandPrefix} new recipe\` instead of inventing artifact formats.
+3. Run \`${commandPrefix} validate\` and \`${commandPrefix} sync\` before finishing changes that touch memory.
+4. Run \`${commandPrefix} audit --git-diff\` before finishing when canonical memory files changed.
 
 Update targets:
 

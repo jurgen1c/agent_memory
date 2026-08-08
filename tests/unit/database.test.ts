@@ -46,7 +46,8 @@ describe("resolveDatabaseLocation", () => {
         dbPath: "tmp/override.sqlite",
         globalLocation: {
           databasePath: path.resolve("fixtures/global/memory.sqlite"),
-          checkoutFingerprint: "0123456789abcdef01234567"
+          checkoutFingerprint: "0123456789abcdef01234567",
+          repositoryIdentity: "remote:github.com/jurgen1c/agent_memory"
         }
       })
     ).toEqual({
@@ -86,7 +87,8 @@ describe("resolveDatabaseLocation", () => {
         repoRoot,
         globalLocation: {
           databasePath,
-          checkoutFingerprint: "0123456789abcdef01234567"
+          checkoutFingerprint: "0123456789abcdef01234567",
+          repositoryIdentity: "remote:github.com/jurgen1c/agent_memory"
         }
       })
     ).toEqual({
@@ -94,7 +96,8 @@ describe("resolveDatabaseLocation", () => {
       scope: "global",
       source: "global_registry",
       memoryKey: "jurgen1c-agent-memory",
-      checkoutFingerprint: "0123456789abcdef01234567"
+      checkoutFingerprint: "0123456789abcdef01234567",
+      repositoryIdentity: "remote:github.com/jurgen1c/agent_memory"
     });
   });
 
@@ -108,7 +111,8 @@ describe("resolveDatabaseLocation", () => {
         repoRoot,
         globalLocation: {
           databasePath: path.resolve("fixtures/global/memory.sqlite"),
-          checkoutFingerprint: "0123456789abcdef01234567"
+          checkoutFingerprint: "0123456789abcdef01234567",
+          repositoryIdentity: "remote:github.com/jurgen1c/agent_memory"
         }
       })
     ).toThrow("Global database scope requires config field memory_key.");

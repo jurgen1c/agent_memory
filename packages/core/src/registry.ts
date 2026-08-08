@@ -5,14 +5,13 @@ import path from "node:path";
 import { isPathInside, nearestExistingAncestor, resolveContainedPath } from "@jurgen1c/agent-core/repository";
 import { AgentMemoryError } from "./errors";
 import { isFullGitObjectId, repositoryObjectIdLength } from "./git";
+import { isValidMemoryKey } from "./memory_key";
 
 export const REGISTRY_VERSION = 1;
 export const DEFAULT_REGISTRY_LOCK_TIMEOUT_MS = 1_000;
 export const DEFAULT_REGISTRY_LOCK_RETRY_MS = 25;
 
-const MEMORY_KEY_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9_-])?$/;
 const CHECKOUT_FINGERPRINT_PATTERN = /^[0-9a-f]{24}$/;
-const WINDOWS_DEVICE_NAME_PATTERN = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
 export interface RegistryCheckoutRecord extends Record<string, unknown> {
   repo_root: string;
@@ -684,9 +683,10 @@ function isActiveRepositoryRoot(repoRoot: string): boolean {
 }
 
 function assertMemoryKey(memoryKey: string): void {
-  const basename = memoryKey.split(".", 1)[0];
-  if (!MEMORY_KEY_PATTERN.test(memoryKey) || WINDOWS_DEVICE_NAME_PATTERN.test(basename)) {
-    throw new RegistryError(`Invalid memory key for global storage: ${JSON.stringify(memoryKey)}.`);
+  if (!isValidMemoryKey(memoryKey)) {
+    throw new RegistryError("Invalid memory key for global storage.", {
+      details: ["Use 1-128 lowercase letters, digits, dots, underscores, or hyphens without secrets or path separators."]
+    });
   }
 }
 

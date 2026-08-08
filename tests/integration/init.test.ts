@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -10,8 +11,9 @@ import { initRepository } from "../../packages/core/src/init";
 describe("init command", () => {
   test("scaffolds an empty repository idempotently", async () => {
     const repoRoot = makeGitRepo();
+    git(repoRoot, ["remote", "add", "origin", "git@github.com:Acme-Inc/Sample_Repo.git"]);
 
-    const first = await dispatch(["init", "--yes", "--package-manager", "npm"], { cwd: repoRoot });
+    const first = await dispatch(["init", "--yes"], { cwd: repoRoot });
     expect(first.exitCode).toBe(0);
     expect(first.stdout).toContain("created");
 
@@ -25,7 +27,6 @@ describe("init command", () => {
       "docs/agent-memory/plans/.gitkeep",
       "docs/agent-memory/profiles/.gitkeep",
       "docs/agent-memory/waivers/.gitkeep",
-      "bin/memory",
       "AGENTS.md",
       ".codex/skills/repo-memory/SKILL.md",
       ".codex/skills/repo-memory/references/claims.md",
@@ -44,6 +45,10 @@ describe("init command", () => {
 
     expect(fs.readFileSync(path.join(repoRoot, ".gitignore"), "utf8")).toContain(".agent-memory/");
     const config = fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8");
+    expect(config).toContain("version: 2");
+    expect(config).toContain("memory_key: acme-inc-sample-repo");
+    expect(config).toContain("database_scope: global");
+    expect(config).not.toContain(os.homedir());
     expect(config).toContain("# Canonical memory source directory.");
     expect(config).toContain("# Defaults for agent-memory context when command flags are omitted.");
     expect(loadConfig({ repoRoot }).config.context.default_budget).toBe("medium");
@@ -51,13 +56,13 @@ describe("init command", () => {
     expect(agents).toContain("<!-- agent-memory:start -->");
     expect(agents).toContain("## Agent Memory Knowledge Base");
     expect(agents).toContain("Use the repo-memory skill or instruction file whenever it is available.");
-    expect(agents).toContain("bin/memory context --task");
+    expect(agents).toContain("agent-memory context --task");
     expect(agents).toContain("After non-trivial work:");
     expect(agents).toContain("If context includes matched recipes");
     expect(agents).toContain("If context includes a plan stage");
     expect(agents).toContain("If context includes profile traits");
     expect(agents).toContain("Update memory in the same change when durable repository knowledge changed.");
-    expect(agents).toContain("bin/memory audit --git-diff");
+    expect(agents).toContain("agent-memory audit --git-diff");
     expect(agents).toContain("Recipes for new or changed repeatable workflows.");
     expect(agents).toContain("Plan templates for reusable multi-stage workflows");
     expect(agents).toContain("Profile traits for reusable retrieval/output/verification/risk/scope guidance.");
@@ -66,18 +71,211 @@ describe("init command", () => {
     expect(agents).toContain("A new claim should normally satisfy at least four");
     expect(agents).toContain("Do not create a claim merely because code changed or coverage reported a gap");
     expect(agents).toContain("Allowed claim sources: all repository paths");
-    const wrapper = fs.readFileSync(path.join(repoRoot, "bin/memory"), "utf8");
-    expect(wrapper).toContain('LOCAL_CLI="${REPO_ROOT}/node_modules/.bin/agent-memory"');
-    expect(wrapper).toContain('AGENT_MEMORY_ALLOW_NPX:-}');
-    expect(wrapper).toContain("exec npx -y @jurgen1c/agent-memory-cli");
-    expect(wrapper).not.toContain("npx agent-memory");
-    expect(fs.readFileSync(path.resolve("bin/memory"), "utf8")).toBe(wrapper);
-    expect(fs.statSync(path.join(repoRoot, "bin/memory")).mode & 0o111).toBeGreaterThan(0);
+    expect(fs.existsSync(path.join(repoRoot, "bin/memory"))).toBe(false);
+    expect(fs.readFileSync(path.join(repoRoot, ".codex/skills/repo-memory/SKILL.md"), "utf8")).toContain(
+      "agent-memory sync"
+    );
+    expect(first.stdout).toContain("agent-memory sync");
+    expect(first.stdout).toContain('agent-memory context --task "<task>"');
 
     const second = await dispatch(["init", "--yes"], { cwd: repoRoot });
     expect(second.exitCode).toBe(0);
     expect(second.stdout).toContain("skipped");
+    expect(fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8")).toBe(config);
     expect(fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")).toBe(agents);
+  });
+
+  test("supports explicit local and global wrapper modes", async () => {
+    const localRoot = makeGitRepo();
+    const local = await dispatch(["init", "--yes", "--local", "--package-manager", "npm"], { cwd: localRoot });
+    const localConfig = loadConfig({ repoRoot: localRoot }).config;
+    const localWrapper = fs.readFileSync(path.join(localRoot, "bin/memory"), "utf8");
+
+    expect(local.exitCode).toBe(0);
+    expect(localConfig.version).toBe(1);
+    expect(localConfig.database_scope).toBe("local");
+    expect(localConfig.memory_key).toBeUndefined();
+
+    const versionTwoRoot = makeGitRepo();
+    await dispatch(["init", "--yes", "--memory-key", "stable-version-two"], { cwd: versionTwoRoot });
+    await dispatch(["init", "--yes", "--force", "--local"], { cwd: versionTwoRoot });
+    const versionTwoLocalConfig = loadConfig({ repoRoot: versionTwoRoot }).config;
+    expect(versionTwoLocalConfig.version).toBe(2);
+    expect(versionTwoLocalConfig.database_scope).toBe("local");
+    expect(versionTwoLocalConfig.memory_key).toBe("stable-version-two");
+    expect(localWrapper).toContain('LOCAL_CLI="${REPO_ROOT}/node_modules/.bin/agent-memory"');
+    expect(localWrapper).toContain("exec npx -y @jurgen1c/agent-memory-cli");
+    expect(fs.readFileSync(path.join(localRoot, "AGENTS.md"), "utf8")).toContain("bin/memory context --task");
+    expect(local.stdout).toContain("bin/memory sync");
+
+    const wrapperRoot = makeGitRepo();
+    const wrapper = await dispatch(["init", "--yes", "--wrapper", "--memory-key", "shared-repository"], {
+      cwd: wrapperRoot
+    });
+    const wrapperConfig = loadConfig({ repoRoot: wrapperRoot }).config;
+
+    expect(wrapper.exitCode).toBe(0);
+    expect(wrapperConfig.version).toBe(2);
+    expect(wrapperConfig.database_scope).toBe("global");
+    expect(wrapperConfig.memory_key).toBe("shared-repository");
+    expect(fs.existsSync(path.join(wrapperRoot, "bin/memory"))).toBe(true);
+    expect(fs.readFileSync(path.join(wrapperRoot, "AGENTS.md"), "utf8")).toContain("bin/memory context --task");
+  });
+
+  test("rejects conflicting local and global-wrapper modes before writing", async () => {
+    const repoRoot = makeGitRepo();
+
+    await expect(dispatch(["init", "--yes", "--local", "--wrapper"], { cwd: repoRoot })).rejects.toThrow(
+      "--local cannot be combined with --wrapper."
+    );
+    expect(fs.readdirSync(repoRoot).filter((entry) => entry !== ".git")).toEqual([]);
+  });
+
+  test("validates global memory keys before writing and forcefully regenerates deterministic init output", async () => {
+    const invalidRoot = makeGitRepo();
+
+    await expect(dispatch(["init", "--yes", "--memory-key", "CON"], { cwd: invalidRoot })).rejects.toThrow(
+      "Could not derive a valid memory_key"
+    );
+    expect(fs.readdirSync(invalidRoot).filter((entry) => entry !== ".git")).toEqual([]);
+
+    const repoRoot = makeGitRepo();
+    await dispatch(["init", "--yes", "--memory-key", "first-key"], { cwd: repoRoot });
+    fs.writeFileSync(path.join(repoRoot, "docs/agent-memory/README.md"), "custom\n");
+
+    const forced = await dispatch(["init", "--yes", "--force", "--memory-key", "replacement-key"], { cwd: repoRoot });
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(forced.exitCode).toBe(0);
+    expect(config.memory_key).toBe("replacement-key");
+    expect(fs.readFileSync(path.join(repoRoot, "docs/agent-memory/README.md"), "utf8")).toContain("# Agent Memory");
+    expect(fs.existsSync(path.join(repoRoot, "bin/memory"))).toBe(false);
+  });
+
+  test("preserves existing storage identity under force unless a storage change is explicit", async () => {
+    const globalRoot = makeGitRepo();
+    git(globalRoot, ["remote", "add", "origin", "git@github.com:acme/first.git"]);
+    await dispatch(["init", "--yes"], { cwd: globalRoot });
+    git(globalRoot, ["remote", "set-url", "origin", "git@github.com:acme/second.git"]);
+
+    await dispatch(["init", "--yes", "--force"], { cwd: globalRoot });
+    expect(loadConfig({ repoRoot: globalRoot }).config.memory_key).toBe("acme-first");
+
+    const localRoot = makeGitRepo();
+    await dispatch(["init", "--yes", "--local"], { cwd: localRoot });
+    await dispatch(["init", "--yes", "--force"], { cwd: localRoot });
+    const localConfig = loadConfig({ repoRoot: localRoot }).config;
+    expect(localConfig.version).toBe(1);
+    expect(localConfig.database_scope).toBe("local");
+    expect(localConfig.memory_key).toBeUndefined();
+  });
+
+  test("runs the advertised global sync against user-local generated storage", async () => {
+    const repoRoot = makeGitRepo();
+    const globalHome = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-init-global-")), "home");
+    const cliPath = path.resolve("packages/cli/src/index.ts");
+    await dispatch(["init", "--yes", "--memory-key", "syncable-repository"], { cwd: repoRoot });
+
+    const result = spawnSync("bun", [cliPath, "sync"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { ...process.env, AGENT_MEMORY_HOME: globalHome }
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Agent Memory synced.");
+    const registry = JSON.parse(fs.readFileSync(path.join(globalHome, "registry.json"), "utf8"));
+    const checkouts = registry.memories["syncable-repository"].checkouts;
+    const checkout = checkouts[Object.keys(checkouts)[0]];
+    expect(checkout.database_path).toStartWith(globalHome);
+    expect(fs.existsSync(checkout.database_path)).toBe(true);
+    const database = new Database(checkout.database_path, { readonly: true });
+    const metadata = Object.fromEntries(
+      (database.query("SELECT key, value FROM compile_metadata").all() as Array<{ key: string; value: string }>).map(
+        (row) => [row.key, row.value]
+      )
+    );
+    database.close();
+    expect(metadata.memory_key).toBe("syncable-repository");
+    expect(metadata.checkout_fingerprint).toBe(Object.keys(checkouts)[0]);
+    expect(metadata.repository_identity).toMatch(/^checkout:[0-9a-f]{64}$/);
+    expect(metadata.repo_root).toBe(fs.realpathSync(repoRoot));
+    expect(metadata.config_hash).toBe(checkout.config_hash);
+    expect(fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8")).not.toContain(globalHome);
+
+    const tamperedDatabase = new Database(checkout.database_path);
+    tamperedDatabase
+      .query("UPDATE compile_metadata SET value = ? WHERE key = 'repository_identity'")
+      .run("checkout:tampered");
+    tamperedDatabase.close();
+
+    for (const command of [["query", "anything"], ["doctor"]]) {
+      const rejectedRead = spawnSync("bun", [cliPath, ...command], {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: { ...process.env, AGENT_MEMORY_HOME: globalHome }
+      });
+
+      expect(rejectedRead.status).not.toBe(0);
+      expect(rejectedRead.stderr).toContain("Global database provenance does not match the current checkout.");
+      expect(rejectedRead.stderr).toContain("agent-memory compile");
+    }
+
+    const repaired = spawnSync("bun", [cliPath, "sync"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { ...process.env, AGENT_MEMORY_HOME: globalHome }
+    });
+    const verifiedRead = spawnSync("bun", [cliPath, "query", "anything"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { ...process.env, AGENT_MEMORY_HOME: globalHome }
+    });
+
+    expect(repaired.status).toBe(0);
+    expect(verifiedRead.status).toBe(0);
+  });
+
+  test("rejects unsafe global origins before writing any files", async () => {
+    const repoRoot = makeGitRepo();
+    git(repoRoot, ["remote", "add", "origin", "ssh://alice@git.example.test:2222/org/repo.git"]);
+
+    await expect(dispatch(["init", "--yes"], { cwd: repoRoot })).rejects.toThrow(
+      "Could not derive a safe repository identity"
+    );
+    expect(fs.readdirSync(repoRoot).filter((entry) => entry !== ".git")).toEqual([]);
+  });
+
+  test("rejects unsafe origins before forcing an existing local config global", async () => {
+    const repoRoot = makeGitRepo();
+    git(repoRoot, ["remote", "add", "origin", "ssh://alice@git.example.test:2222/org/repo.git"]);
+    await dispatch(["init", "--yes", "--local"], { cwd: repoRoot });
+    const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+    const readmePath = path.join(repoRoot, "docs/agent-memory/README.md");
+    const originalConfig = fs.readFileSync(configPath, "utf8");
+    fs.writeFileSync(readmePath, "custom local memory guidance\n");
+
+    await expect(
+      dispatch(["init", "--yes", "--force", "--memory-key", "forced-global"], { cwd: repoRoot })
+    ).rejects.toThrow("Could not derive a safe repository identity");
+
+    expect(fs.readFileSync(configPath, "utf8")).toBe(originalConfig);
+    expect(fs.readFileSync(readmePath, "utf8")).toBe("custom local memory guidance\n");
+  });
+
+  test("forcefully replaces an unreadable config in explicit local mode", async () => {
+    const repoRoot = makeGitRepo();
+    const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+    fs.writeFileSync(configPath, "version: [invalid\n");
+
+    const result = await dispatch(["init", "--yes", "--force", "--local"], { cwd: repoRoot });
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(result.exitCode).toBe(0);
+    expect(config.version).toBe(1);
+    expect(config.database_scope).toBe("local");
+    expect(config.memory_key).toBeUndefined();
+    expect(fs.existsSync(path.join(repoRoot, "bin/memory"))).toBe(true);
   });
 
   test("escapes claim-source policy values in managed instructions", async () => {
@@ -447,7 +645,7 @@ Keep this footer too.
 
   test("creates a wrapper that can execute the built CLI through AGENT_MEMORY_CLI", async () => {
     const repoRoot = makeGitRepo();
-    await dispatch(["init", "--yes", "--package-manager", "bun"], { cwd: repoRoot });
+    await dispatch(["init", "--yes", "--wrapper", "--package-manager", "bun"], { cwd: repoRoot });
 
     const cliPath = path.resolve("packages/cli/src/index.ts");
     const helperPath = path.join(repoRoot, "agent-memory-dev-helper");
@@ -469,7 +667,7 @@ Keep this footer too.
 
   test("writes a bun wrapper with the scoped package fallback", async () => {
     const repoRoot = makeGitRepo();
-    await dispatch(["init", "--yes", "--package-manager", "bun"], { cwd: repoRoot });
+    await dispatch(["init", "--yes", "--wrapper", "--package-manager", "bun"], { cwd: repoRoot });
 
     const wrapper = fs.readFileSync(path.join(repoRoot, "bin/memory"), "utf8");
 
@@ -479,7 +677,7 @@ Keep this footer too.
 
   test("does not invoke a package-manager fallback automatically in non-interactive environments", async () => {
     const repoRoot = makeGitRepo();
-    await dispatch(["init", "--yes", "--package-manager", "npm"], { cwd: repoRoot });
+    await dispatch(["init", "--yes", "--wrapper", "--package-manager", "npm"], { cwd: repoRoot });
 
     const result = spawnSync("/bin/bash", ["bin/memory", "help"], {
       cwd: repoRoot,
@@ -538,7 +736,7 @@ Keep this footer too.
     for (const hookName of ["post-merge", "post-checkout", "post-rewrite"]) {
       const hookPath = path.join(repoRoot, ".git/hooks", hookName);
       expect(fs.existsSync(hookPath)).toBe(true);
-      expect(fs.readFileSync(hookPath, "utf8")).toContain("bin/memory sync");
+      expect(fs.readFileSync(hookPath, "utf8")).toContain("agent-memory sync");
     }
   });
 
@@ -658,4 +856,9 @@ function makeGitRepo(): string {
   const init = spawnSync("git", ["init"], { cwd: repoRoot, encoding: "utf8" });
   expect(init.status).toBe(0);
   return repoRoot;
+}
+
+function git(cwd: string, args: string[]): void {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  expect(result.status).toBe(0);
 }
