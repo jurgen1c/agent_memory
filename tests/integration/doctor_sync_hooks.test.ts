@@ -239,7 +239,7 @@ describe("install-hooks command", () => {
   });
 
   test("runs wrapper hooks from the repository root and keeps sync failures non-blocking", async () => {
-    const cwd = makeGitRepo();
+    const cwd = makeGitRepo("agent-memory-hook's-");
     await dispatch(["init", "--yes", "--wrapper"], { cwd });
     const wrapperPath = path.join(cwd, "bin/memory");
     const observedCwdPath = path.join(cwd, ".agent-memory-test-cwd");
@@ -248,9 +248,12 @@ describe("install-hooks command", () => {
       `#!/usr/bin/env bash\nprintf '%s' "$PWD" > ${JSON.stringify(observedCwdPath)}\nexit 1\n`
     );
     fs.chmodSync(wrapperPath, 0o755);
-    await dispatch(["install-hooks"], { cwd });
     const nested = path.join(cwd, "src/nested");
     fs.mkdirSync(nested, { recursive: true });
+    const installResult = await dispatch(["install-hooks"], { cwd: nested });
+
+    const quotedCwd = cwd.replaceAll("'", "'\"'\"'");
+    expect(installResult.stdout).toContain(`Command: cd -- '${quotedCwd}' && bin/memory sync`);
 
     const result = spawnSync(path.join(cwd, ".git/hooks/post-checkout"), [], { cwd: nested, encoding: "utf8" });
 
@@ -329,8 +332,8 @@ function copyFixture(source: string): string {
   return target;
 }
 
-function makeGitRepo(): string {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+function makeGitRepo(prefix = "agent-memory-hooks-"): string {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   git(cwd, ["init"]);
   return cwd;
 }

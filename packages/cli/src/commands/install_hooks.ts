@@ -48,11 +48,14 @@ function parseInstallHooksArgs(args: string[]): { force: boolean; json: boolean 
 }
 
 function renderInstallHooksResult(result: HookInstallResult): string {
+  const syncCommand = result.commandPrefix === "bin/memory"
+    ? `cd -- ${shellQuote(result.repo.root)} && bin/memory sync`
+    : "agent-memory sync";
   const lines = [
     result.actions.length > 0 ? "Agent Memory hooks installed." : "No Agent Memory hooks installed.",
     "",
     `Repo root: ${result.repo.root}`,
-    `Command: ${result.commandPrefix} sync`
+    `Command: ${syncCommand}`
   ];
 
   for (const warning of result.warnings) {
@@ -67,4 +70,8 @@ function renderInstallHooksResult(result: HookInstallResult): string {
   }
 
   return lines.join("\n");
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
 }

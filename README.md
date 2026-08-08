@@ -94,7 +94,7 @@ Init options:
 | `--agent generic` | Install only the generic agent instruction file. |
 | `--skill-location .agents` | Install the selected agent skill under `.agents/skills/repo-memory/SKILL.md` and write that path to config. Requires exactly one `--agent`. |
 | `--instructions-file CLAUDE.md` | Append managed repository guidance to this file and persist it for upgrades. Repeat the option to manage files such as both `AGENTS.md` and `CLAUDE.md`. |
-| `--install-hooks` | Install configured non-blocking git hooks that resolve the repository root before using `agent-memory`, or `bin/memory` when that wrapper exists. |
+| `--install-hooks` | Install configured non-blocking git hooks that resolve the repository root before using `agent-memory`, or `bin/memory` when that wrapper is readable and executable. |
 | `--force` | Overwrite existing scaffold files and hooks where supported. |
 
 ### Claim Relevance and Source Policy
