@@ -147,6 +147,18 @@ describe("init command", () => {
     expect(fs.statSync(wrapperPath).mode & 0o111).toBeGreaterThan(0);
   });
 
+  test("rejects a non-file wrapper path before writing scaffold files", async () => {
+    const repoRoot = makeGitRepo();
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    fs.mkdirSync(wrapperPath, { recursive: true });
+
+    await expect(dispatch(["init", "--yes", "--local"], { cwd: repoRoot })).rejects.toThrow(
+      "Wrapper path bin/memory is not a regular file."
+    );
+    expect(fs.existsSync(path.join(repoRoot, "agent-memory.config.yaml"))).toBe(false);
+    expect(fs.statSync(wrapperPath).isDirectory()).toBe(true);
+  });
+
   test("rejects conflicting local and global-wrapper modes before writing", async () => {
     const repoRoot = makeGitRepo();
 
