@@ -407,6 +407,34 @@ describe("agent-manifest command", () => {
     );
   });
 
+  test("uses the global command when a repository wrapper is not a usable regular file", async () => {
+    const repoRoot = makeGitRepo();
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    const globalHome = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-unusable-wrapper-global-")), "home");
+    await dispatch(["init", "--yes"], { cwd: repoRoot });
+    fs.mkdirSync(wrapperPath, { recursive: true });
+
+    const directoryResult = await runCliWithGlobalHome(repoRoot, globalHome);
+
+    expect(directoryResult.exitCode).toBe(0);
+    expect(JSON.parse(directoryResult.stdout).commandPrefix).toBe("agent-memory");
+
+    fs.rmdirSync(wrapperPath);
+    fs.writeFileSync(wrapperPath, "#!/usr/bin/env bash\nexec agent-memory \"$@\"\n");
+    fs.chmodSync(wrapperPath, 0o640);
+
+    const nonExecutableResult = await runCliWithGlobalHome(repoRoot, globalHome);
+
+    expect(nonExecutableResult.exitCode).toBe(0);
+    expect(JSON.parse(nonExecutableResult.stdout).commandPrefix).toBe("agent-memory");
+
+    fs.chmodSync(wrapperPath, 0o750);
+    const executableResult = await runCliWithGlobalHome(repoRoot, globalHome);
+
+    expect(executableResult.exitCode).toBe(0);
+    expect(JSON.parse(executableResult.stdout).commandPrefix).toBe("bin/memory");
+  });
+
   test("renders command help for phase 10 commands", async () => {
     const installSkill = await dispatch(["help", "install-skill"]);
     const manifest = await dispatch(["help", "agent-manifest"]);
@@ -424,6 +452,16 @@ function makeGitRepo(): string {
   const init = spawnSync("git", ["init"], { cwd: repoRoot, encoding: "utf8" });
   expect(init.status).toBe(0);
   return repoRoot;
+}
+
+function runCliWithGlobalHome(repoRoot: string, globalHome: string): { exitCode: number | null; stdout: string } {
+  const result = spawnSync("bun", [path.resolve("packages/cli/src/index.ts"), "agent-manifest", "--json"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, AGENT_MEMORY_HOME: globalHome }
+  });
+
+  return { exitCode: result.status, stdout: result.stdout };
 }
 
 function rewriteGenericSkillPath(repoRoot: string, skillPath: string): void {

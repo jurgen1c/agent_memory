@@ -285,6 +285,23 @@ agent_instructions:
     expect(fs.readFileSync(wrapperPath, "utf8")).toBe("#!/usr/bin/env bash\necho custom memory wrapper\n");
   });
 
+  test("preserves unreadable custom wrappers and renders a usable command prefix", async () => {
+    const repoRoot = makeRepo(oldConfig());
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
+    fs.writeFileSync(wrapperPath, "#!/usr/bin/env bash\necho protected custom wrapper\n");
+    fs.chmodSync(wrapperPath, 0o000);
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("bin/memory is not a readable regular file");
+    expect(fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")).toContain("agent-memory context --task");
+    expect(fs.statSync(wrapperPath).mode & 0o777).toBe(0o000);
+    fs.chmodSync(wrapperPath, 0o600);
+    expect(fs.readFileSync(wrapperPath, "utf8")).toContain("protected custom wrapper");
+  });
+
   test("is idempotent after writing the current support files", async () => {
     const repoRoot = makeRepo(oldConfig());
     fs.writeFileSync(path.join(repoRoot, "AGENTS.md"), oldAgents());

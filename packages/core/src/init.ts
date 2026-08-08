@@ -7,8 +7,16 @@ import { resolveConfiguredPath } from "./files";
 import { installMemoryHooks } from "./hooks";
 import { deriveInitMemoryKey, deriveRepositoryIdentity } from "./memory_key";
 import { findRepoRoot, normalizeRepoRelativeOutputPath, resolveRepoOutputPath } from "./repo";
-import { parseAgentTarget, renderAgentSkill, skillPathForLocation, writeCodexSkillReferences, type AgentTarget } from "./skills";
+import {
+  commandPrefixForRepo,
+  parseAgentTarget,
+  renderAgentSkill,
+  skillPathForLocation,
+  writeCodexSkillReferences,
+  type AgentTarget
+} from "./skills";
 import type { AgentMemoryConfig, RepoInfo } from "./types";
+import { inspectRepositoryWrapper, tryReadRepositoryWrapper, type RepositoryWrapperStatus } from "./wrapper";
 import { setYamlTopLevelValue } from "./yaml";
 
 export type PackageManager = "npm" | "bun";
@@ -52,10 +60,16 @@ export function initRepository(options: InitOptions): InitResult {
 
   assertCompatibleInitStorageOptions(config, options, hasExistingConfig);
 
-  const wrapperPath = path.join(repo.root, "bin/memory");
+  const wrapper = inspectRepositoryWrapper(repo.root);
   const writesWrapper = Boolean(options.wrapper || options.local || config.database_scope === "local");
-  assertCompatibleWrapperPath(wrapperPath, writesWrapper);
-  const commandPrefix = writesWrapper || isRegularWrapperPath(wrapperPath) ? "bin/memory" : "agent-memory";
+  assertCompatibleWrapperPath(wrapper, writesWrapper);
+  const existingWrapper = tryReadRepositoryWrapper(wrapper);
+  const generatedWrapperPackageManager =
+    existingWrapper === null ? null : detectGeneratedWrapperPackageManager(existingWrapper);
+  const willProvideUsableWrapper = Boolean(
+    writesWrapper && (options.force || !wrapper.exists || generatedWrapperPackageManager !== null)
+  );
+  const commandPrefix = willProvideUsableWrapper ? "bin/memory" : commandPrefixForRepo(repo.root);
   const agents =
     options.agents.length > 0
       ? options.agents
@@ -110,7 +124,15 @@ export function initRepository(options: InitOptions): InitResult {
   }
 
   if (writesWrapper) {
-    writeExecutable(repo.root, "bin/memory", wrapperTemplate(options.packageManager), options.force, actions);
+    writeExecutable(
+      repo.root,
+      "bin/memory",
+      wrapperTemplate(options.packageManager),
+      options.force,
+      actions,
+      generatedWrapperPackageManager,
+      commandPrefix
+    );
   }
   ensureGitignoreEntry(repo.root, ".agent-memory/", actions);
 
@@ -222,18 +244,14 @@ function assertCompatibleInitStorageOptions(
   }
 }
 
-function assertCompatibleWrapperPath(wrapperPath: string, writesWrapper: boolean): void {
-  if (!writesWrapper || !fs.existsSync(wrapperPath) || isRegularWrapperPath(wrapperPath)) {
+function assertCompatibleWrapperPath(wrapper: RepositoryWrapperStatus, writesWrapper: boolean): void {
+  if (!writesWrapper || !wrapper.exists || wrapper.isRegularFile) {
     return;
   }
 
   throw new AgentMemoryError("Wrapper path bin/memory is not a regular file.", {
     details: ["Move the existing path before initializing, or replace it with a wrapper file."]
   });
-}
-
-function isRegularWrapperPath(wrapperPath: string): boolean {
-  return fs.existsSync(wrapperPath) && fs.statSync(wrapperPath).isFile();
 }
 
 function writeFile(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): InitAction {
@@ -288,7 +306,15 @@ function ensureConfigFile(
   actions.push({ path: relativePath, status: "updated", detail: "updated managed instruction paths" });
 }
 
-function writeExecutable(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): void {
+function writeExecutable(
+  repoRoot: string,
+  relativePath: string,
+  content: string,
+  force: boolean,
+  actions: InitAction[],
+  generatedWrapperPackageManager: PackageManager | null,
+  commandPrefix: "agent-memory" | "bin/memory"
+): void {
   const action = writeFile(repoRoot, relativePath, content, force, actions);
   const absolutePath = resolveOutputPath(repoRoot, relativePath);
 
@@ -296,13 +322,12 @@ function writeExecutable(repoRoot: string, relativePath: string, content: string
     return;
   }
 
-  if (action.status === "skipped") {
-    const existing = fs.readFileSync(absolutePath, "utf8");
-
-    if (detectGeneratedWrapperPackageManager(existing) === null) {
-      action.detail = "custom wrapper preserved; use --force to replace it";
-      return;
-    }
+  if (action.status === "skipped" && generatedWrapperPackageManager === null) {
+    action.detail =
+      commandPrefix === "bin/memory"
+        ? "custom wrapper preserved; use --force to replace it"
+        : "custom wrapper preserved; using agent-memory because the wrapper is not readable and executable; use --force to replace it";
+    return;
   }
 
   fs.chmodSync(absolutePath, 0o755);
