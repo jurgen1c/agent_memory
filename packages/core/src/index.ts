@@ -19,6 +19,7 @@ export * from "./migration";
 export * from "./plans";
 export * from "./profiles";
 export * from "./repo";
+export * from "./registry";
 export * from "./retrieval";
 export * from "./recipes";
 export * from "./recipe_templates";
