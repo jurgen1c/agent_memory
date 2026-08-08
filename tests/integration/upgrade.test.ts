@@ -380,17 +380,24 @@ context:
     expect(loaded.config.context.include_inferred_edges_by_default).toBe(false);
   });
 
-  test("does not rewrite config with unknown fields unless forced", async () => {
+  test("adds defaults while preserving unknown config fields in dry-run and write modes", async () => {
     const repoRoot = makeRepo(`${oldConfig()}\ncustom_setting: true\n`);
+    const originalConfigText = fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8");
+
+    const dryRun = await dispatch(["upgrade"], { cwd: repoRoot });
+    expect(dryRun.exitCode).toBe(0);
+    expect(dryRun.stdout).toContain("would_update");
+    expect(dryRun.stdout).toContain("preserving unknown config fields");
+    expect(fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8")).toBe(originalConfigText);
 
     const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
     const configText = fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8");
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Unknown config field custom_setting");
-    expect(result.stdout).toContain("skipped");
+    expect(result.stdout).toContain("added missing defaults while preserving unknown config fields");
     expect(configText).toContain("custom_setting: true");
-    expect(configText).not.toContain("max_claim_frontmatter_length");
+    expect(configText).toContain("max_claim_frontmatter_length");
 
     const forced = await dispatch(["upgrade", "--write", "--force"], { cwd: repoRoot });
     const forcedConfigText = fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8");
@@ -399,6 +406,25 @@ context:
     expect(forced.stdout).toContain("will be removed because --force was passed");
     expect(forcedConfigText).not.toContain("custom_setting: true");
     expect(forcedConfigText).toContain("max_claim_frontmatter_length");
+  });
+
+  test("preserves unknown fields when upgrading a version 2 global config", async () => {
+    const repoRoot = makeRepo(`
+version: 2
+database_scope: global
+memory_key: jurgen1c-agent-memory
+future_global_option: retained
+`);
+
+    const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
+    const configText = fs.readFileSync(path.join(repoRoot, "agent-memory.config.yaml"), "utf8");
+    const config = loadConfig({ repoRoot }).config;
+
+    expect(result.exitCode).toBe(0);
+    expect(configText).toContain("future_global_option: retained");
+    expect(configText).toContain("memory_root: docs/agent-memory");
+    expect(config.database_scope).toBe("global");
+    expect(config.memory_key).toBe("jurgen1c-agent-memory");
   });
 
   test("detects nested unknown config fields", async () => {

@@ -4,7 +4,12 @@
   "type": "object",
   "required": ["version", "memory_root", "database_path", "claims", "graphs", "indexes", "recipes", "plans", "profiles", "waivers"],
   "properties": {
-    "version": { "const": 1 },
+    "version": { "enum": [1, 2] },
+    "memory_key": {
+      "type": "string",
+      "pattern": "^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\.|$))[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9_-])?$"
+    },
+    "database_scope": { "enum": ["local", "global"] },
     "memory_root": { "type": "string" },
     "database_path": { "type": "string" },
     "claims": { "type": "array", "items": { "type": "string" } },
@@ -35,5 +40,26 @@
       },
       "additionalProperties": false
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "version": { "const": 1 } }, "required": ["version"] },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["memory_key"] },
+            { "required": ["database_scope"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": { "properties": { "version": { "const": 2 } }, "required": ["version"] },
+      "then": {
+        "required": ["database_scope"],
+        "if": { "properties": { "database_scope": { "const": "global" } }, "required": ["database_scope"] },
+        "then": { "required": ["memory_key"] }
+      }
+    }
+  ]
 }

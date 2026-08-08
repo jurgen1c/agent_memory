@@ -7,6 +7,7 @@ import { parseYaml } from "./yaml";
 
 const DEFAULT_CONFIG: AgentMemoryConfig = {
   version: 1,
+  database_scope: "local",
   memory_root: "docs/agent-memory",
   database_path: ".agent-memory/memory.sqlite",
   claims: ["claims/**/*.md"],
@@ -100,12 +101,13 @@ export function defaultConfig(): AgentMemoryConfig {
 
 export function renderConfigTemplate(config: AgentMemoryConfig = defaultConfig()): string {
   return `# Config schema version. Leave this at 1 unless agent-memory documents an upgrade.
-version: ${config.version}
+version: ${config.version}${renderGlobalStorageFields(config)}
 
 # Canonical memory source directory. The file patterns below are relative to this path.
 memory_root: ${renderYamlScalar(config.memory_root)}
 
-# Generated SQLite cache. Keep this under an ignored directory and do not commit it.
+# Generated SQLite cache for local mode. Global database paths are user-local generated state,
+# never committed canonical memory. Keep the local path under an ignored directory.
 database_path: ${renderYamlScalar(config.database_path)}
 
 # Claim Markdown files. Use this to split or relocate atomic claim documents.
@@ -195,14 +197,17 @@ function normalizeConfig(value: unknown, repoRoot: string): AgentMemoryConfig {
 
   const version = readNumber(value, "version", DEFAULT_CONFIG.version);
 
-  if (version !== 1) {
+  if (version !== 1 && version !== 2) {
     throw new ConfigError(`Unsupported config version ${version}.`, {
-      details: ["This Phase 1 implementation supports config version 1."]
+      details: ["Supported config versions are 1 and 2."]
     });
   }
 
+  const globalStorage = readGlobalStorageConfig(value, version);
+
   return {
     version,
+    ...globalStorage,
     memory_root: readString(value, "memory_root", DEFAULT_CONFIG.memory_root),
     database_path: readString(value, "database_path", DEFAULT_CONFIG.database_path),
     claims: readStringArray(value, "claims", DEFAULT_CONFIG.claims),
@@ -222,6 +227,82 @@ function normalizeConfig(value: unknown, repoRoot: string): AgentMemoryConfig {
     validation: readValidation(value),
     context: readContext(value)
   };
+}
+
+function readGlobalStorageConfig(
+  value: Record<string, unknown>,
+  version: number
+): Pick<AgentMemoryConfig, "memory_key" | "database_scope"> {
+  const hasMemoryKey = value.memory_key !== undefined;
+  const hasDatabaseScope = value.database_scope !== undefined;
+
+  if (version === 1) {
+    if (hasMemoryKey || hasDatabaseScope) {
+      throw new ConfigError("Config version 1 does not support memory_key or database_scope.", {
+        details: ["Migrate the config to version 2 before configuring global database storage."]
+      });
+    }
+
+    return { database_scope: "local" };
+  }
+
+  if (!hasDatabaseScope) {
+    throw new ConfigError("Config field database_scope is required for config version 2.", {
+      details: ["Expected database_scope to be local or global."]
+    });
+  }
+
+  const databaseScope = readString(value, "database_scope", "local");
+  if (databaseScope !== "local" && databaseScope !== "global") {
+    throw new ConfigError(`Invalid database_scope value: ${databaseScope}. Expected local or global.`);
+  }
+
+  const memoryKey = hasMemoryKey ? readString(value, "memory_key", "") : undefined;
+  if (memoryKey !== undefined && !isValidMemoryKey(memoryKey)) {
+    throw new ConfigError(`Invalid memory_key value: ${JSON.stringify(memoryKey)}.`, {
+      details: [
+        "Expected 1-128 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit and not using a Windows device name."
+      ]
+    });
+  }
+
+  if (databaseScope === "global" && memoryKey === undefined) {
+    throw new ConfigError("Config field memory_key is required when database_scope is global.");
+  }
+
+  return {
+    database_scope: databaseScope,
+    ...(memoryKey === undefined ? {} : { memory_key: memoryKey })
+  };
+}
+
+function isValidMemoryKey(value: string): boolean {
+  if (!/^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9_-])?$/.test(value)) {
+    return false;
+  }
+
+  const basename = value.split(".", 1)[0];
+  return !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(basename);
+}
+
+function renderGlobalStorageFields(config: AgentMemoryConfig): string {
+  if (config.version === 1) {
+    return "";
+  }
+
+  const scope = config.database_scope ?? "local";
+  const fields = [];
+
+  if (config.memory_key !== undefined) {
+    fields.push(
+      `# Stable repository identity used for user-local global database storage.\nmemory_key: ${renderYamlScalar(config.memory_key)}`
+    );
+  }
+
+  fields.push(
+    `# Database storage mode. Global databases are generated per checkout and are never canonical memory.\ndatabase_scope: ${scope}`
+  );
+  return `\n\n${fields.join("\n\n")}`;
 }
 
 function readAgentInstructions(root: Record<string, unknown>, repoRoot: string) {

@@ -12,7 +12,7 @@ import {
   type AgentTarget
 } from "./skills";
 import type { AgentMemoryConfig, RepoInfo } from "./types";
-import { parseYaml } from "./yaml";
+import { mergeYamlMissingValues, parseYaml } from "./yaml";
 
 export interface UpgradeOptions {
   cwd?: string;
@@ -41,6 +41,8 @@ const CONFIG_SCHEMA: ConfigSchema = {
   version: true,
   memory_root: true,
   database_path: true,
+  memory_key: true,
+  database_scope: true,
   claims: true,
   graphs: true,
   indexes: true,
@@ -110,8 +112,8 @@ export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
   const rawConfig = fs.readFileSync(configPath, "utf8");
   const parsedConfig = parseYaml(rawConfig);
   const unknownConfigPaths = collectUnknownConfigPaths(parsedConfig);
-  const configRewriteBlocked = unknownConfigPaths.length > 0 && !options.force;
-  const aliasWarningMode: DeprecatedAliasWarningMode = configRewriteBlocked ? "deferred" : options.write ? "applied" : "planned";
+  const preservesUnknownFields = unknownConfigPaths.length > 0 && !options.force;
+  const aliasWarningMode: DeprecatedAliasWarningMode = preservesUnknownFields ? "deferred" : options.write ? "applied" : "planned";
   const config = applyDeprecatedConfigAliases(structuredClone(loaded.config), parsedConfig, warnings, aliasWarningMode);
   preserveLegacySingleAgentSelection(repo.root, config, warnings);
 
@@ -119,13 +121,14 @@ export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
     warnings.push(
       options.force
         ? `Unknown config field ${unknownPath} will be removed because --force was passed.`
-        : `Unknown config field ${unknownPath}; skipping config rewrite to avoid dropping user settings.`
+        : `Unknown config field ${unknownPath} will be preserved while missing defaults are added.`
     );
   }
 
   upgradeConfigFile({
     repoRoot: repo.root,
     rawConfig,
+    parsedConfig,
     config,
     hasUnknownFields: unknownConfigPaths.length > 0,
     options,
@@ -262,6 +265,7 @@ function isExecutable(filePath: string): boolean {
 function upgradeConfigFile(options: {
   repoRoot: string;
   rawConfig: string;
+  parsedConfig: unknown;
   config: AgentMemoryConfig;
   hasUnknownFields: boolean;
   options: UpgradeOptions;
@@ -269,12 +273,10 @@ function upgradeConfigFile(options: {
 }): void {
   const relativePath = "agent-memory.config.yaml";
 
-  if (options.hasUnknownFields && !options.options.force) {
-    options.actions.push({ path: relativePath, status: "skipped", detail: "unknown config fields require manual review" });
-    return;
-  }
-
-  const nextConfig = renderConfigTemplate(options.config);
+  const renderedConfig = renderConfigTemplate(options.config);
+  const nextConfig = options.hasUnknownFields && !options.options.force
+    ? mergeYamlMissingValues(options.rawConfig, renderedConfig, deprecatedReplacementPaths(options.parsedConfig))
+    : renderedConfig;
 
   if (normalizeTrailingNewline(options.rawConfig) === nextConfig) {
     options.actions.push({ path: relativePath, status: "skipped", detail: "already current" });
@@ -283,11 +285,42 @@ function upgradeConfigFile(options: {
 
   if (options.options.write) {
     fs.writeFileSync(path.join(options.repoRoot, relativePath), nextConfig);
-    options.actions.push({ path: relativePath, status: "updated", detail: "refreshed comments and missing defaults" });
+    options.actions.push({
+      path: relativePath,
+      status: "updated",
+      detail: options.hasUnknownFields && !options.options.force
+        ? "added missing defaults while preserving unknown config fields"
+        : "refreshed comments and missing defaults"
+    });
     return;
   }
 
-  options.actions.push({ path: relativePath, status: "would_update", detail: "refresh comments and missing defaults" });
+  options.actions.push({
+    path: relativePath,
+    status: "would_update",
+    detail: options.hasUnknownFields && !options.options.force
+      ? "add missing defaults while preserving unknown config fields"
+      : "refresh comments and missing defaults"
+  });
+}
+
+function deprecatedReplacementPaths(parsedConfig: unknown): string[] {
+  if (!isRecord(parsedConfig)) {
+    return [];
+  }
+
+  const paths: string[] = [];
+  const agentInstructions = parsedConfig.agent_instructions;
+  if (isRecord(agentInstructions) && "path" in agentInstructions && !("paths" in agentInstructions)) {
+    paths.push("agent_instructions.paths");
+  }
+
+  const context = parsedConfig.context;
+  if (isRecord(context) && "include_inferred_edges" in context && !("include_inferred_edges_by_default" in context)) {
+    paths.push("context.include_inferred_edges_by_default");
+  }
+
+  return paths;
 }
 
 function upgradeAgentInstructionsFile(
