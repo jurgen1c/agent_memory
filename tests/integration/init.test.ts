@@ -159,6 +159,19 @@ describe("init command", () => {
     expect(fs.statSync(wrapperPath).isDirectory()).toBe(true);
   });
 
+  test("ignores a non-file wrapper path when global mode does not write a wrapper", async () => {
+    const repoRoot = makeGitRepo();
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    fs.mkdirSync(wrapperPath, { recursive: true });
+
+    const result = await dispatch(["init", "--yes"], { cwd: repoRoot });
+
+    expect(result.exitCode).toBe(0);
+    expect(fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")).toContain("agent-memory context --task");
+    expect(fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")).not.toContain("bin/memory context --task");
+    expect(fs.statSync(wrapperPath).isDirectory()).toBe(true);
+  });
+
   test("rejects conflicting local and global-wrapper modes before writing", async () => {
     const repoRoot = makeGitRepo();
 

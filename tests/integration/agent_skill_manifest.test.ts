@@ -396,7 +396,7 @@ describe("agent-manifest command", () => {
     const result = spawnSync("bun", [path.resolve("packages/cli/src/index.ts"), "agent-manifest", "--json"], {
       cwd: repoRoot,
       encoding: "utf8",
-      env: { ...process.env, PATH: `${globalBin}:${process.env.PATH ?? ""}` }
+      env: { ...process.env, PATH: `${globalBin}${path.delimiter}${process.env.PATH ?? ""}` }
     });
     const parsed = JSON.parse(result.stdout);
 

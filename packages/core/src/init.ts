@@ -55,7 +55,7 @@ export function initRepository(options: InitOptions): InitResult {
   const wrapperPath = path.join(repo.root, "bin/memory");
   const writesWrapper = Boolean(options.wrapper || options.local || config.database_scope === "local");
   assertCompatibleWrapperPath(wrapperPath, writesWrapper);
-  const commandPrefix = writesWrapper || fs.existsSync(wrapperPath) ? "bin/memory" : "agent-memory";
+  const commandPrefix = writesWrapper || isRegularWrapperPath(wrapperPath) ? "bin/memory" : "agent-memory";
   const agents =
     options.agents.length > 0
       ? options.agents
@@ -223,13 +223,17 @@ function assertCompatibleInitStorageOptions(
 }
 
 function assertCompatibleWrapperPath(wrapperPath: string, writesWrapper: boolean): void {
-  if (!writesWrapper || !fs.existsSync(wrapperPath) || fs.statSync(wrapperPath).isFile()) {
+  if (!writesWrapper || !fs.existsSync(wrapperPath) || isRegularWrapperPath(wrapperPath)) {
     return;
   }
 
   throw new AgentMemoryError("Wrapper path bin/memory is not a regular file.", {
     details: ["Move the existing path before initializing, or replace it with a wrapper file."]
   });
+}
+
+function isRegularWrapperPath(wrapperPath: string): boolean {
+  return fs.existsSync(wrapperPath) && fs.statSync(wrapperPath).isFile();
 }
 
 function writeFile(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): InitAction {
