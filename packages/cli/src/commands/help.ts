@@ -287,10 +287,10 @@ const TOPICS: HelpTopic[] = [
   },
   {
     name: "install-hooks",
-    purpose: "Install non-blocking git hooks that run bin/memory sync after repository state changes.",
+    purpose: "Install configured non-blocking git hooks that sync from the repository root using the available command.",
     usage: ["agent-memory install-hooks", "agent-memory install-hooks --force", "agent-memory install-hooks --json"],
     examples: ["agent-memory install-hooks", "agent-memory install-hooks --force"],
-    agentNotes: ["Hooks warn but do not block git operations."],
+    agentNotes: ["Hooks use agent-memory in global CLI-first mode or bin/memory when a usable wrapper exists, and warn without blocking git operations."],
     phase: "Phase 8"
   },
   {

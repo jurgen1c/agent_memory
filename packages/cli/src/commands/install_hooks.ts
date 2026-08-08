@@ -48,7 +48,12 @@ function parseInstallHooksArgs(args: string[]): { force: boolean; json: boolean 
 }
 
 function renderInstallHooksResult(result: HookInstallResult): string {
-  const lines = ["Agent Memory hooks installed.", "", `Repo root: ${result.repo.root}`];
+  const lines = [
+    result.actions.length > 0 ? "Agent Memory hooks installed." : "No Agent Memory hooks installed.",
+    "",
+    `Repo root: ${result.repo.root}`,
+    `Command: ${result.commandPrefix} sync`
+  ];
 
   for (const warning of result.warnings) {
     lines.push(`Warning: ${warning}`);

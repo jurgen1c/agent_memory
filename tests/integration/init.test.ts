@@ -818,7 +818,19 @@ Keep this footer too.
       const hookPath = path.join(repoRoot, ".git/hooks", hookName);
       expect(fs.existsSync(hookPath)).toBe(true);
       expect(fs.readFileSync(hookPath, "utf8")).toContain("agent-memory sync");
+      expect(fs.readFileSync(hookPath, "utf8")).not.toContain("bin/memory ]");
     }
+  });
+
+  test("installs wrapper-mode hooks with a repository-root wrapper path", async () => {
+    const repoRoot = makeGitRepo();
+    const result = await dispatch(["init", "--yes", "--wrapper", "--install-hooks"], { cwd: repoRoot });
+    const hook = fs.readFileSync(path.join(repoRoot, ".git/hooks/post-merge"), "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("bin/memory sync");
+    expect(hook).toContain('MEMORY_COMMAND="${REPO_ROOT}/bin/memory"');
+    expect(hook).toContain("Run bin/memory sync manually");
   });
 
   test("honors a single requested agent target", async () => {

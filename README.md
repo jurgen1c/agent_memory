@@ -94,7 +94,7 @@ Init options:
 | `--agent generic` | Install only the generic agent instruction file. |
 | `--skill-location .agents` | Install the selected agent skill under `.agents/skills/repo-memory/SKILL.md` and write that path to config. Requires exactly one `--agent`. |
 | `--instructions-file CLAUDE.md` | Append managed repository guidance to this file and persist it for upgrades. Repeat the option to manage files such as both `AGENTS.md` and `CLAUDE.md`. |
-| `--install-hooks` | Install non-blocking git hooks using `agent-memory`, or `bin/memory` when that wrapper exists. |
+| `--install-hooks` | Install configured non-blocking git hooks that resolve the repository root before using `agent-memory`, or `bin/memory` when that wrapper exists. |
 | `--force` | Overwrite existing scaffold files and hooks where supported. |
 
 ### Claim Relevance and Source Policy
@@ -184,7 +184,7 @@ Use `agent-memory help <command>` for full usage and examples.
 | `doctor` | Check whether the compiled database exists, is fresh, and is compatible. |
 | `sync` | Compile, validate, and doctor memory in one command. |
 | `upgrade` | Refresh generated config comments, the configured managed instruction file, and generated agent skill files after package upgrades. |
-| `install-hooks` | Install non-blocking git hooks using the available `agent-memory` command or wrapper. |
+| `install-hooks` | Install the hooks configured under `git.hooks`; each resolves the repository root and non-blockingly runs the available `agent-memory` command or wrapper. |
 | `ui` | Serve a local browser UI for inspecting and reviewing repository memory. |
 | `install-skill` | Install repository memory instructions under `.codex`, `.agents`, `.claude`, or a custom path. |
 | `migrate-docs` | Plan or create starter memory drafts from existing repository docs. |
