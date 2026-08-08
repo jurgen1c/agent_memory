@@ -33,6 +33,12 @@ export interface ResolvedDatabaseLocation {
 
 export function resolveDatabaseLocation(options: ResolveDatabaseLocationOptions): ResolvedDatabaseLocation {
   const scope = options.config.database_scope ?? "local";
+  if (scope === "global" && !options.config.memory_key?.trim()) {
+    throw new ConfigError("Global database scope requires config field memory_key.", {
+      details: ["Set memory_key to the repository's stable global-memory identity before resolving its database."]
+    });
+  }
+
   const common = {
     scope,
     ...(options.config.memory_key === undefined ? {} : { memoryKey: options.config.memory_key })

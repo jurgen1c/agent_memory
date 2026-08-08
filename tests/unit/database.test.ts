@@ -98,6 +98,22 @@ describe("resolveDatabaseLocation", () => {
     });
   });
 
+  test("fails actionably when global scope has no memory key", () => {
+    expect(() =>
+      resolveDatabaseLocation({
+        config: {
+          database_path: ".agent-memory/memory.sqlite",
+          database_scope: "global"
+        },
+        repoRoot,
+        globalLocation: {
+          databasePath: path.resolve("fixtures/global/memory.sqlite"),
+          checkoutFingerprint: "0123456789abcdef01234567"
+        }
+      })
+    ).toThrow("Global database scope requires config field memory_key.");
+  });
+
   test("fails actionably when a global registry location is unavailable", () => {
     expect(() =>
       resolveDatabaseLocation({
