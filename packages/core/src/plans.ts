@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig, renderYamlScalar } from "./config";
+import { resolveDatabaseLocation } from "./database";
 import { AgentMemoryError, NotFoundError } from "./errors";
 import { resolveConfiguredPath } from "./files";
 import { runGit } from "./git";
@@ -446,9 +447,7 @@ function searchPlanTemplates(database: SqliteDatabase, task: string, limit: numb
 
 async function openConfiguredDatabase(cwd?: string): Promise<{ database: SqliteDatabase; databasePath: string; planTemplateSuggestionLimit: number }> {
   const loaded = loadConfig({ cwd });
-  const databasePath = path.isAbsolute(loaded.config.database_path)
-    ? loaded.config.database_path
-    : path.join(loaded.repo.root, loaded.config.database_path);
+  const databasePath = resolveDatabaseLocation({ config: loaded.config, repoRoot: loaded.repo.root }).path;
 
   if (!fs.existsSync(databasePath)) {
     throw new NotFoundError(`Compiled memory database not found at ${databasePath}`, {

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config";
+import { resolveDatabaseLocation } from "./database";
 import { canonicalMemoryFileInventory, discoverCanonicalMemoryFiles, resolveConfiguredPath } from "./files";
 import { runGit } from "./git";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
@@ -46,7 +47,7 @@ export async function doctorMemory(options: DoctorOptions = {}): Promise<DoctorR
   const loaded = loadConfig({ cwd: options.cwd });
   const repoRoot = loaded.repo.root;
   const memoryRoot = resolveConfiguredPath(repoRoot, loaded.config.memory_root);
-  const databasePath = path.isAbsolute(loaded.config.database_path) ? loaded.config.database_path : path.join(repoRoot, loaded.config.database_path);
+  const databasePath = resolveDatabaseLocation({ config: loaded.config, repoRoot }).path;
   const checks: DoctorCheck[] = [];
 
   if (!fs.existsSync(databasePath)) {

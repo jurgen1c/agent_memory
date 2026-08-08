@@ -3,6 +3,7 @@ import path from "node:path";
 import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
 import { describeClaimSourcePolicyDecision, evaluateClaimSourcePath } from "./claim_sources";
 import { loadConfig } from "./config";
+import { resolveDatabaseLocation } from "./database";
 import { configuredPathRelativeToRepo, discoverFiles, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
 import { parseYaml } from "./yaml";
 import { NotFoundError } from "./errors";
@@ -84,7 +85,7 @@ export async function checkCoverage(options: CoverageOptions = {}): Promise<Cove
   const repoRoot = loaded.repo.root;
   const memoryRoot = resolveConfiguredPath(repoRoot, loaded.config.memory_root);
   const memoryRootRelative = configuredPathRelativeToRepo(repoRoot, loaded.config.memory_root);
-  const databasePath = path.isAbsolute(loaded.config.database_path) ? loaded.config.database_path : path.join(repoRoot, loaded.config.database_path);
+  const databasePath = resolveDatabaseLocation({ config: loaded.config, repoRoot }).path;
 
   if (!fs.existsSync(databasePath)) {
     throw new NotFoundError(`Compiled memory database not found at ${databasePath}`, {

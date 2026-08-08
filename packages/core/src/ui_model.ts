@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { compileMemory, type CompileResult } from "./compiler";
 import { loadConfig, renderYamlScalar } from "./config";
+import { resolveDatabaseLocation } from "./database";
 import { doctorMemory, type DoctorResult } from "./doctor";
 import { AgentMemoryError, NotFoundError } from "./errors";
 import { discoverCanonicalMemoryFiles, resolveConfiguredPath, toPosix } from "./files";
@@ -289,7 +290,7 @@ export async function buildUiMemoryModel(cwd?: string): Promise<UiMemoryModel> {
   const memory = loadMemory(cwd);
   const repoRoot = loaded.repo.root;
   const memoryRoot = resolveConfiguredPath(repoRoot, loaded.config.memory_root);
-  const databasePath = path.isAbsolute(loaded.config.database_path) ? loaded.config.database_path : path.join(repoRoot, loaded.config.database_path);
+  const databasePath = resolveDatabaseLocation({ config: loaded.config, repoRoot }).path;
   const validation = validateRepository({ cwd });
   const doctor = await doctorMemory({ cwd });
   const claims = memory.claims.map(toUiClaimSummary);
