@@ -206,8 +206,88 @@ describe("install-hooks command", () => {
       const hookPath = path.join(cwd, ".git/hooks", hookName);
       expect(fs.existsSync(hookPath)).toBe(true);
       expect(fs.readFileSync(hookPath, "utf8")).toContain("agent-memory sync");
+      expect(fs.readFileSync(hookPath, "utf8")).toContain('git rev-parse --show-toplevel');
       expect(fs.statSync(hookPath).mode & 0o111).toBeGreaterThan(0);
     }
+  });
+
+  test("runs global hooks from the repository root when invoked in a nested directory", async () => {
+    const cwd = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd });
+    await dispatch(["install-hooks"], { cwd });
+    const nested = path.join(cwd, "src/nested");
+    const commandDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hook-command-"));
+    const commandPath = path.join(commandDir, "agent-memory");
+    const observedCwdPath = path.join(commandDir, "observed-cwd");
+    fs.mkdirSync(nested, { recursive: true });
+    fs.writeFileSync(commandPath, "#!/usr/bin/env bash\nprintf '%s' \"$PWD\" > \"$AGENT_MEMORY_TEST_CWD\"\n");
+    fs.chmodSync(commandPath, 0o755);
+
+    const result = spawnSync(path.join(cwd, ".git/hooks/post-merge"), [], {
+      cwd: nested,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        AGENT_MEMORY_TEST_CWD: observedCwdPath,
+        PATH: `${commandDir}${path.delimiter}${process.env.PATH ?? ""}`
+      }
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Refreshing agent memory...");
+    expect(fs.readFileSync(observedCwdPath, "utf8")).toBe(cwd);
+  });
+
+  test("runs wrapper hooks from the repository root and keeps sync failures non-blocking", async () => {
+    const cwd = makeGitRepo("agent-memory-hook's-");
+    await dispatch(["init", "--yes", "--wrapper"], { cwd });
+    const wrapperPath = path.join(cwd, "bin/memory");
+    const observedCwdPath = path.join(cwd, ".agent-memory-test-cwd");
+    fs.writeFileSync(
+      wrapperPath,
+      `#!/usr/bin/env bash\nprintf '%s' "$PWD" > ${JSON.stringify(observedCwdPath)}\nexit 1\n`
+    );
+    fs.chmodSync(wrapperPath, 0o755);
+    const nested = path.join(cwd, "src/nested");
+    fs.mkdirSync(nested, { recursive: true });
+    const installResult = await dispatch(["install-hooks"], { cwd: nested });
+
+    const quotedCwd = cwd.replaceAll("'", "'\"'\"'");
+    expect(installResult.stdout).toContain(`Command: cd -- '${quotedCwd}' && bin/memory sync`);
+
+    const result = spawnSync(path.join(cwd, ".git/hooks/post-checkout"), [], { cwd: nested, encoding: "utf8" });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("Warning: agent memory sync failed.");
+    expect(result.stderr).toContain("Run bin/memory sync manually");
+    expect(fs.readFileSync(observedCwdPath, "utf8")).toBe(cwd);
+  });
+
+  test("installs only configured hooks and honors disabled installation", async () => {
+    const cwd = makeGitRepo();
+    await dispatch(["init", "--yes"], { cwd });
+    const configPath = path.join(cwd, "agent-memory.config.yaml");
+    fs.writeFileSync(
+      configPath,
+      fs.readFileSync(configPath, "utf8").replace(
+        "  hooks:\n    - post-merge\n    - post-checkout\n    - post-rewrite",
+        "  hooks:\n    - post-merge\n    - post-merge"
+      )
+    );
+
+    const configured = await dispatch(["install-hooks"], { cwd });
+
+    expect(configured.exitCode).toBe(0);
+    expect(configured.stdout).toContain("Command: agent-memory sync");
+    expect(fs.existsSync(path.join(cwd, ".git/hooks/post-merge"))).toBe(true);
+    expect(fs.existsSync(path.join(cwd, ".git/hooks/post-checkout"))).toBe(false);
+
+    fs.writeFileSync(configPath, fs.readFileSync(configPath, "utf8").replace("install_hooks: true", "install_hooks: false"));
+    const disabled = await dispatch(["install-hooks", "--force"], { cwd });
+
+    expect(disabled.exitCode).toBe(0);
+    expect(disabled.stdout).toContain("No Agent Memory hooks installed.");
+    expect(disabled.stdout).toContain("disabled by git.install_hooks");
   });
 
   test("supports forced JSON installs and rejects unknown options", async () => {
@@ -252,8 +332,8 @@ function copyFixture(source: string): string {
   return target;
 }
 
-function makeGitRepo(): string {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+function makeGitRepo(prefix = "agent-memory-hooks-"): string {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   git(cwd, ["init"]);
   return cwd;
 }

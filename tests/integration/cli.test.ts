@@ -38,6 +38,8 @@ describe("CLI", () => {
     expect(query.stdout).toContain("--include-stale");
     expect(templates.stdout).toContain("templates copy claim:fact --to /tmp/fact.md --force");
     expect(installHooks.stdout).toContain("agent-memory install-hooks --json");
+    expect(installHooks.stdout).toContain("configured non-blocking git hooks");
+    expect(installHooks.stdout).toContain("agent-memory in global CLI-first mode or bin/memory");
     expect(upgrade.stdout).toContain("agent-memory upgrade --write --force");
     expect(migrateDocs.stdout).toContain("lowercase memory namespace");
     expect(audit.stdout).toContain("agent-memory audit --git-diff --base origin/main");
