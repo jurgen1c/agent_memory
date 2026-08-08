@@ -259,7 +259,7 @@ function readGlobalStorageConfig(
 
   const memoryKey = hasMemoryKey ? readString(value, "memory_key", "") : undefined;
   if (memoryKey !== undefined && !isValidMemoryKey(memoryKey)) {
-    throw new ConfigError(`Invalid memory_key value: ${memoryKey}.`, {
+    throw new ConfigError(`Invalid memory_key value: ${JSON.stringify(memoryKey)}.`, {
       details: [
         "Expected 1-128 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit and not using a Windows device name."
       ]

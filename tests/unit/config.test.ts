@@ -154,7 +154,10 @@ memory_key: jurgen1c-agent-memory
   });
 
   test("rejects invalid global memory keys", () => {
-    for (const memoryKey of ["", "Uppercase", "contains/slash", "con", "con.cache", "ends.", "a".repeat(129)]) {
+    const emptyMemoryKeyRepo = makeTempRepo('version: 2\ndatabase_scope: global\nmemory_key: ""\n');
+    expect(() => loadConfig({ repoRoot: emptyMemoryKeyRepo })).toThrow('Invalid memory_key value: "".');
+
+    for (const memoryKey of ["Uppercase", "contains/slash", "con", "con.cache", "ends.", "a".repeat(129)]) {
       const repoRoot = makeTempRepo(`version: 2\ndatabase_scope: global\nmemory_key: ${JSON.stringify(memoryKey)}\n`);
       expect(() => loadConfig({ repoRoot })).toThrow("Invalid memory_key value");
     }
