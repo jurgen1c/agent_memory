@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { resolveDatabaseLocation } from "./database";
 import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, resolveConfiguredPath } from "./files";
 import { runGit } from "./git";
@@ -57,8 +58,11 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
 
   const memory = loadMemory(options.cwd);
   const repoRoot = memory.loadedConfig.repo.root;
-  const configuredDbPath = options.dbPath ?? memory.loadedConfig.config.database_path;
-  const databasePath = path.isAbsolute(configuredDbPath) ? configuredDbPath : path.join(repoRoot, configuredDbPath);
+  const databasePath = resolveDatabaseLocation({
+    config: memory.loadedConfig.config,
+    repoRoot,
+    dbPath: options.dbPath
+  }).path;
   const memoryRoot = resolveConfiguredPath(repoRoot, memory.loadedConfig.config.memory_root);
   const tempDatabasePath = temporaryDatabasePath(databasePath);
 

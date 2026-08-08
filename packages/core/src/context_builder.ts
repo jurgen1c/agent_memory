@@ -1,7 +1,7 @@
 import fs from "node:fs";
-import path from "node:path";
 import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
 import { loadConfig } from "./config";
+import { resolveDatabaseLocation } from "./database";
 import { NotFoundError } from "./errors";
 import { pathMatchesPattern } from "./files";
 import { resolvePlanStageContext, type PlanRunStageDetail } from "./plans";
@@ -266,9 +266,7 @@ function expandExplicitClaims(database: SqliteDatabase, claims: ContextClaim[], 
 
 async function openConfiguredDatabase(cwd?: string): Promise<OpenDatabase> {
   const loaded = loadConfig({ cwd });
-  const databasePath = path.isAbsolute(loaded.config.database_path)
-    ? loaded.config.database_path
-    : path.join(loaded.repo.root, loaded.config.database_path);
+  const databasePath = resolveDatabaseLocation({ config: loaded.config, repoRoot: loaded.repo.root }).path;
 
   if (!fs.existsSync(databasePath)) {
     throw new NotFoundError(`Compiled memory database not found at ${databasePath}`, {
