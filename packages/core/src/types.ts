@@ -18,6 +18,8 @@ export interface ClaimSourcePolicy {
 
 export interface AgentMemoryConfig {
   version: number;
+  memory_key?: string;
+  database_scope?: "local" | "global";
   memory_root: string;
   database_path: string;
   claims: string[];

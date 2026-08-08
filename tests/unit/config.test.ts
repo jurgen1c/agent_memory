@@ -55,6 +55,8 @@ context:
     const loaded = loadConfig({ repoRoot });
 
     expect(loaded.config.version).toBe(1);
+    expect(loaded.config.database_scope).toBe("local");
+    expect(loaded.config.memory_key).toBeUndefined();
     expect(loaded.config.memory_root).toBe("docs/agent-memory");
     expect(loaded.config.claims).toEqual(["claims/**/*.md"]);
     expect(loaded.config.plans).toEqual(["plans/**/*.yaml"]);
@@ -101,10 +103,61 @@ context:
     expect(loaded.config.context.include_profile_diagnostics).toBe(false);
   });
 
+  test("loads version 2 local and global storage config", () => {
+    const localRepoRoot = makeTempRepo(`
+version: 2
+database_scope: local
+memory_key: jurgen1c-agent-memory
+`);
+    const globalRepoRoot = makeTempRepo(`
+version: 2
+database_scope: global
+memory_key: jurgen1c-agent-memory
+`);
+
+    expect(loadConfig({ repoRoot: localRepoRoot }).config).toMatchObject({
+      version: 2,
+      database_scope: "local",
+      memory_key: "jurgen1c-agent-memory"
+    });
+    expect(loadConfig({ repoRoot: globalRepoRoot }).config).toMatchObject({
+      version: 2,
+      database_scope: "global",
+      memory_key: "jurgen1c-agent-memory"
+    });
+  });
+
   test("rejects unsupported config versions", () => {
-    const repoRoot = makeTempRepo("version: 2\n");
+    const repoRoot = makeTempRepo("version: 3\n");
 
     expect(() => loadConfig({ repoRoot })).toThrow(ConfigError);
+  });
+
+  test("keeps version 1 local-only and requires explicit version 2 storage fields", () => {
+    for (const config of [
+      "version: 1\ndatabase_scope: local\n",
+      "version: 1\nmemory_key: repo-memory\n",
+      "version: 2\n",
+      "version: 2\ndatabase_scope: global\n"
+    ]) {
+      const repoRoot = makeTempRepo(config);
+      expect(() => loadConfig({ repoRoot })).toThrow(ConfigError);
+    }
+  });
+
+  test("rejects invalid database scopes with an actionable error", () => {
+    const repoRoot = makeTempRepo("version: 2\ndatabase_scope: shared\n");
+
+    expect(() => loadConfig({ repoRoot })).toThrow(
+      "Invalid database_scope value: shared. Expected local or global."
+    );
+  });
+
+  test("rejects invalid global memory keys", () => {
+    for (const memoryKey of ["", "Uppercase", "contains/slash", "con", "con.cache", "ends.", "a".repeat(129)]) {
+      const repoRoot = makeTempRepo(`version: 2\ndatabase_scope: global\nmemory_key: ${JSON.stringify(memoryKey)}\n`);
+      expect(() => loadConfig({ repoRoot })).toThrow("Invalid memory_key value");
+    }
   });
 
   test("rejects invalid context depth defaults", () => {
@@ -223,6 +276,23 @@ claim_sources:
     expect(loaded.config.claim_sources.deny).toEqual(["src/generated/**"]);
   });
 
+  test("renders version 2 global storage fields and generated-state guidance", () => {
+    const config = defaultConfig();
+    config.version = 2;
+    config.database_scope = "global";
+    config.memory_key = "jurgen1c-agent-memory";
+
+    const rendered = renderConfigTemplate(config);
+    const loaded = loadConfig({ repoRoot: makeTempRepo(rendered) });
+
+    expect(rendered).toContain("memory_key: jurgen1c-agent-memory");
+    expect(rendered).toContain("database_scope: global");
+    expect(rendered).toContain("Global database paths are user-local generated state");
+    expect(rendered).toContain("never committed canonical memory");
+    expect(loaded.config.database_scope).toBe("global");
+    expect(loaded.config.memory_key).toBe("jurgen1c-agent-memory");
+  });
+
   test("schema requires contextual workflow path globs", () => {
     const schema = JSON.parse(fs.readFileSync(path.join(repoRoot, "packages/schemas/config.schema.json"), "utf8"));
 
@@ -231,6 +301,9 @@ claim_sources:
     expect(schema.properties.agent_instructions.properties.path.type).toBe("string");
     expect(schema.properties.agent_instructions.properties.paths.items.type).toBe("string");
     expect(schema.properties.claim_sources.properties.deny.items.type).toBe("string");
+    expect(schema.properties.version.enum).toEqual([1, 2]);
+    expect(schema.properties.database_scope.enum).toEqual(["local", "global"]);
+    expect(schema.properties.memory_key.pattern).toContain("[a-z0-9]");
   });
 });
 

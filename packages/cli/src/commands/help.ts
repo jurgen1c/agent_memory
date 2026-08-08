@@ -277,7 +277,7 @@ const TOPICS: HelpTopic[] = [
       "agent-memory upgrade --json"
     ],
     examples: ["agent-memory upgrade", "agent-memory upgrade --write"],
-    agentNotes: ["Dry-run by default. Preserves config values, refreshes the configured managed instruction file and generated skill files, and warns before dropping unknown config fields."],
+    agentNotes: ["Dry-run by default. Preserves config values and unknown fields while adding defaults, and refreshes configured managed instruction and generated skill files."],
     phase: "Maintenance"
   },
   {
