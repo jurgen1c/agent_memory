@@ -198,6 +198,12 @@ function assertCompatibleInitStorageOptions(
   options: InitOptions,
   hasExistingConfig: boolean
 ): void {
+  if (options.local && options.wrapper) {
+    throw new AgentMemoryError("--local cannot be combined with --wrapper.", {
+      details: ["Local compatibility mode already creates bin/memory; use --wrapper only with global storage."]
+    });
+  }
+
   if (options.local && options.memoryKey !== undefined) {
     throw new AgentMemoryError("--local cannot be combined with --memory-key.", {
       details: ["Local compatibility mode writes a version 1 config without global storage fields."]

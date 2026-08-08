@@ -684,7 +684,9 @@ function isActiveRepositoryRoot(repoRoot: string): boolean {
 
 function assertMemoryKey(memoryKey: string): void {
   if (!isValidMemoryKey(memoryKey)) {
-    throw new RegistryError(`Invalid memory key for global storage: ${JSON.stringify(memoryKey)}.`);
+    throw new RegistryError("Invalid memory key for global storage.", {
+      details: ["Use 1-128 lowercase letters, digits, dots, underscores, or hyphens without secrets or path separators."]
+    });
   }
 }
 

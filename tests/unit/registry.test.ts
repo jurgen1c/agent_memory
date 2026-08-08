@@ -171,6 +171,27 @@ describe("global registry storage", () => {
     );
   });
 
+  test("rejects invalid memory keys without echoing their contents", () => {
+    const invalidMemoryKey = "token-containing secret";
+
+    try {
+      updateRegistryCheckout({
+        globalHome: path.join(os.tmpdir(), "unused-agent-memory-home"),
+        memoryKey: invalidMemoryKey,
+        repositoryIdentity: "remote:github.com/org/repo",
+        repoRoot: path.resolve("."),
+        configPath: path.resolve("agent-memory.config.yaml"),
+        packageVersion: "0.4.0",
+        configHash: "sha256:config"
+      });
+      throw new Error("Expected invalid memory key to fail.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(RegistryError);
+      expect((error as Error).message).toBe("Invalid memory key for global storage.");
+      expect((error as Error).message).not.toContain(invalidMemoryKey);
+    }
+  });
+
   test("handles memory keys that match inherited object property names", () => {
     const globalHome = makeTempDirectory("agent-memory-global-home-");
     const repoRoot = makeTempDirectory("agent-memory-checkout-");

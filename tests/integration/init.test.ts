@@ -122,6 +122,15 @@ describe("init command", () => {
     expect(fs.readFileSync(path.join(wrapperRoot, "AGENTS.md"), "utf8")).toContain("bin/memory context --task");
   });
 
+  test("rejects conflicting local and global-wrapper modes before writing", async () => {
+    const repoRoot = makeGitRepo();
+
+    await expect(dispatch(["init", "--yes", "--local", "--wrapper"], { cwd: repoRoot })).rejects.toThrow(
+      "--local cannot be combined with --wrapper."
+    );
+    expect(fs.readdirSync(repoRoot).filter((entry) => entry !== ".git")).toEqual([]);
+  });
+
   test("validates global memory keys before writing and forcefully regenerates deterministic init output", async () => {
     const invalidRoot = makeGitRepo();
 
