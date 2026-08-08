@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dispatch, runCli } from "../../packages/cli/src/router";
+import { wrapperTemplate } from "../../packages/core/src/init";
 import { PACKAGE_VERSION } from "../../packages/core/src/version";
 
 describe("install-skill command", () => {
@@ -108,6 +109,7 @@ user-invocable: false
     expect(result.exitCode).toBe(0);
     expect(content).toContain("`tmp/custom-memory.sqlite`");
     expect(content).toContain("`.agent-memory/plans` for local one-off plan runs");
+    expect(content).toContain("bin/memory sync");
     expect(content).not.toContain("`tmp/plans`");
   });
 
@@ -379,6 +381,30 @@ describe("agent-manifest command", () => {
       ".agent-memory/plans/middle/b-nested.yml",
       ".agent-memory/plans/z-last.yaml"
     ]);
+  });
+
+  test("prefers the repository wrapper deterministically when a global CLI is also available", async () => {
+    const repoRoot = makeGitRepo();
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    const globalBin = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-global-bin-"));
+    const globalCli = path.join(globalBin, "agent-memory");
+    await dispatch(["init", "--yes", "--local"], { cwd: repoRoot });
+    fs.writeFileSync(globalCli, "#!/usr/bin/env bash\nexit 0\n");
+    fs.chmodSync(globalCli, 0o755);
+    expect(fs.readFileSync(wrapperPath, "utf8")).toBe(wrapperTemplate("npm"));
+
+    const result = spawnSync("bun", [path.resolve("packages/cli/src/index.ts"), "agent-manifest", "--json"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${globalBin}:${process.env.PATH ?? ""}` }
+    });
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.status).toBe(0);
+    expect(parsed.commandPrefix).toBe("bin/memory");
+    expect(parsed.commands.find((command: { name: string }) => command.name === "context").examples[0]).toContain(
+      "bin/memory"
+    );
   });
 
   test("renders command help for phase 10 commands", async () => {

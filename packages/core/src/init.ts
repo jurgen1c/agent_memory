@@ -274,12 +274,23 @@ function ensureConfigFile(
 }
 
 function writeExecutable(repoRoot: string, relativePath: string, content: string, force: boolean, actions: InitAction[]): void {
-  writeFile(repoRoot, relativePath, content, force, actions);
+  const action = writeFile(repoRoot, relativePath, content, force, actions);
   const absolutePath = resolveOutputPath(repoRoot, relativePath);
 
-  if (fs.existsSync(absolutePath)) {
-    fs.chmodSync(absolutePath, 0o755);
+  if (!fs.existsSync(absolutePath)) {
+    return;
   }
+
+  if (action.status === "skipped") {
+    const existing = fs.readFileSync(absolutePath, "utf8");
+
+    if (detectGeneratedWrapperPackageManager(existing) === null) {
+      action.detail = "custom wrapper preserved; use --force to replace it";
+      return;
+    }
+  }
+
+  fs.chmodSync(absolutePath, 0o755);
 }
 
 function resolveOutputPath(repoRoot: string, targetPath: string): string {

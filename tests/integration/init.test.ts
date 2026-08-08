@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { dispatch } from "../../packages/cli/src/router";
 import { defaultConfig, loadConfig, renderConfigTemplate } from "../../packages/core/src/config";
-import { initRepository } from "../../packages/core/src/init";
+import { initRepository, wrapperTemplate } from "../../packages/core/src/init";
 
 describe("init command", () => {
   test("scaffolds an empty repository idempotently", async () => {
@@ -120,6 +120,31 @@ describe("init command", () => {
     expect(wrapperConfig.memory_key).toBe("shared-repository");
     expect(fs.existsSync(path.join(wrapperRoot, "bin/memory"))).toBe(true);
     expect(fs.readFileSync(path.join(wrapperRoot, "AGENTS.md"), "utf8")).toContain("bin/memory context --task");
+  });
+
+  test("preserves custom wrappers completely unless force is explicit", async () => {
+    const repoRoot = makeGitRepo();
+    const wrapperPath = path.join(repoRoot, "bin/memory");
+    const customWrapper = "#!/usr/bin/env bash\necho custom memory wrapper\n";
+    await dispatch(["init", "--yes", "--local"], { cwd: repoRoot });
+    fs.writeFileSync(wrapperPath, customWrapper);
+    fs.chmodSync(wrapperPath, 0o640);
+
+    const preserved = await dispatch(["init", "--yes", "--local", "--package-manager", "bun"], { cwd: repoRoot });
+
+    expect(preserved.exitCode).toBe(0);
+    expect(preserved.stdout).toContain("custom wrapper preserved; use --force to replace it");
+    expect(fs.readFileSync(wrapperPath, "utf8")).toBe(customWrapper);
+    expect(fs.statSync(wrapperPath).mode & 0o777).toBe(0o640);
+
+    const replaced = await dispatch(
+      ["init", "--yes", "--force", "--local", "--package-manager", "bun"],
+      { cwd: repoRoot }
+    );
+
+    expect(replaced.exitCode).toBe(0);
+    expect(fs.readFileSync(wrapperPath, "utf8")).toBe(wrapperTemplate("bun"));
+    expect(fs.statSync(wrapperPath).mode & 0o111).toBeGreaterThan(0);
   });
 
   test("rejects conflicting local and global-wrapper modes before writing", async () => {
