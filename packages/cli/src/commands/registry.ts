@@ -132,7 +132,7 @@ function renderShow(memory: RegistryMemorySummary): string {
 
 function renderDoctor(result: RegistryDoctorResult): string {
   const lines = [
-    result.healthy ? "Agent Memory registry doctor passed." : "Agent Memory registry doctor found warnings.",
+    result.healthy ? "Agent Memory registry doctor passed." : "Agent Memory registry doctor found issues.",
     "",
     `Registry: ${result.registry_path}`,
     `Memory keys: ${result.memory_count}`,

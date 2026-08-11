@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { inspectFileSystemPathSync } from "@jurgen1c/agent-core/filesystem";
+import { resolveContainedPath } from "@jurgen1c/agent-core/repository";
 import { sqliteArtifactPaths } from "@jurgen1c/agent-core/sqlite";
 import { loadConfig } from "./config";
 import { NotFoundError } from "./errors";
@@ -204,7 +205,15 @@ export function doctorRegistry(options: RegistryMaintenanceOptions = {}): Regist
 
         try {
           const actualIdentity = deriveRepositoryIdentity(checkout.repo_root);
-          if (memory.repository_identity === null || actualIdentity !== memory.repository_identity) {
+          if (memory.repository_identity === null) {
+            findings.push({
+              code: "corrupt_metadata",
+              severity: "error",
+              ...common,
+              message: `Memory key ${memoryKey} has no verified repository identity.`,
+              guidance: "Repair the generated registry mapping from this active checkout before trusting or reusing its database."
+            });
+          } else if (actualIdentity !== memory.repository_identity) {
             findings.push({
               code: "duplicate_key",
               severity: "error",
@@ -397,7 +406,8 @@ function inspectCheckoutMapping(memoryKey: string, checkout: RegistryCheckoutRec
   if (configPathInspection.status === "inconclusive") return configPathInspection;
 
   try {
-    const configPath = path.relative(checkout.repo_root, checkout.config_path);
+    const containedConfigPath = resolveContainedPath(checkout.repo_root, checkout.config_path).absolutePath;
+    const configPath = path.relative(checkout.repo_root, containedConfigPath);
     const loaded = loadConfig({ repoRoot: checkout.repo_root, configPath });
     return loaded.config.database_scope === "global" && loaded.config.memory_key === memoryKey
       ? { status: "active" }

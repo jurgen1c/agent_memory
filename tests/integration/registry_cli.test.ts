@@ -44,6 +44,19 @@ describe("registry CLI", () => {
     expect(json.findings[0].code).toBe("corrupt_metadata");
   });
 
+  test("doctor human output uses neutral wording when findings include errors", async () => {
+    const globalHome = makeTempDirectory("agent-memory-cli-registry-home-");
+    fs.writeFileSync(registryPaths(globalHome).registry, "not json\n", { mode: 0o600 });
+
+    const result = await dispatch(["registry", "doctor"], {
+      env: { AGENT_MEMORY_HOME: globalHome }
+    });
+
+    expect(result.exitCode).toBe(5);
+    expect(result.stdout).toContain("registry doctor found issues");
+    expect(result.stdout).toContain("[ERROR]");
+  });
+
   test("renders inconclusive checkout status when config inspection fails", async () => {
     const globalHome = makeTempDirectory("agent-memory-cli-registry-home-");
     const repoRoot = makeTempDirectory("agent-memory-cli-registry-repo-");

@@ -88,6 +88,27 @@ describe("registry maintenance", () => {
     ]);
   });
 
+  test("doctor reports an unverified legacy identity as corrupt metadata rather than a mismatch", () => {
+    const globalHome = makeTempDirectory("agent-memory-registry-home-");
+    const repoRoot = makeTempDirectory("agent-memory-registry-repo-");
+    const registered = registerCheckout(globalHome, repoRoot, "legacy-memory");
+    ensureGlobalDatabaseDirectory(globalHome, "legacy-memory", registered.checkoutFingerprint);
+    fs.writeFileSync(registered.databasePath, "sqlite", { mode: 0o600 });
+    const registry = readRegistry({ globalHome });
+    registry.memories["legacy-memory"].repository_identity = null;
+    writeRegistry(registry, { globalHome });
+
+    const result = doctorRegistry({ globalHome });
+
+    expect(result.healthy).toBe(false);
+    expect(result.findings.some((finding) => finding.code === "duplicate_key")).toBe(false);
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: "corrupt_metadata",
+      severity: "error",
+      memory_key: "legacy-memory"
+    }));
+  });
+
   test("rejects a symlinked global home before canonicalizing maintenance paths", () => {
     const parent = makeTempDirectory("agent-memory-registry-home-parent-");
     const target = makeTempDirectory("agent-memory-registry-home-target-");
@@ -181,6 +202,47 @@ describe("registry maintenance", () => {
     expect(pruneRegistry({ globalHome, force: true })).toMatchObject({ stale_count: 0, pruned_count: 0 });
     expect(fs.existsSync(registered.databasePath)).toBe(true);
     expect(readRegistry({ globalHome }).memories["inconclusive-memory"]).toBeDefined();
+  });
+
+  test("treats config paths outside the checkout as inconclusive and excludes them from pruning", () => {
+    const globalHome = makeTempDirectory("agent-memory-registry-home-");
+    const repoRoot = makeTempDirectory("agent-memory-registry-repo-");
+    const outsideRoot = makeTempDirectory("agent-memory-registry-outside-");
+    const registered = registerCheckout(globalHome, repoRoot, "contained-memory");
+    ensureGlobalDatabaseDirectory(globalHome, "contained-memory", registered.checkoutFingerprint);
+    fs.writeFileSync(registered.databasePath, "sqlite", { mode: 0o600 });
+    const outsideConfigPath = path.join(outsideRoot, "agent-memory.config.yaml");
+    fs.writeFileSync(outsideConfigPath, "version: 2\nmemory_key: contained-memory\ndatabase_scope: global\n");
+    const registry = readRegistry({ globalHome });
+    Object.values(registry.memories["contained-memory"].checkouts)[0].config_path = outsideConfigPath;
+    writeRegistry(registry, { globalHome });
+
+    expect(listRegistry({ globalHome }).memories[0].checkouts[0]).toMatchObject({
+      checkout_status: "inconclusive",
+      stale: false
+    });
+    expect(doctorRegistry({ globalHome }).findings).toContainEqual(expect.objectContaining({
+      code: "corrupt_metadata",
+      memory_key: "contained-memory"
+    }));
+    expect(pruneRegistry({ globalHome, force: true })).toMatchObject({ stale_count: 0, pruned_count: 0 });
+    expect(fs.existsSync(registered.databasePath)).toBe(true);
+  });
+
+  test("keeps a config symlink active when its target remains inside the checkout", () => {
+    const globalHome = makeTempDirectory("agent-memory-registry-home-");
+    const repoRoot = makeTempDirectory("agent-memory-registry-repo-");
+    registerCheckout(globalHome, repoRoot, "symlinked-config-memory");
+    const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+    const targetPath = path.join(repoRoot, "actual.config.yaml");
+    fs.renameSync(configPath, targetPath);
+    fs.symlinkSync(path.basename(targetPath), configPath);
+
+    expect(listRegistry({ globalHome }).memories[0].checkouts[0]).toMatchObject({
+      checkout_status: "active",
+      stale: false
+    });
+    expect(doctorRegistry({ globalHome }).findings.some((finding) => finding.code === "corrupt_metadata")).toBe(false);
   });
 
   test("treats inaccessible config paths as inconclusive and excludes them from pruning", () => {
