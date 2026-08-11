@@ -97,6 +97,22 @@ Init options:
 | `--install-hooks` | Install configured non-blocking git hooks that resolve the repository root before using `agent-memory`, or `bin/memory` when that wrapper is readable and executable. |
 | `--force` | Overwrite existing scaffold files and hooks where supported. |
 
+### Migrate an Existing Local Install
+
+Existing version 1 repositories remain in local wrapper mode until migration is explicitly requested. Preview the migration first:
+
+```bash
+agent-memory upgrade --global
+```
+
+Apply it with:
+
+```bash
+agent-memory upgrade --global --write
+```
+
+The migration derives a stable `memory_key` from repository identity, or accepts `--memory-key <key>`. It refreshes managed instruction sections, generated agent skills, and installed generated hooks to use `agent-memory`; missing hooks stay uninstalled. Custom skills and hooks are preserved unless `--force` is passed. The local SQLite cache and `bin/memory` are never removed; output classifies the wrapper as generated, custom, or missing and reports whether manual cleanup is safe after `agent-memory sync` and `agent-memory doctor` succeed. Writes are rolled back if migration fails so the prior local configuration remains usable.
+
 ### Claim Relevance and Source Policy
 
 Generated repository guidance and skills include a memory-worthiness gate. A new claim should normally be repository-specific, future-relevant, durable, consequential if forgotten, and evidence-backed. Agents are told to search existing memory first and not create claims merely because code changed or coverage reported a gap.
@@ -183,7 +199,7 @@ Use `agent-memory help <command>` for full usage and examples.
 | `audit` | Audit changed memory for deterministic stale-claim risks. |
 | `doctor` | Check whether the compiled database exists, is fresh, and is compatible. |
 | `sync` | Compile, validate, and doctor memory in one command. |
-| `upgrade` | Refresh generated config comments, the configured managed instruction file, and generated agent skill files after package upgrades. |
+| `upgrade` | Refresh generated support files after package upgrades, or migrate local wrapper mode with `--global`. |
 | `install-hooks` | Install the hooks configured under `git.hooks`; each resolves the repository root and non-blockingly runs the available `agent-memory` command or wrapper. |
 | `ui` | Serve a local browser UI for inspecting and reviewing repository memory. |
 | `install-skill` | Install repository memory instructions under `.codex`, `.agents`, `.claude`, or a custom path. |
@@ -226,7 +242,7 @@ Command usage cheat sheet:
 | `audit` | `--changed-files` or `--git-diff`. | `--base <ref>` with `--git-diff`, `--strict`, `--json` |
 | `doctor` | None. | `--json` |
 | `sync` | None. | `--json` |
-| `upgrade` | None. Dry-run by default. | `--write`, `--force`, `--json` |
+| `upgrade` | None. Dry-run by default. | `--write`, `--force`, `--json`, `--global`, `--memory-key <key>` |
 | `install-hooks` | None. | `--force`, `--json` |
 | `ui` | None. | `--host <host>`, `--port <port>`, `--json` |
 | `install-skill` | `--agent codex` or `--agent generic`. | `--kind repo`, `--kind migration`, `--location <dir>`, `--path <file>`, `--force`, `--json` |
@@ -253,6 +269,7 @@ bin/memory install-skill --agent codex --kind migration
 bin/memory migrate-docs --from docs/legacy --system auth
 bin/memory migrate-docs --from docs/legacy --system auth --automatic
 bin/memory upgrade --write
+agent-memory upgrade --global --write
 bin/memory agent-manifest --json
 ```
 

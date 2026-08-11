@@ -304,10 +304,15 @@ const TOPICS: HelpTopic[] = [
       "agent-memory upgrade",
       "agent-memory upgrade --write",
       "agent-memory upgrade --write --force",
+      "agent-memory upgrade --global",
+      "agent-memory upgrade --global --write",
+      "agent-memory upgrade --global --write --memory-key org-repository",
       "agent-memory upgrade --json"
     ],
-    examples: ["agent-memory upgrade", "agent-memory upgrade --write"],
-    agentNotes: ["Dry-run by default. Preserves config values and unknown fields while adding defaults, and refreshes configured managed instruction and generated skill files."],
+    examples: ["agent-memory upgrade", "agent-memory upgrade --write", "agent-memory upgrade --global --write"],
+    agentNotes: [
+      "Dry-run by default. Normal upgrade preserves config values and unknown fields while adding defaults. Use --global to migrate local mode transactionally: it writes version 2, memory_key, and global scope only with --write; refreshes managed instructions, generated skills, and generated hooks; and preserves bin/memory plus the local SQLite cache. Use --force only to replace custom skill or hook files."
+    ],
     phase: "Maintenance"
   },
   {

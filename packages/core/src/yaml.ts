@@ -22,6 +22,10 @@ export function parseYaml(input: string): YamlValue {
 }
 
 export function setYamlTopLevelValue(input: string, key: string, value: JsonValue): string {
+  return setYamlPathValue(input, [key], value);
+}
+
+export function setYamlPathValue(input: string, path: string[], value: JsonValue): string {
   const document = parseDocument(input, {
     logLevel: "error",
     prettyErrors: true,
@@ -40,7 +44,7 @@ export function setYamlTopLevelValue(input: string, key: string, value: JsonValu
     throw new ConfigError("Invalid YAML: expected a top-level mapping.");
   }
 
-  document.set(key, value);
+  document.setIn(path, value);
   return document.toString({ lineWidth: 0 });
 }
 

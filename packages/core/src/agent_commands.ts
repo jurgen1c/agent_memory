@@ -130,9 +130,9 @@ export function buildAgentCommands(commandPrefix: string): AgentCommandDescripti
     },
     {
       name: "upgrade",
-      purpose: "Refresh generated config comments, the configured managed instruction file, and agent skill files.",
-      whenToUse: "Run after upgrading the agent-memory package version in a repository.",
-      examples: [`${commandPrefix} upgrade`, `${commandPrefix} upgrade --write`]
+      purpose: "Refresh generated support files or migrate local wrapper mode to global storage.",
+      whenToUse: "Run after upgrading the package, or use --global for an explicit dry-run-first local-to-global migration.",
+      examples: [`${commandPrefix} upgrade`, `${commandPrefix} upgrade --write`, "agent-memory upgrade --global --write"]
     }
   ];
 }
