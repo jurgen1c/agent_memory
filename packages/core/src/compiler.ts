@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { sqliteArtifactPaths } from "@jurgen1c/agent-core/sqlite";
 import { resolveConfiguredDatabaseLocation } from "./database";
 import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, resolveConfiguredPath } from "./files";
@@ -727,7 +728,7 @@ function replaceDatabase(tempDatabasePath: string, databasePath: string): void {
 }
 
 function cleanupDatabaseArtifacts(databasePath: string): void {
-  for (const artifactPath of [databasePath, `${databasePath}-journal`, `${databasePath}-wal`, `${databasePath}-shm`]) {
+  for (const artifactPath of sqliteArtifactPaths(databasePath)) {
     try {
       fs.rmSync(artifactPath, { force: true });
     } catch {

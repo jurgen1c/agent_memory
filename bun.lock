@@ -5,7 +5,7 @@
     "": {
       "name": "@jurgen1c/agent-memory-cli",
       "dependencies": {
-        "@jurgen1c/agent-core": "^0.1.0",
+        "@jurgen1c/agent-core": "^0.2.0",
         "@xyflow/react": "^12.0.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
@@ -175,7 +175,7 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
-    "@jurgen1c/agent-core": ["@jurgen1c/agent-core@0.1.0", "", { "dependencies": { "is-path-inside": "^4.0.0", "yaml": "^2.9.0" } }, "sha512-036a6Ra+Yf3/CoVW5/1m/NJGgNJc7oGyDnYp/doN4dBNoNi39PAQpOAmsgu7e6LilBDsS9Q5brBdQT84HKPXDA=="],
+    "@jurgen1c/agent-core": ["@jurgen1c/agent-core@0.2.0", "", { "dependencies": { "is-path-inside": "^4.0.0", "yaml": "^2.9.0" } }, "sha512-FX1Xn+QiDR5rGvtdK8nyVONrYD2MkMsmWdRVeLlM/YS+kBgXFwE8ehwI1ME29mIL1ijuSrC4HmcSS3n+/Y8cWA=="],
 
     "@jurgen1c/agent-memory-cli-workspace": ["@jurgen1c/agent-memory-cli-workspace@workspace:packages/cli"],
 

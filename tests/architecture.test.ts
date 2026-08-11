@@ -23,7 +23,7 @@ describe("standalone Agent Memory architecture", () => {
       type: "git",
       url: "git+https://github.com/jurgen1c/agent_memory.git"
     });
-    expect(packageJson.dependencies?.["@jurgen1c/agent-core"]).toBe("^0.1.0");
+    expect(packageJson.dependencies?.["@jurgen1c/agent-core"]).toBe("^0.2.0");
     expect(packageJson.engines?.node).toBe(">=25.9.0");
     expect(packageJson.workspaces).toEqual(["packages/*"]);
     expect(

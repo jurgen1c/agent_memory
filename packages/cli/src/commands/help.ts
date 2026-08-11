@@ -170,6 +170,31 @@ const TOPICS: HelpTopic[] = [
     phase: "Contextual Workflows Phase 5"
   },
   {
+    name: "registry",
+    purpose: "Inspect and safely maintain the user-local global storage registry.",
+    usage: [
+      "agent-memory registry list",
+      "agent-memory registry list --json",
+      "agent-memory registry show <memory-key>",
+      "agent-memory registry show <memory-key> --json",
+      "agent-memory registry doctor",
+      "agent-memory registry doctor --json",
+      "agent-memory registry prune",
+      "agent-memory registry prune --force",
+      "agent-memory registry prune --force --json"
+    ],
+    examples: [
+      "agent-memory registry list",
+      "agent-memory registry show org-repository --json",
+      "agent-memory registry doctor",
+      "agent-memory registry prune"
+    ],
+    agentNotes: [
+      "Registry commands inspect generated global state only. Prune is a dry run unless --force (or --yes) is supplied, removes stale entries only, and never deletes repository config or canonical docs/agent-memory content."
+    ],
+    phase: "Global Storage AM-72"
+  },
+  {
     name: "templates",
     purpose: "List, show, or copy built-in claim templates.",
     usage: [
@@ -390,6 +415,7 @@ export function renderHelp(topicName?: string): string {
     "  recipes              List, search, and show reusable workflow recipes.",
     "  plans                Search workflow templates and manage generated plan runs.",
     "  profiles             Match task-specific profile traits for context guidance.",
+    "  registry             Inspect and maintain global registry state.",
     "  context              Build agent-ready task or file context.",
     "  coverage             Check watched-file memory coverage.",
     "  audit                Audit deterministic stale-claim risks.",

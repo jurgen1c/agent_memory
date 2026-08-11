@@ -32,6 +32,7 @@ describe("CLI", () => {
     const upgrade = await dispatch(["help", "upgrade"]);
     const migrateDocs = await dispatch(["help", "migrate-docs"]);
     const audit = await dispatch(["help", "audit"]);
+    const registry = await dispatch(["help", "registry"]);
 
     expect(init.stdout).toContain("agent-memory init --yes --force");
     expect(init.stdout).toContain("--skill-location .agents");
@@ -44,6 +45,8 @@ describe("CLI", () => {
     expect(migrateDocs.stdout).toContain("lowercase memory namespace");
     expect(audit.stdout).toContain("agent-memory audit --git-diff --base origin/main");
     expect(audit.stdout).toContain("agent-memory audit --git-diff --strict");
+    expect(registry.stdout).toContain("agent-memory registry prune --force");
+    expect(registry.stdout).toContain("dry run unless --force");
   });
 
   test("renders inline help for every command", async () => {
@@ -66,7 +69,8 @@ describe("CLI", () => {
       "install-skill",
       "agent-manifest",
       "migrate-docs",
-      "new"
+      "new",
+      "registry"
     ];
 
     for (const command of commands) {
