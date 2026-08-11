@@ -1,6 +1,12 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import {
+  AtomicFileReplacementError,
+  ExclusiveFileLockError,
+  replaceFileAtomicallySync,
+  withExclusiveFileLockSync
+} from "@jurgen1c/agent-core/filesystem";
 import { loadConfig, renderYamlScalar } from "./config";
 import { assertGlobalDatabaseProvenance, resolveConfiguredDatabaseLocation } from "./database";
 import { AgentMemoryError, NotFoundError } from "./errors";
@@ -595,32 +601,32 @@ function writePlanRunAtomic(repoRoot: string, filePath: string, run: PlanRunDeta
   const lockPath = path.join(repoRoot, ".agent-memory/locks/plans.lock");
   fs.mkdirSync(path.dirname(lockPath), { recursive: true });
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  let lockHandle: number | null = null;
 
   try {
-    lockHandle = fs.openSync(lockPath, "wx");
-  } catch {
-    throw new AgentMemoryError(`Plan lock already exists at ${lockPath}.`, {
-      details: ["If it is stale, remove it manually after confirming no plan command is running."]
-    });
-  }
-
-  let tempPath: string | null = null;
-
-  try {
-    tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(tempPath, renderPlanRunYaml(run));
-    fs.renameSync(tempPath, filePath);
-    tempPath = null;
-  } finally {
-    if (tempPath && fs.existsSync(tempPath)) {
-      fs.unlinkSync(tempPath);
+    withExclusiveFileLockSync(lockPath, () => {
+      try {
+        replaceFileAtomicallySync(filePath, renderPlanRunYaml(run));
+      } catch (error) {
+        const detail = error instanceof AtomicFileReplacementError && error.cause instanceof Error
+          ? error.cause.message
+          : error instanceof Error ? error.message : String(error);
+        throw new AgentMemoryError(`Could not atomically write plan run: ${detail}`, { cause: error });
+      }
+    }, { timeoutMs: 0 });
+  } catch (error) {
+    if (error instanceof ExclusiveFileLockError && error.reason === "timeout") {
+      throw new AgentMemoryError(`Plan lock already exists at ${lockPath}.`, {
+        details: ["If it is stale, remove it manually after confirming no plan command is running."],
+        cause: error
+      });
     }
-
-    if (lockHandle !== null) {
-      fs.closeSync(lockHandle);
-      fs.unlinkSync(lockPath);
+    if (error instanceof ExclusiveFileLockError) {
+      throw new AgentMemoryError(`Could not safely use plan lock at ${lockPath}.`, {
+        details: ["Inspect the generated lock path before retrying the plan command."],
+        cause: error
+      });
     }
+    throw error;
   }
 }
 

@@ -2,7 +2,19 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isPathInside, nearestExistingAncestor, resolveContainedPath } from "@jurgen1c/agent-core/repository";
+import {
+  ExclusiveFileLockError,
+  inspectFileSystemPathSync,
+  replaceFileAtomicallySync,
+  withExclusiveFileLockSync
+} from "@jurgen1c/agent-core/filesystem";
+import {
+  isPathInside,
+  nearestExistingAncestor,
+  PathContainmentError,
+  resolveContainedPath
+} from "@jurgen1c/agent-core/repository";
+import { sqliteArtifactPaths } from "@jurgen1c/agent-core/sqlite";
 import { AgentMemoryError } from "./errors";
 import { isFullGitObjectId, repositoryObjectIdLength } from "./git";
 import { isValidMemoryKey } from "./memory_key";
@@ -49,6 +61,11 @@ export interface RegistryWriteOptions {
   globalHome?: string;
   lockTimeoutMs?: number;
   lockRetryMs?: number;
+}
+
+export interface RegistryUpdateHooks {
+  onFailure?: () => void;
+  finalize?: (registry: AgentMemoryRegistry) => AgentMemoryRegistry | void;
 }
 
 export interface UpdateRegistryCheckoutOptions extends RegistryWriteOptions {
@@ -229,21 +246,52 @@ export function writeRegistry(registry: AgentMemoryRegistry, options: RegistryWr
 
 export function updateRegistry(
   updater: (registry: AgentMemoryRegistry) => AgentMemoryRegistry | void,
-  options: RegistryWriteOptions = {}
+  options: RegistryWriteOptions = {},
+  hooks: RegistryUpdateHooks = {}
 ): AgentMemoryRegistry {
   const home = ensureGlobalHome(options.globalHome ?? resolveGlobalHome());
   const paths = registryPaths(home);
-  const lock = acquireRegistryLock(paths.lock, options);
-
   try {
-    const current = readRegistry({ globalHome: home });
-    const working = structuredClone(current);
-    const result = updater(working) ?? working;
-    const validated = validateRegistry(result, home);
-    atomicWriteRegistry(paths.registry, validated);
-    return validated;
-  } finally {
-    releaseRegistryLock(paths.lock, lock);
+    return withExclusiveFileLockSync(paths.lock, () => {
+      let committed = false;
+
+      try {
+        const current = readRegistry({ globalHome: home });
+        const working = structuredClone(current);
+        const result = updater(working) ?? working;
+        const validated = validateRegistry(result, home);
+        atomicWriteRegistry(paths.registry, validated);
+        committed = true;
+
+        if (!hooks.finalize) return validated;
+
+        const finalWorking = structuredClone(validated);
+        const finalResult = hooks.finalize(finalWorking) ?? finalWorking;
+        const finalValidated = validateRegistry(finalResult, home);
+        atomicWriteRegistry(paths.registry, finalValidated);
+        return finalValidated;
+      } catch (error) {
+        if (!committed) {
+          try {
+            hooks.onFailure?.();
+          } catch (rollbackError) {
+            throw new RegistryError("Registry update failed and generated-state rollback also failed.", {
+              details: ["Inspect registry.json and generated database paths before retrying maintenance."],
+              cause: rollbackError
+            });
+          }
+        }
+        throw error;
+      }
+    }, {
+      timeoutMs: options.lockTimeoutMs ?? DEFAULT_REGISTRY_LOCK_TIMEOUT_MS,
+      retryIntervalMs: options.lockRetryMs ?? DEFAULT_REGISTRY_LOCK_RETRY_MS,
+      mode: 0o600,
+      metadata: () => `${JSON.stringify({ pid: process.pid, acquired_at: new Date().toISOString() })}\n`
+    });
+  } catch (error) {
+    if (error instanceof ExclusiveFileLockError) throw registryLockError(error);
+    throw error;
   }
 }
 
@@ -281,7 +329,7 @@ export function updateRegistryCheckout(options: UpdateRegistryCheckoutOptions): 
     };
     const existingCheckout = memory.checkouts[checkoutFingerprint];
 
-    if (!existingCheckout && databaseArtifactPaths(databasePath).some(pathExistsIncludingSymlink)) {
+    if (!existingCheckout && sqliteArtifactPaths(databasePath).some(pathExistsIncludingSymlink)) {
       throw new RegistryError(`Refusing to register orphaned database artifacts at ${databasePath}.`, {
         details: ["The deterministic cache exists without a matching checkout mapping. Use an explicit repair or rebuild flow that verifies or replaces its provenance."]
       });
@@ -452,13 +500,21 @@ function validateCheckoutRecord(
 
 function assertDatabasePathContained(globalHome: string, databasePath: string): void {
   try {
-    const resolved = resolveContainedPath(globalHome, databasePath, { rejectFinalSymlink: true });
+    const resolved = resolveContainedPath(globalHome, databasePath, {
+      rejectFinalSymlink: true,
+      rejectSymlinkComponents: true
+    });
     if (!isPathInside(resolved.realRootPath, resolved.realExistingAncestorPath)) {
       throw new Error("Database path escapes global home.");
     }
-    assertNoSymlinkedPathComponents(globalHome, databasePath);
   } catch (error) {
     if (error instanceof RegistryError) throw error;
+    if (error instanceof PathContainmentError && error.reason === "symlink_component") {
+      throw new RegistryError(`Global database path contains a symbolic-link component: ${error.symlinkPath ?? databasePath}`, {
+        details: ["Use dedicated generated directories beneath global home and repair the unsafe alias before continuing."],
+        cause: error
+      });
+    }
     throw new RegistryError(`Global database path is not safely contained beneath ${path.resolve(globalHome)}.`, {
       details: ["Do not use the stored registry path. Repair the registry before continuing."],
       cause: error
@@ -466,93 +522,37 @@ function assertDatabasePathContained(globalHome: string, databasePath: string): 
   }
 }
 
-function acquireRegistryLock(lockPath: string, options: RegistryWriteOptions): number {
-  const timeoutMs = options.lockTimeoutMs ?? DEFAULT_REGISTRY_LOCK_TIMEOUT_MS;
-  const retryMs = options.lockRetryMs ?? DEFAULT_REGISTRY_LOCK_RETRY_MS;
-  const startedAt = Date.now();
-
-  while (true) {
-    let handle: number;
-    try {
-      handle = fs.openSync(lockPath, "wx", 0o600);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-        throw new RegistryError(`Could not acquire registry lock at ${lockPath}.`, { cause: error });
-      }
-
-      if (Date.now() - startedAt >= timeoutMs) {
-        throw new RegistryError(`Timed out waiting for registry lock at ${lockPath}.`, {
-          details: ["Another Agent Memory process may be updating the registry. Retry shortly; do not delete the lock unless its owner is proven inactive."]
-        });
-      }
-
-      sleepSynchronously(Math.min(retryMs, Math.max(1, timeoutMs - (Date.now() - startedAt))));
-      continue;
-    }
-
-    try {
-      fs.writeFileSync(handle, `${JSON.stringify({ pid: process.pid, acquired_at: new Date().toISOString() })}\n`);
-      fs.fsyncSync(handle);
-      return handle;
-    } catch (error) {
-      cleanupFailedLockInitialization(lockPath, handle);
-      throw new RegistryError(`Could not initialize registry lock at ${lockPath}.`, {
-        details: ["The incomplete lock was removed. Check available storage and directory permissions before retrying."],
-        cause: error
-      });
-    }
-  }
-}
-
-function cleanupFailedLockInitialization(lockPath: string, handle: number): void {
-  try {
-    fs.closeSync(handle);
-  } finally {
-    try {
-      fs.unlinkSync(lockPath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-  }
-}
-
-function releaseRegistryLock(lockPath: string, handle: number): void {
-  try {
-    fs.closeSync(handle);
-  } finally {
-    try {
-      fs.unlinkSync(lockPath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-  }
-}
-
 function atomicWriteRegistry(registryPath: string, registry: AgentMemoryRegistry): void {
-  const tempPath = `${registryPath}.${process.pid}.${crypto.randomBytes(8).toString("hex")}.tmp`;
-  let handle: number | null = null;
-
   try {
-    handle = fs.openSync(tempPath, "wx", 0o600);
-    fs.writeFileSync(handle, `${JSON.stringify(registry, null, 2)}\n`, "utf8");
-    fs.fsyncSync(handle);
-    fs.closeSync(handle);
-    handle = null;
-    fs.chmodSync(tempPath, 0o600);
-    fs.renameSync(tempPath, registryPath);
+    replaceFileAtomicallySync(registryPath, `${JSON.stringify(registry, null, 2)}\n`, { mode: 0o600 });
   } catch (error) {
     throw new RegistryError(`Could not atomically write registry at ${registryPath}.`, {
       details: ["The previous complete registry remains authoritative. Check directory permissions and retry."],
       cause: error
     });
-  } finally {
-    if (handle !== null) fs.closeSync(handle);
-    try {
-      fs.unlinkSync(tempPath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
   }
+}
+
+function registryLockError(error: ExclusiveFileLockError): RegistryError {
+  if (error.reason === "timeout") {
+    return new RegistryError(`Timed out waiting for registry lock at ${error.lockPath}.`, {
+      details: ["Another Agent Memory process may be updating the registry. Retry shortly; do not delete the lock unless its owner is proven inactive."],
+      cause: error
+    });
+  }
+  if (error.reason === "initialize_failed") {
+    return new RegistryError(`Could not initialize registry lock at ${error.lockPath}.`, {
+      details: ["The incomplete lock was removed when ownership could be verified. Check available storage and directory permissions before retrying."],
+      cause: error
+    });
+  }
+  if (error.reason === "release_failed") {
+    return new RegistryError(`Could not safely release registry lock at ${error.lockPath}.`, {
+      details: ["The lock path was retained if ownership could not be verified. Inspect it before retrying."],
+      cause: error
+    });
+  }
+  return new RegistryError(`Could not acquire registry lock at ${error.lockPath}.`, { cause: error });
 }
 
 function repairGeneratedDirectoryPermissions(globalHome: string, directory: string): void {
@@ -597,7 +597,7 @@ function assertPrivateGeneratedFile(filePath: string): void {
 }
 
 function assertPrivateDatabaseArtifacts(databasePath: string): void {
-  for (const artifactPath of databaseArtifactPaths(databasePath)) {
+  for (const artifactPath of sqliteArtifactPaths(databasePath)) {
     if (!pathExistsIncludingSymlink(artifactPath)) continue;
 
     let stat: fs.Stats;
@@ -629,41 +629,11 @@ function assertPrivateDatabaseArtifacts(databasePath: string): void {
   }
 }
 
-function databaseArtifactPaths(databasePath: string): string[] {
-  return [databasePath, `${databasePath}-journal`, `${databasePath}-wal`, `${databasePath}-shm`];
-}
-
-function assertNoSymlinkedPathComponents(globalHome: string, databasePath: string): void {
-  const home = path.resolve(globalHome);
-  const relativePath = path.relative(home, path.resolve(databasePath));
-  let current = home;
-
-  for (const component of relativePath.split(path.sep)) {
-    current = path.join(current, component);
-    let stat: fs.Stats;
-    try {
-      stat = fs.lstatSync(current);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-      throw error;
-    }
-
-    if (stat.isSymbolicLink()) {
-      throw new RegistryError(`Global database path contains a symbolic-link component: ${current}`, {
-        details: ["Use dedicated generated directories beneath global home and repair the unsafe alias before continuing."]
-      });
-    }
-  }
-}
-
 function pathExistsIncludingSymlink(filePath: string): boolean {
-  try {
-    fs.lstatSync(filePath);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw new RegistryError(`Could not inspect generated database path at ${filePath}.`, { cause: error });
-  }
+  const inspection = inspectFileSystemPathSync(filePath);
+  if (inspection.status === "present") return true;
+  if (inspection.status === "missing") return false;
+  throw new RegistryError(`Could not inspect generated database path at ${filePath}.`, { cause: inspection.error });
 }
 
 function isActiveRepositoryRoot(repoRoot: string): boolean {
@@ -763,11 +733,6 @@ function canonicalizeExistingPath(value: string): string {
   } catch (error) {
     throw new RegistryError(`Could not resolve global Agent Memory path: ${absolute}`, { cause: error });
   }
-}
-
-function sleepSynchronously(milliseconds: number): void {
-  const signal = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
-  Atomics.wait(signal, 0, 0, milliseconds);
 }
 
 function corruptRegistryError(registryPath: string, reason: string, cause?: unknown): RegistryError {

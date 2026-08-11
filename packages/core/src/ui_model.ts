@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { replaceFileAtomicallySync } from "@jurgen1c/agent-core/filesystem";
 import { compileMemory, type CompileResult } from "./compiler";
 import { loadConfig, renderYamlScalar } from "./config";
 import { resolveConfiguredDatabaseLocation } from "./database";
@@ -1258,20 +1259,7 @@ function updateYamlFile(filePath: string, operations: YamlPatchOperation[]): voi
     }
   }
 
-  writeFileAtomic(filePath, content.endsWith("\n") ? content : `${content}\n`);
-}
-
-function writeFileAtomic(filePath: string, content: string): void {
-  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
-
-  try {
-    fs.writeFileSync(tempPath, content);
-    fs.renameSync(tempPath, filePath);
-  } finally {
-    if (fs.existsSync(tempPath)) {
-      fs.unlinkSync(tempPath);
-    }
-  }
+  replaceFileAtomicallySync(filePath, content.endsWith("\n") ? content : `${content}\n`);
 }
 
 function replaceTopLevelScalar(content: string, key: string, value: string): string {

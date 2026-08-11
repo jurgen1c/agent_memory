@@ -328,7 +328,7 @@ describe("global registry storage", () => {
     fs.symlinkSync(outside, databasePath);
 
     expect(() => ensureGlobalDatabaseDirectory(globalHome, "symlink-cache", fingerprint)).toThrow(
-      "not safely contained"
+      "symbolic-link component"
     );
     expect(fs.existsSync(outside)).toBe(false);
     expect(fs.lstatSync(databasePath).isSymbolicLink()).toBe(true);
@@ -533,7 +533,7 @@ describe("global registry storage", () => {
     const original = updateRegistry((registry) => {
       registry.marker = "original";
     }, { globalHome });
-    const chmod = spyOn(fs, "chmodSync").mockImplementationOnce(() => {
+    const chmod = spyOn(fs, "fchmodSync").mockImplementationOnce(() => {
       throw Object.assign(new Error("permission denied"), { code: "EPERM" });
     });
 

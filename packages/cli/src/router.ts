@@ -16,6 +16,7 @@ import { runNewCommand } from "./commands/new";
 import { runPlansCommand } from "./commands/plans";
 import { runProfilesCommand } from "./commands/profiles";
 import { runQueryCommand } from "./commands/query";
+import { runRegistryCommand } from "./commands/registry";
 import { runRecipesCommand } from "./commands/recipes";
 import { runShowCommand } from "./commands/show";
 import { runSystemCommand } from "./commands/system";
@@ -38,6 +39,7 @@ export interface CliResult {
 
 export interface CliContext {
   cwd?: string;
+  env?: NodeJS.ProcessEnv;
 }
 
 export async function runCli(args: string[], streams: CliStreams = process, context: CliContext = {}): Promise<ExitCode> {
@@ -180,6 +182,17 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
     }
 
     return runProfilesCommand(rest, { cwd: context.cwd });
+  }
+
+  if (command === "registry") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      return {
+        exitCode: 0,
+        stdout: renderHelp("registry")
+      };
+    }
+
+    return runRegistryCommand(rest, { env: context.env });
   }
 
   if (command === "system") {
