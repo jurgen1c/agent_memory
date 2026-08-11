@@ -111,7 +111,7 @@ Apply it with:
 agent-memory upgrade --global --write
 ```
 
-The migration derives a stable `memory_key` from repository identity, or accepts `--memory-key <key>`. It refreshes managed instruction sections, generated agent skills, and installed generated hooks to use `agent-memory`; missing hooks stay uninstalled. Custom skills and hooks are preserved unless `--force` is passed. The local SQLite cache and `bin/memory` are never removed; output classifies the wrapper as generated, custom, or missing and reports whether manual cleanup is safe after `agent-memory sync` and `agent-memory doctor` succeed. Writes are rolled back if migration fails so the prior local configuration remains usable.
+The migration derives a stable `memory_key` from repository identity, or accepts `--memory-key <key>` to override key derivation. Global registry safety still requires a supported credential-free repository identity; an explicit key does not bypass that validation. It refreshes managed instruction sections, generated agent skills, and installed generated hooks to use `agent-memory`; missing hooks stay uninstalled. Custom skills and hooks are preserved unless `--force` is passed. The local SQLite cache and `bin/memory` are never removed; output classifies the wrapper as generated, custom, or missing and reports whether manual cleanup is safe after `agent-memory sync` and `agent-memory doctor` succeed. Writes are rolled back if migration fails so the prior local configuration remains usable.
 
 ### Claim Relevance and Source Policy
 

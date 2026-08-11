@@ -90,6 +90,20 @@ describe("upgrade --global", () => {
     expect(loadConfig({ repoRoot }).config.database_scope).toBe("local");
   });
 
+  test("does not let an explicit memory key bypass repository identity validation", async () => {
+    const repoRoot = makeLocalRepo({ wrapper: "missing" });
+    const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+    git(repoRoot, ["remote", "set-url", "origin", "ssh://alice@git.example.test:2222/org/repo.git"]);
+    const originalConfig = fs.readFileSync(configPath, "utf8");
+
+    await expect(
+      dispatch(["upgrade", "--global", "--write", "--memory-key", "deliberately-chosen"], { cwd: repoRoot })
+    ).rejects.toThrow("Could not derive a safe repository identity");
+
+    expect(fs.readFileSync(configPath, "utf8")).toBe(originalConfig);
+    expect(loadConfig({ repoRoot }).config.database_scope).toBe("local");
+  });
+
   test("preserves a legacy single-agent install and persists its selection", async () => {
     const repoRoot = makeLocalRepo({ wrapper: "generated", generatedSupport: true });
     const genericSkillPath = path.join(repoRoot, "docs/agent-memory/AGENT_SKILL.md");
