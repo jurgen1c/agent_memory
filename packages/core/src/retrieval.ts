@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { loadConfig } from "./config";
-import { assertGlobalDatabaseProvenance, resolveConfiguredDatabaseLocation } from "./database";
+import { assertGlobalDatabaseProvenance, missingDatabaseGuidance, resolveConfiguredDatabaseLocation } from "./database";
 import { NotFoundError } from "./errors";
 import { openSqliteDatabase, type SqliteDatabase, type SqliteValue } from "./sqlite";
 
@@ -201,7 +201,7 @@ async function openConfiguredDatabase(cwd?: string): Promise<{ database: SqliteD
 
   if (!fs.existsSync(databasePath)) {
     throw new NotFoundError(`Compiled memory database not found at ${databasePath}`, {
-      details: ["Run `agent-memory compile` first."]
+      details: [missingDatabaseGuidance(databaseLocation)]
     });
   }
 

@@ -2,7 +2,11 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config";
-import { assertGlobalDatabaseProvenance, resolveConfiguredDatabaseLocation } from "./database";
+import {
+  assertGlobalDatabaseProvenance,
+  missingDatabaseGuidance,
+  resolveConfiguredDatabaseLocation
+} from "./database";
 import { canonicalMemoryFileInventory, discoverCanonicalMemoryFiles, resolveConfiguredPath } from "./files";
 import { runGit } from "./git";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
@@ -52,7 +56,7 @@ export async function doctorMemory(options: DoctorOptions = {}): Promise<DoctorR
   const checks: DoctorCheck[] = [];
 
   if (!fs.existsSync(databasePath)) {
-    checks.push(warn("database_exists", `Database does not exist at ${databasePath}.`, "Run `agent-memory compile`."));
+    checks.push(warn("database_exists", `Database does not exist at ${databasePath}.`, missingDatabaseGuidance(databaseLocation)));
     return result(false, databasePath, repoRoot, checks);
   }
 
@@ -61,7 +65,7 @@ export async function doctorMemory(options: DoctorOptions = {}): Promise<DoctorR
   const database = await openSqliteDatabase(databasePath, { readonly: true });
 
   try {
-    assertGlobalDatabaseProvenance(database, databaseLocation, loaded);
+    assertGlobalDatabaseProvenance(database, databaseLocation, loaded, { includeConfigHash: false });
     const metadataTableExists = tableExists(database, "compile_metadata");
     const metadata = metadataTableExists ? readMetadata(database) : new Map<string, string>();
 

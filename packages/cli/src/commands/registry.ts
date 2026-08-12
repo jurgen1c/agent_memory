@@ -96,7 +96,14 @@ function parsePrune(args: string[]): { force: boolean; json: boolean } {
 function renderList(result: RegistryListResult): string {
   const lines = ["# Agent Memory Registry", "", `Global home: ${result.global_home}`, `Memory keys: ${result.memory_count}`, `Checkouts: ${result.checkout_count}`];
   for (const memory of result.memories) {
-    lines.push("", `## ${memory.memory_key}`, "", `Repository identity: ${memory.repository_identity ?? "unverified"}`);
+    lines.push(
+      "",
+      `## ${memory.memory_key}`,
+      "",
+      `Repository identity: ${memory.repository_identity ?? "unverified"}`,
+      `Checkout classification: ${memory.checkout_classification}`,
+      `Checkout counts: active=${memory.active_checkout_count}, stale=${memory.stale_checkout_count}, inconclusive=${memory.inconclusive_checkout_count}`
+    );
     for (const checkout of memory.checkouts) lines.push(renderCheckoutLine(checkout));
   }
   if (result.memories.length === 0) lines.push("", "No registry entries found.");
@@ -108,7 +115,9 @@ function renderShow(memory: RegistryMemorySummary): string {
     `# Registry Memory ${memory.memory_key}`,
     "",
     `Repository identity: ${memory.repository_identity ?? "unverified"}`,
-    `Checkouts: ${memory.checkout_count}`
+    `Checkouts: ${memory.checkout_count}`,
+    `Checkout classification: ${memory.checkout_classification}`,
+    `Checkout counts: active=${memory.active_checkout_count}, stale=${memory.stale_checkout_count}, inconclusive=${memory.inconclusive_checkout_count}`
   ];
   for (const checkout of memory.checkouts) {
     lines.push(

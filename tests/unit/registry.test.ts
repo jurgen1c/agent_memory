@@ -153,21 +153,129 @@ describe("global registry storage", () => {
     );
   });
 
-  test("fails closed on memory-key identity collisions", () => {
+  test("distinguishes active memory-key identity collisions from stale mappings", () => {
     const globalHome = makeTempDirectory("agent-memory-global-home-");
     const repoRoot = makeTempDirectory("agent-memory-checkout-");
+    const unrelatedRoot = makeTempDirectory("agent-memory-unrelated-");
+    const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+    fs.writeFileSync(configPath, "version: 2\nmemory_key: shared-key\ndatabase_scope: global\n");
     const common = {
       globalHome,
       memoryKey: "shared-key",
-      repoRoot,
-      configPath: path.join(repoRoot, "agent-memory.config.yaml"),
       packageVersion: "0.4.0",
       configHash: "sha256:config"
     };
 
-    updateRegistryCheckout({ ...common, repositoryIdentity: "remote:github.com/org/one" });
-    expect(() => updateRegistryCheckout({ ...common, repositoryIdentity: "remote:github.com/org/two" })).toThrow(
-      "Memory key collision"
+    updateRegistryCheckout({
+      ...common,
+      repositoryIdentity: "remote:github.com/org/one",
+      repoRoot,
+      configPath
+    });
+    const conflictingRegistration = {
+      ...common,
+      repositoryIdentity: "remote:github.com/org/two",
+      repoRoot: unrelatedRoot,
+      configPath: path.join(unrelatedRoot, "agent-memory.config.yaml")
+    };
+
+    expect(() => updateRegistryCheckout(conflictingRegistration)).toThrow("Active memory key collision");
+
+    fs.writeFileSync(configPath, "version: 2\nmemory_key: replacement-key\ndatabase_scope: global\n");
+    try {
+      updateRegistryCheckout(conflictingRegistration);
+      throw new Error("Expected stale memory key collision.");
+    } catch (error) {
+      expect((error as Error).message).toContain("Stale memory key collision");
+      expect((error as RegistryError).details).toContainEqual(expect.stringContaining("no longer selects this key"));
+      expect((error as RegistryError).details.join(" ")).not.toContain("roots are missing");
+    }
+  });
+
+  test("requires registry repair when the current root has a different repository identity", () => {
+    const globalHome = makeTempDirectory("agent-memory-global-home-");
+    const repoRoot = makeTempDirectory("agent-memory-checkout-");
+    const configPath = path.join(repoRoot, "agent-memory.config.yaml");
+    fs.writeFileSync(configPath, "version: 2\nmemory_key: shared-key\ndatabase_scope: global\n");
+    const common = {
+      globalHome,
+      memoryKey: "shared-key",
+      repoRoot,
+      configPath,
+      packageVersion: "0.4.0",
+      configHash: "sha256:config"
+    };
+
+    updateRegistryCheckout({ ...common, repositoryIdentity: "remote:github.com/org/original" });
+
+    try {
+      updateRegistryCheckout({ ...common, repositoryIdentity: "remote:github.com/org/changed" });
+      throw new Error("Expected a same-root repository identity mismatch.");
+    } catch (error) {
+      expect((error as Error).message).toContain("Repository identity mismatch");
+      expect((error as RegistryError).details).toContainEqual(expect.stringContaining("Repair the registry"));
+      expect((error as RegistryError).details.join(" ")).not.toContain("distinct memory_key");
+    }
+  });
+
+  test("reports an empty mismatched memory record as repairable registry state", () => {
+    const globalHome = makeTempDirectory("agent-memory-global-home-");
+    const repoRoot = makeTempDirectory("agent-memory-checkout-");
+    writeRegistry({
+      version: 1,
+      memories: {
+        "shared-key": {
+          repository_identity: "remote:github.com/org/original",
+          checkouts: {}
+        }
+      }
+    }, { globalHome });
+
+    try {
+      updateRegistryCheckout({
+        globalHome,
+        memoryKey: "shared-key",
+        repositoryIdentity: "remote:github.com/org/changed",
+        repoRoot,
+        configPath: path.join(repoRoot, "agent-memory.config.yaml"),
+        packageVersion: "0.4.0",
+        configHash: "sha256:config"
+      });
+      throw new Error("Expected an empty memory record error.");
+    } catch (error) {
+      expect((error as Error).message).toContain("Empty memory key record");
+      expect((error as RegistryError).details).toContainEqual(expect.stringContaining("registry prune"));
+      expect((error as RegistryError).details.join(" ")).not.toContain("distinct memory_key");
+    }
+  });
+
+  test("registers separate checkout fingerprints and databases for active clones with one identity and key", () => {
+    const globalHome = makeTempDirectory("agent-memory-global-home-");
+    const firstRoot = makeTempDirectory("agent-memory-first-clone-");
+    const secondRoot = makeTempDirectory("agent-memory-second-clone-");
+    const common = {
+      globalHome,
+      memoryKey: "shared-clones",
+      repositoryIdentity: "remote:github.com/org/repo",
+      packageVersion: "0.4.0",
+      configHash: "sha256:config"
+    };
+
+    const first = updateRegistryCheckout({
+      ...common,
+      repoRoot: firstRoot,
+      configPath: path.join(firstRoot, "agent-memory.config.yaml")
+    });
+    const second = updateRegistryCheckout({
+      ...common,
+      repoRoot: secondRoot,
+      configPath: path.join(secondRoot, "agent-memory.config.yaml")
+    });
+
+    expect(second.checkoutFingerprint).not.toBe(first.checkoutFingerprint);
+    expect(second.databasePath).not.toBe(first.databasePath);
+    expect(Object.keys(second.registry.memories["shared-clones"].checkouts).sort()).toEqual(
+      [first.checkoutFingerprint, second.checkoutFingerprint].sort()
     );
   });
 

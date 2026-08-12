@@ -39,6 +39,10 @@ describe("registry maintenance", () => {
     expect(listed.memories[0]).toMatchObject({
       memory_key: "example-memory",
       checkout_count: 1,
+      active_checkout_count: 1,
+      stale_checkout_count: 0,
+      inconclusive_checkout_count: 0,
+      checkout_classification: "single_active",
       effective_database_paths: [registered.databasePath]
     });
     expect(listed.memories[0].checkouts[0]).toMatchObject({
@@ -52,6 +56,31 @@ describe("registry maintenance", () => {
 
     expect(showRegistryMemory("example-memory", { globalHome })).toEqual(listed.memories[0]);
     expect(() => showRegistryMemory("missing-key", { globalHome })).toThrow("Registry memory key not found");
+  });
+
+  test("classifies active clones separately from stale moved checkout mappings", () => {
+    const globalHome = makeTempDirectory("agent-memory-registry-home-");
+    const firstRoot = makeTempDirectory("agent-memory-first-clone-");
+    const secondRoot = makeTempDirectory("agent-memory-second-clone-");
+    const identity = "remote:github.com/org/shared";
+    registerCheckout(globalHome, firstRoot, "shared-memory", "agent-memory.config.yaml", identity);
+    registerCheckout(globalHome, secondRoot, "shared-memory", "agent-memory.config.yaml", identity);
+
+    expect(showRegistryMemory("shared-memory", { globalHome })).toMatchObject({
+      checkout_count: 2,
+      active_checkout_count: 2,
+      stale_checkout_count: 0,
+      checkout_classification: "multiple_active"
+    });
+
+    fs.rmSync(firstRoot, { recursive: true });
+
+    expect(showRegistryMemory("shared-memory", { globalHome })).toMatchObject({
+      checkout_count: 2,
+      active_checkout_count: 1,
+      stale_checkout_count: 1,
+      checkout_classification: "mixed"
+    });
   });
 
   test("doctor reports stale paths, missing databases, and duplicate active keys with guidance", () => {
@@ -407,14 +436,20 @@ describe("registry maintenance", () => {
   });
 });
 
-function registerCheckout(globalHome: string, repoRoot: string, memoryKey: string, configName = "agent-memory.config.yaml") {
+function registerCheckout(
+  globalHome: string,
+  repoRoot: string,
+  memoryKey: string,
+  configName = "agent-memory.config.yaml",
+  repositoryIdentity = deriveRepositoryIdentity(repoRoot)
+) {
   fs.mkdirSync(repoRoot, { recursive: true });
   const configPath = path.join(repoRoot, configName);
   fs.writeFileSync(configPath, `version: 2\nmemory_key: ${memoryKey}\ndatabase_scope: global\n`);
   return updateRegistryCheckout({
     globalHome,
     memoryKey,
-    repositoryIdentity: deriveRepositoryIdentity(repoRoot),
+    repositoryIdentity,
     repoRoot,
     configPath,
     packageVersion: "0.4.0",

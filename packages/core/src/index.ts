@@ -22,6 +22,7 @@ export * from "./plans";
 export * from "./profiles";
 export * from "./repo";
 export * from "./registry";
+export * from "./registry_checkout";
 export * from "./registry_maintenance";
 export * from "./retrieval";
 export * from "./recipes";
