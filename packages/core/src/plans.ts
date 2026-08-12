@@ -8,7 +8,7 @@ import {
   withExclusiveFileLockSync
 } from "@jurgen1c/agent-core/filesystem";
 import { loadConfig, renderYamlScalar } from "./config";
-import { assertGlobalDatabaseProvenance, resolveConfiguredDatabaseLocation } from "./database";
+import { assertGlobalDatabaseProvenance, missingDatabaseGuidance, resolveConfiguredDatabaseLocation } from "./database";
 import { AgentMemoryError, NotFoundError } from "./errors";
 import { resolveConfiguredPath } from "./files";
 import { runGit } from "./git";
@@ -458,7 +458,7 @@ async function openConfiguredDatabase(cwd?: string): Promise<{ database: SqliteD
 
   if (!fs.existsSync(databasePath)) {
     throw new NotFoundError(`Compiled memory database not found at ${databasePath}`, {
-      details: ["Run `agent-memory compile` first."]
+      details: [missingDatabaseGuidance(databaseLocation)]
     });
   }
 

@@ -28,6 +28,10 @@ describe("registry CLI", () => {
 
     const shown = await dispatch(["registry", "show", "cli-memory", "--json"], context);
     expect(JSON.parse(shown.stdout ?? "{}")).toMatchObject({ memory_key: "cli-memory", checkout_count: 1 });
+
+    const human = await dispatch(["registry", "show", "cli-memory"], context);
+    expect(human.stdout).toContain("Checkout classification: single_active");
+    expect(human.stdout).toContain("Checkout counts: active=1, stale=0, inconclusive=0");
   });
 
   test("doctor emits structured JSON for corrupt metadata", async () => {

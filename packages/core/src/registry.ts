@@ -18,6 +18,7 @@ import { sqliteArtifactPaths } from "@jurgen1c/agent-core/sqlite";
 import { AgentMemoryError } from "./errors";
 import { isFullGitObjectId, repositoryObjectIdLength } from "./git";
 import { isValidMemoryKey } from "./memory_key";
+import { inspectRegistryCheckoutMapping } from "./registry_checkout";
 
 export const REGISTRY_VERSION = 1;
 export const DEFAULT_REGISTRY_LOCK_TIMEOUT_MS = 1_000;
@@ -316,10 +317,53 @@ export function updateRegistryCheckout(options: UpdateRegistryCheckoutOptions): 
     const existingMemory = Object.hasOwn(current.memories, options.memoryKey)
       ? current.memories[options.memoryKey]
       : undefined;
+    const existingCheckout = existingMemory?.checkouts[checkoutFingerprint];
+
+    if (existingCheckout && path.normalize(existingCheckout.repo_root) !== repoRoot) {
+      throw new RegistryError(`Checkout fingerprint collision for ${checkoutFingerprint}.`, {
+        details: ["The fingerprint is already mapped to another repository root. Repair the registry before continuing."]
+      });
+    }
 
     if (existingMemory && existingMemory.repository_identity !== repositoryIdentity) {
-      throw new RegistryError(`Memory key collision for ${options.memoryKey}.`, {
-        details: ["The key is already registered to a different or unverified repository identity. Choose a new memory_key or repair the registry."]
+      const existingCheckouts = Object.values(existingMemory.checkouts);
+
+      if (existingCheckouts.length === 0) {
+        throw new RegistryError(`Empty memory key record for ${options.memoryKey}.`, {
+          details: [
+            "The key is registered to a different or unverified repository identity but has no checkout mappings.",
+            "Run `agent-memory registry doctor`, then preview `agent-memory registry prune` and repeat with --force after confirming the empty record."
+          ]
+        });
+      }
+
+      if (existingCheckout) {
+        throw new RegistryError(`Repository identity mismatch for ${options.memoryKey}.`, {
+          details: [
+            "The current checkout root and fingerprint are already registered with a different or unverified repository identity.",
+            "Do not read the existing database. Repair the registry only after verifying the checkout and its repository identity."
+          ]
+        });
+      }
+
+      const nonStaleCheckouts = existingCheckouts.filter(
+        (checkout) => inspectRegistryCheckoutMapping(options.memoryKey, checkout).status !== "stale"
+      );
+
+      if (nonStaleCheckouts.length === 0) {
+        throw new RegistryError(`Stale memory key collision for ${options.memoryKey}.`, {
+          details: [
+            "The key belongs to a different or unverified repository identity, but every registered checkout mapping is stale or no longer selects this key.",
+            "Run `agent-memory registry doctor`, then preview `agent-memory registry prune` and repeat with --force after confirming the stale mappings."
+          ]
+        });
+      }
+
+      throw new RegistryError(`Active memory key collision for ${options.memoryKey}.`, {
+        details: [
+          "The key is already registered to a different or unverified repository identity with an active or inconclusive checkout mapping.",
+          "Choose a distinct memory_key for the unrelated repository. Do not reuse another active checkout's generated database."
+        ]
       });
     }
 
@@ -327,17 +371,10 @@ export function updateRegistryCheckout(options: UpdateRegistryCheckoutOptions): 
       repository_identity: repositoryIdentity,
       checkouts: {}
     };
-    const existingCheckout = memory.checkouts[checkoutFingerprint];
 
     if (!existingCheckout && sqliteArtifactPaths(databasePath).some(pathExistsIncludingSymlink)) {
       throw new RegistryError(`Refusing to register orphaned database artifacts at ${databasePath}.`, {
         details: ["The deterministic cache exists without a matching checkout mapping. Use an explicit repair or rebuild flow that verifies or replaces its provenance."]
-      });
-    }
-
-    if (existingCheckout && path.normalize(existingCheckout.repo_root) !== repoRoot) {
-      throw new RegistryError(`Checkout fingerprint collision for ${checkoutFingerprint}.`, {
-        details: ["The fingerprint is already mapped to another repository root. Repair the registry before continuing."]
       });
     }
 

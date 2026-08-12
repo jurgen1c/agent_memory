@@ -1,9 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { inspectFileSystemPathSync } from "@jurgen1c/agent-core/filesystem";
-import { resolveContainedPath } from "@jurgen1c/agent-core/repository";
 import { sqliteArtifactPaths } from "@jurgen1c/agent-core/sqlite";
-import { loadConfig } from "./config";
 import { NotFoundError } from "./errors";
 import { deriveRepositoryIdentity } from "./memory_key";
 import {
@@ -18,9 +15,19 @@ import {
   type RegistryMemoryRecord,
   type RegistryWriteOptions
 } from "./registry";
+import {
+  inspectRegistryCheckoutMapping,
+  type RegistryCheckoutMappingInspection
+} from "./registry_checkout";
 
 export type RegistryDatabaseStatus = "present" | "missing";
 export type RegistryCheckoutStatus = "active" | "stale" | "inconclusive";
+export type RegistryMemoryCheckoutClassification =
+  | "single_active"
+  | "multiple_active"
+  | "mixed"
+  | "stale_only"
+  | "inconclusive";
 
 export interface RegistryCheckoutSummary {
   memory_key: string;
@@ -42,6 +49,10 @@ export interface RegistryMemorySummary {
   memory_key: string;
   repository_identity: string | null;
   checkout_count: number;
+  active_checkout_count: number;
+  stale_checkout_count: number;
+  inconclusive_checkout_count: number;
+  checkout_classification: RegistryMemoryCheckoutClassification;
   effective_database_paths: string[];
   checkouts: RegistryCheckoutSummary[];
 }
@@ -88,11 +99,6 @@ export interface PruneRegistryOptions extends RegistryMaintenanceOptions, Pick<R
   force?: boolean;
 }
 
-type CheckoutMappingInspection =
-  | { status: "active" }
-  | { status: "stale" }
-  | { status: "inconclusive"; message: string };
-
 interface StagedCheckoutDirectory {
   original: string;
   staged: string;
@@ -101,11 +107,6 @@ interface StagedCheckoutDirectory {
 interface PrunableRegistryCheckoutRecord extends RegistryCheckoutRecord {
   prune_pending?: boolean;
 }
-
-type PathInspection =
-  | { status: "present" }
-  | { status: "missing" }
-  | { status: "inconclusive"; message: string };
 
 export function listRegistry(options: RegistryMaintenanceOptions = {}): RegistryListResult {
   const registry = readRegistry({ globalHome: options.globalHome });
@@ -179,7 +180,7 @@ export function doctorRegistry(options: RegistryMaintenanceOptions = {}): Regist
 
     for (const [fingerprint, checkout] of Object.entries(memory.checkouts).sort(([left], [right]) => left.localeCompare(right))) {
       const common = { memory_key: memoryKey, checkout_fingerprint: fingerprint };
-      const inspection = inspectCheckoutMapping(memoryKey, checkout);
+      const inspection = inspectRegistryCheckoutMapping(memoryKey, checkout);
 
       if (inspection.status === "stale") {
         findings.push({
@@ -300,7 +301,7 @@ export function pruneRegistry(options: PruneRegistryOptions = {}): RegistryPrune
     const currentStaleEntries = currentMemories.flatMap(([memoryKey, memory]) =>
       Object.entries(memory.checkouts)
         .sort(([left], [right]) => left.localeCompare(right))
-        .filter(([, checkout]) => inspectCheckoutMapping(memoryKey, checkout).status === "stale")
+        .filter(([, checkout]) => inspectRegistryCheckoutMapping(memoryKey, checkout).status === "stale")
         .map(([fingerprint, checkout]) => summarizeCheckout(memoryKey, fingerprint, checkout))
     );
 
@@ -309,7 +310,7 @@ export function pruneRegistry(options: PruneRegistryOptions = {}): RegistryPrune
     for (const entry of currentStaleEntries) {
       const memory = registry.memories[entry.memory_key];
       const checkout = memory?.checkouts[entry.checkout_fingerprint] as PrunableRegistryCheckoutRecord | undefined;
-      if (!checkout || inspectCheckoutMapping(entry.memory_key, checkout).status !== "stale") continue;
+      if (!checkout || inspectRegistryCheckoutMapping(entry.memory_key, checkout).status !== "stale") continue;
 
       const staged = stageGeneratedCheckout(paths.home, stagingRoot, entry);
       if (staged) stagedDirectories.push(staged);
@@ -328,7 +329,7 @@ export function pruneRegistry(options: PruneRegistryOptions = {}): RegistryPrune
         const checkout = memory?.checkouts[entry.checkout_fingerprint] as PrunableRegistryCheckoutRecord | undefined;
         if (!checkout?.prune_pending) continue;
 
-        const checkoutStatus = inspectCheckoutMapping(entry.memory_key, checkout).status;
+        const checkoutStatus = inspectRegistryCheckoutMapping(entry.memory_key, checkout).status;
         if (checkoutStatus !== "stale") {
           reconcileRetainedCheckout(path.dirname(entry.database_path), staged, checkoutStatus);
           delete checkout.prune_pending;
@@ -364,13 +365,37 @@ function summarizeMemory(memoryKey: string, memory: RegistryMemoryRecord): Regis
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([fingerprint, checkout]) => summarizeCheckout(memoryKey, fingerprint, checkout));
 
+  const activeCheckoutCount = checkouts.filter((checkout) => checkout.checkout_status === "active").length;
+  const staleCheckoutCount = checkouts.filter((checkout) => checkout.checkout_status === "stale").length;
+  const inconclusiveCheckoutCount = checkouts.filter((checkout) => checkout.checkout_status === "inconclusive").length;
+
   return {
     memory_key: memoryKey,
     repository_identity: memory.repository_identity,
     checkout_count: checkouts.length,
+    active_checkout_count: activeCheckoutCount,
+    stale_checkout_count: staleCheckoutCount,
+    inconclusive_checkout_count: inconclusiveCheckoutCount,
+    checkout_classification: classifyMemoryCheckouts(
+      activeCheckoutCount,
+      staleCheckoutCount,
+      inconclusiveCheckoutCount
+    ),
     effective_database_paths: checkouts.map((checkout) => checkout.database_path),
     checkouts
   };
+}
+
+function classifyMemoryCheckouts(
+  activeCount: number,
+  staleCount: number,
+  inconclusiveCount: number
+): RegistryMemoryCheckoutClassification {
+  if (inconclusiveCount > 0) return "inconclusive";
+  if (activeCount > 0 && staleCount > 0) return "mixed";
+  if (activeCount > 1) return "multiple_active";
+  if (activeCount === 1) return "single_active";
+  return "stale_only";
 }
 
 function summarizeCheckout(
@@ -378,7 +403,7 @@ function summarizeCheckout(
   checkoutFingerprint: string,
   checkout: RegistryCheckoutRecord
 ): RegistryCheckoutSummary {
-  const inspection = inspectCheckoutMapping(memoryKey, checkout);
+  const inspection = inspectRegistryCheckoutMapping(memoryKey, checkout);
   return {
     memory_key: memoryKey,
     checkout_fingerprint: checkoutFingerprint,
@@ -393,39 +418,6 @@ function summarizeCheckout(
     config_hash: checkout.config_hash,
     git_head: checkout.git_head,
     last_seen_at: checkout.last_seen_at
-  };
-}
-
-function inspectCheckoutMapping(memoryKey: string, checkout: RegistryCheckoutRecord): CheckoutMappingInspection {
-  const repoRoot = inspectPath(checkout.repo_root);
-  if (repoRoot.status === "missing") return { status: "stale" };
-  if (repoRoot.status === "inconclusive") return repoRoot;
-
-  const configPathInspection = inspectPath(checkout.config_path);
-  if (configPathInspection.status === "missing") return { status: "stale" };
-  if (configPathInspection.status === "inconclusive") return configPathInspection;
-
-  try {
-    const containedConfigPath = resolveContainedPath(checkout.repo_root, checkout.config_path).absolutePath;
-    const configPath = path.relative(checkout.repo_root, containedConfigPath);
-    const loaded = loadConfig({ repoRoot: checkout.repo_root, configPath });
-    return loaded.config.database_scope === "global" && loaded.config.memory_key === memoryKey
-      ? { status: "active" }
-      : { status: "stale" };
-  } catch (error) {
-    return {
-      status: "inconclusive",
-      message: error instanceof Error ? error.message : String(error)
-    };
-  }
-}
-
-function inspectPath(filePath: string): PathInspection {
-  const inspection = inspectFileSystemPathSync(filePath);
-  if (inspection.status !== "inconclusive") return inspection;
-  return {
-    status: "inconclusive",
-    message: `Could not inspect ${filePath}: ${inspection.error instanceof Error ? inspection.error.message : String(inspection.error)}`
   };
 }
 
@@ -492,7 +484,7 @@ function rollbackStagedCheckouts(
 function reconcileRetainedCheckout(
   original: string,
   staged: string,
-  checkoutStatus: Exclude<RegistryCheckoutStatus, "stale">
+  checkoutStatus: Exclude<RegistryCheckoutMappingInspection["status"], "stale">
 ): void {
   if (!fs.existsSync(staged)) return;
   assertRecognizedGeneratedDirectory(staged);

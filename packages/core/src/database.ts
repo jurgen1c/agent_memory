@@ -41,6 +41,16 @@ export interface ResolvedDatabaseLocation {
   repositoryIdentity?: string;
 }
 
+export interface AssertGlobalDatabaseProvenanceOptions {
+  includeConfigHash?: boolean;
+}
+
+export function missingDatabaseGuidance(location: ResolvedDatabaseLocation): string {
+  return location.source === "global_registry"
+    ? "Run `agent-memory compile` or `agent-memory sync` first."
+    : "Run `agent-memory compile` first.";
+}
+
 export interface ResolveConfiguredDatabaseLocationOptions {
   loaded: LoadedConfig;
   dbPath?: string;
@@ -138,7 +148,8 @@ export function resolveDatabaseLocation(options: ResolveDatabaseLocationOptions)
 export function assertGlobalDatabaseProvenance(
   database: Pick<SqliteDatabase, "all">,
   location: ResolvedDatabaseLocation,
-  loaded: LoadedConfig
+  loaded: LoadedConfig,
+  options: AssertGlobalDatabaseProvenanceOptions = {}
 ): void {
   if (location.source !== "global_registry") {
     return;
@@ -161,7 +172,9 @@ export function assertGlobalDatabaseProvenance(
     ["checkout_fingerprint", location.checkoutFingerprint],
     ["repository_identity", location.repositoryIdentity],
     ["repo_root", canonicalRepositoryRoot(loaded.repo.root)],
-    ["config_hash", sha256(fs.readFileSync(loaded.path, "utf8"))]
+    ...(options.includeConfigHash === false
+      ? []
+      : [["config_hash", sha256(fs.readFileSync(loaded.path, "utf8"))] as const])
   ]);
 
   if (Array.from(expectedMetadata).some(([key, expected]) => !expected || metadata.get(key) !== expected)) {
