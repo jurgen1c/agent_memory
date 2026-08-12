@@ -56,7 +56,7 @@ dist/agent-memory.js help
 dist/agent-memory.js --version
 ```
 
-Use `ASDF_NODEJS_VERSION=25.9.0` if running the built executable outside this
+Use `ASDF_NODEJS_VERSION=26.7.0` if running the built executable outside this
 repo and the shell has no Node version selected.
 
 ## Current Local Notes

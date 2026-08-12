@@ -83,5 +83,5 @@ function localNodeVersion(): string {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find((line) => line.startsWith("nodejs "));
-  return nodeLine?.split(/\s+/)[1] ?? "25.9.0";
+  return nodeLine?.split(/\s+/)[1] ?? "26.7.0";
 }
