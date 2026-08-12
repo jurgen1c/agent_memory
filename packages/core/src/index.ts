@@ -10,6 +10,7 @@ export * from "./doctor";
 export * from "./errors";
 export * from "./files";
 export * from "./git";
+export * from "./global_migration";
 export * from "./hooks";
 export * from "./init";
 export * from "./markdown";

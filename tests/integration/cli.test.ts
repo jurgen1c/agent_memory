@@ -42,6 +42,8 @@ describe("CLI", () => {
     expect(installHooks.stdout).toContain("configured non-blocking git hooks");
     expect(installHooks.stdout).toContain("agent-memory in global CLI-first mode or bin/memory");
     expect(upgrade.stdout).toContain("agent-memory upgrade --write --force");
+    expect(upgrade.stdout).toContain("agent-memory upgrade --global --write");
+    expect(upgrade.stdout).toContain("preserves bin/memory plus the local SQLite cache");
     expect(migrateDocs.stdout).toContain("lowercase memory namespace");
     expect(audit.stdout).toContain("agent-memory audit --git-diff --base origin/main");
     expect(audit.stdout).toContain("agent-memory audit --git-diff --strict");

@@ -59,7 +59,7 @@ export function installMemoryHooks(options: HookInstallOptions = {}): HookInstal
       continue;
     }
 
-    writeExecutable(hookPath.absolutePath, hookPath.actionPath, hookTemplate(commandPrefix), Boolean(options.force), actions);
+    writeExecutable(hookPath.absolutePath, hookPath.actionPath, renderMemoryHook(commandPrefix), Boolean(options.force), actions);
   }
 
   return { repo, commandPrefix, actions, warnings };
@@ -102,7 +102,7 @@ function writeExecutable(absolutePath: string, actionPath: string, content: stri
   actions.push({ path: actionPath, status: existedBefore ? "overwritten" : "created" });
 }
 
-function hookTemplate(commandPrefix: "agent-memory" | "bin/memory"): string {
+export function renderMemoryHook(commandPrefix: "agent-memory" | "bin/memory"): string {
   const commandSetup = commandPrefix === "bin/memory"
     ? `MEMORY_COMMAND="\${REPO_ROOT}/bin/memory"
 
@@ -134,4 +134,29 @@ echo "Refreshing agent memory..."
 
 exit 0
 `;
+}
+
+export function isGeneratedMemoryHook(content: string): boolean {
+  const normalized = normalizeGeneratedHook(content);
+  return normalized === normalizeGeneratedHook(renderMemoryHook("agent-memory"))
+    || normalized === normalizeGeneratedHook(renderMemoryHook("bin/memory"))
+    || normalized === normalizeGeneratedHook(renderLegacyMemoryHook("agent-memory"))
+    || normalized === normalizeGeneratedHook(renderLegacyMemoryHook("bin/memory"));
+}
+
+function renderLegacyMemoryHook(commandPrefix: "agent-memory" | "bin/memory"): string {
+  const availabilityCheck = commandPrefix === "bin/memory"
+    ? "[ -x bin/memory ]"
+    : "command -v agent-memory >/dev/null 2>&1";
+  return `#!/usr/bin/env bash
+
+if ${availabilityCheck}; then
+  echo "Refreshing agent memory..."
+  ${commandPrefix} sync || echo "Warning: agent memory sync failed. Run ${commandPrefix} sync manually."
+fi
+`;
+}
+
+function normalizeGeneratedHook(content: string): string {
+  return content.replaceAll("\r\n", "\n").trimEnd();
 }
