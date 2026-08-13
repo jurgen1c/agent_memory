@@ -6,6 +6,7 @@ import path from "node:path";
 const repoRoot = path.resolve(".");
 const mockApp = path.join(repoRoot, "examples/mock-app");
 const builtCli = path.join(repoRoot, "dist/agent-memory.js");
+const globalSmoke = path.join(repoRoot, "scripts/verify-global-cli.mjs");
 const nodeExecutable = process.env.AGENT_TEST_NODE ?? "node";
 const packageVersion = (
   JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")) as {
@@ -54,6 +55,16 @@ describe("built Node CLI", () => {
     expect(help.stdout).toContain("agent-memory");
     expect(version.exitCode).toBe(0);
     expect(version.stdout).toBe(`agent-memory ${packageVersion}\n`);
+
+    const packagedGlobal = run(
+      [nodeExecutable, globalSmoke, "--binary", builtCli],
+      repoRoot,
+      env
+    );
+    expect(packagedGlobal.exitCode).toBe(0);
+    expect(packagedGlobal.stdout).toContain(
+      "Agent Memory packaged global CLI smoke test passed."
+    );
   }, 120000);
 });
 
