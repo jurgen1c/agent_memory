@@ -33,9 +33,13 @@ describe("CLI", () => {
     const migrateDocs = await dispatch(["help", "migrate-docs"]);
     const audit = await dispatch(["help", "audit"]);
     const registry = await dispatch(["help", "registry"]);
+    const compile = await dispatch(["help", "compile"]);
+    const doctor = await dispatch(["help", "doctor"]);
+    const sync = await dispatch(["help", "sync"]);
 
     expect(init.stdout).toContain("agent-memory init --yes --force");
     expect(init.stdout).toContain("--skill-location .agents");
+    expect(init.stdout).toContain("follow it with agent-memory sync and agent-memory doctor");
     expect(query.stdout).toContain("--include-stale");
     expect(templates.stdout).toContain("templates copy claim:fact --to /tmp/fact.md --force");
     expect(installHooks.stdout).toContain("agent-memory install-hooks --json");
@@ -44,11 +48,18 @@ describe("CLI", () => {
     expect(upgrade.stdout).toContain("agent-memory upgrade --write --force");
     expect(upgrade.stdout).toContain("agent-memory upgrade --global --write");
     expect(upgrade.stdout).toContain("preserves bin/memory plus the local SQLite cache");
+    expect(upgrade.stdout).toContain("custom wrappers remain preserved for manual review");
+    expect(upgrade.stdout).toContain("only when the written migration output explicitly marks cleanup as safe");
     expect(migrateDocs.stdout).toContain("lowercase memory namespace");
     expect(audit.stdout).toContain("agent-memory audit --git-diff --base origin/main");
     expect(audit.stdout).toContain("agent-memory audit --git-diff --strict");
     expect(registry.stdout).toContain("agent-memory registry prune --force");
     expect(registry.stdout).toContain("dry run unless --force");
+    expect(registry.stdout).toContain("moved checkout or collision");
+    expect(compile.stdout).toContain("effective database path and compiled artifact counts");
+    expect(compile.stdout).toContain("AGENT_MEMORY_HOME, memory_key, and checkout identity");
+    expect(doctor.stdout).toContain("freshness, schema, package, config, and repository checks");
+    expect(sync.stdout).toContain("compiled counts, validation status, and doctor status");
   });
 
   test("renders inline help for every command", async () => {

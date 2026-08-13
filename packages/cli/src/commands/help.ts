@@ -38,14 +38,14 @@ const TOPICS: HelpTopic[] = [
       "agent-memory init --yes --force"
     ],
     examples: [
-      "agent-memory init --yes --memory-key org-repository",
+      "agent-memory init --yes --memory-key org-repository --agent codex --install-hooks",
       "agent-memory init --yes --local --package-manager npm",
       "agent-memory init --yes --agent codex",
       "agent-memory init --yes --instructions-file AGENTS.md --instructions-file CLAUDE.md",
       "agent-memory init --yes --wrapper --package-manager bun"
     ],
     agentNotes: [
-      "Fresh init defaults to global storage and the agent-memory command. Use --local for version 1 local compatibility, --wrapper to add bin/memory in global mode, and --memory-key to override offline key derivation. Safe to run repeatedly. Existing files are skipped unless --force is passed; configured instruction files keep local content and refresh only the managed agent-memory section. Repeat --instructions-file for multiple agent instruction targets. Use --skill-location with exactly one --agent target."
+      "Fresh init defaults to global storage and the agent-memory command; follow it with agent-memory sync and agent-memory doctor. Use --local for version 1 local compatibility, --wrapper to add bin/memory in global mode, and --memory-key to override offline key derivation. Safe to run repeatedly. Existing files are skipped unless --force is passed; configured instruction files keep local content and refresh only the managed agent-memory section. Repeat --instructions-file for multiple agent instruction targets. Use --skill-location with exactly one --agent target."
     ],
     phase: "Phase 2"
   },
@@ -53,8 +53,11 @@ const TOPICS: HelpTopic[] = [
     name: "compile",
     purpose: "Compile canonical Markdown and YAML memory into the configured SQLite cache.",
     usage: ["agent-memory compile", "agent-memory compile --db .agent-memory/memory.sqlite", "agent-memory compile --json", "agent-memory compile --verbose"],
-    examples: ["agent-memory compile --json", "agent-memory compile --db .agent-memory/memory.sqlite"],
-    agentNotes: ["SQLite is generated cache and should not be committed."],
+    examples: ["agent-memory compile", "agent-memory compile --verbose", "agent-memory compile --json"],
+    agentNotes: [
+      "Output reports the effective database path and compiled artifact counts; --verbose also reports repository and canonical memory roots.",
+      "SQLite is generated cache, not source of truth, and should not be committed. In global mode the effective path is derived from AGENT_MEMORY_HOME, memory_key, and checkout identity."
+    ],
     phase: "Phase 5"
   },
   {
@@ -190,7 +193,8 @@ const TOPICS: HelpTopic[] = [
       "agent-memory registry prune"
     ],
     agentNotes: [
-      "Registry commands inspect generated global state only. Prune is a dry run unless --force (or --yes) is supplied, removes stale entries only, and never deletes repository config or canonical docs/agent-memory content."
+      "Registry output identifies the global home, memory keys, checkout roots, effective database paths, and stale or unsafe generated state. Use doctor before prune and show <memory-key> when diagnosing a moved checkout or collision.",
+      "Registry commands inspect generated global state only. Prune is a dry run unless --force (or --yes) is supplied, removes stale entries only, and never deletes repository config, custom wrappers, or canonical docs/agent-memory content."
     ],
     phase: "Global Storage AM-72"
   },
@@ -286,15 +290,21 @@ const TOPICS: HelpTopic[] = [
     purpose: "Check whether the compiled SQLite database is present, fresh, and compatible.",
     usage: ["agent-memory doctor", "agent-memory doctor --json"],
     examples: ["agent-memory doctor", "agent-memory doctor --json"],
-    agentNotes: ["Use doctor when retrieval commands fail or after switching branches."],
+    agentNotes: [
+      "Output reports the effective database path plus freshness, schema, package, config, and repository checks with remediation for warnings.",
+      "Use doctor when retrieval commands fail, after switching branches, or after moving a repository. Run agent-memory sync when the generated database is missing or stale."
+    ],
     phase: "Phase 8"
   },
   {
     name: "sync",
     purpose: "Refresh the memory database and run validation and health checks.",
     usage: ["agent-memory sync", "agent-memory sync --json"],
-    examples: ["agent-memory sync", "bin/memory sync"],
-    agentNotes: ["Use sync after pull, checkout, rebase, merge, or before agent work."],
+    examples: ["agent-memory sync", "agent-memory sync --json", "bin/memory sync"],
+    agentNotes: [
+      "Output reports the effective database path, compiled counts, validation status, and doctor status.",
+      "Use sync after init, pull, checkout, rebase, merge, canonical memory changes, or before agent work. bin/memory is the optional wrapper/local compatibility entry point."
+    ],
     phase: "Phase 8"
   },
   {
@@ -309,9 +319,15 @@ const TOPICS: HelpTopic[] = [
       "agent-memory upgrade --global --write --memory-key org-repository",
       "agent-memory upgrade --json"
     ],
-    examples: ["agent-memory upgrade", "agent-memory upgrade --write", "agent-memory upgrade --global --write"],
+    examples: [
+      "agent-memory upgrade",
+      "agent-memory upgrade --write",
+      "agent-memory upgrade --global",
+      "agent-memory upgrade --global --write --memory-key org-repository"
+    ],
     agentNotes: [
-      "Dry-run by default. Normal upgrade preserves config values and unknown fields while adding defaults. Use --global to migrate local mode transactionally: it writes version 2, memory_key, and global scope only with --write; refreshes managed instructions, generated skills, and generated hooks; and preserves bin/memory plus the local SQLite cache. --memory-key overrides key derivation but does not bypass safe repository identity validation. Use --force only to replace custom skill or hook files."
+      "Dry-run by default. Normal upgrade preserves config values and unknown fields while adding defaults. Use --global first to preview local-to-global migration, then repeat with --write: it writes version 2, memory_key, and global scope transactionally; refreshes managed instructions, generated skills, and generated hooks; and preserves bin/memory plus the local SQLite cache.",
+      "After a written migration, run agent-memory sync and agent-memory doctor. Remove a generated wrapper only when the written migration output explicitly marks cleanup as safe; custom wrappers remain preserved for manual review. Preserve the local cache unless you make a separate backup or retention decision. --memory-key overrides key derivation but does not bypass safe repository identity validation. Use --force only to replace eligible custom skill or hook files."
     ],
     phase: "Maintenance"
   },

@@ -34,37 +34,66 @@ templates remain part of Agent Memory's own contextual-memory model.
 
 ## Requirements
 
-- Node.js 25.9.0 or newer for the published CLI.
+- Node.js 25.9.0 or newer for the published CLI. This repository develops and
+  smoke-tests with Node.js 26.7.0.
 - Bun for developing this package repository.
 - Git for repository root detection and diff-based commands.
 
 ## Quickstart
 
-Install the package in a repository that should own its memory:
-
-```bash
-npm install --save-dev @jurgen1c/agent-memory-cli
-```
-
-Initialize global-mode memory files, repository guidance, and agent skills:
-
-```bash
-npx agent-memory init --yes --wrapper --agent codex --install-hooks
-```
-
-For Bun-based applications:
-
-```bash
-bun add --dev @jurgen1c/agent-memory-cli
-bunx @jurgen1c/agent-memory-cli init --yes --wrapper --agent codex --install-hooks
-```
-
-For a global CLI install:
+Install the CLI once, then run it from a Git repository that should own its
+memory:
 
 ```bash
 npm install -g @jurgen1c/agent-memory-cli
-agent-memory --help
+agent-memory --version
+cd /path/to/repository
+agent-memory init --yes --agent codex --install-hooks
 ```
+
+Fresh `init` uses global storage by default and does not require a repository-local
+package install or `bin/memory` wrapper. Build the generated cache, verify it,
+and retrieve context with the same global command:
+
+```bash
+agent-memory compile
+agent-memory sync
+agent-memory doctor
+agent-memory context --task "fix student oauth"
+agent-memory context --changed-files src/auth.js
+agent-memory context --git-diff
+```
+
+`compile` rebuilds the configured SQLite cache from canonical files. `sync`
+compiles, validates, and runs the repository health checks; `doctor` only checks
+the current cache and reports how to repair missing, stale, or incompatible
+state. Retrieval commands require that generated cache, so run `sync` after
+initialization, pulls, checkouts, rebases, or canonical memory changes.
+
+### Local and Wrapper Compatibility
+
+Use a wrapper when repository scripts or multiple contributors still need the
+stable `bin/memory` entry point while storage remains global:
+
+```bash
+agent-memory init --yes --wrapper --agent codex --install-hooks
+bin/memory sync
+```
+
+Use local compatibility mode only when the repository must retain the version 1
+repo-local package/cache workflow:
+
+```bash
+npm install --save-dev @jurgen1c/agent-memory-cli
+npx agent-memory init --yes --local --agent codex --install-hooks
+bin/memory sync
+```
+
+`--wrapper` and `--local` are different: `--wrapper` adds the command shim but
+keeps `database_scope: global`; `--local` writes a version 1 local config and
+uses `.agent-memory/memory.sqlite`. Generated wrappers prefer a repo-local CLI,
+then the installed global command, and use the package-manager fallback only
+when allowed. Existing custom wrappers are preserved for manual review.
 
 ### What `init` Creates
 
@@ -111,7 +140,79 @@ Apply it with:
 agent-memory upgrade --global --write
 ```
 
-The migration derives a stable `memory_key` from repository identity, or accepts `--memory-key <key>` to override key derivation. Global registry safety still requires a supported credential-free repository identity; an explicit key does not bypass that validation. It refreshes managed instruction sections, generated agent skills, and installed generated hooks to use `agent-memory`; missing hooks stay uninstalled. Custom skills and hooks are preserved unless `--force` is passed. The local SQLite cache and `bin/memory` are never removed; output classifies the wrapper as generated, custom, or missing and reports whether manual cleanup is safe after `agent-memory sync` and `agent-memory doctor` succeed. Writes are rolled back if migration fails so the prior local configuration remains usable.
+The migration derives a stable `memory_key` from repository identity, or accepts
+`--memory-key <key>` to override key derivation. Global registry safety still
+requires a supported credential-free repository identity; an explicit key does
+not bypass that validation. It refreshes managed instruction sections,
+generated agent skills, and installed generated hooks to use `agent-memory`;
+missing hooks stay uninstalled. Custom skills and hooks are preserved unless
+`--force` is passed. The local SQLite cache and `bin/memory` are never removed;
+output classifies the wrapper as generated, custom, or missing and reports
+whether manual cleanup is safe after these commands succeed:
+
+```bash
+agent-memory sync
+agent-memory doctor
+```
+
+Writes are rolled back if migration fails so the prior local configuration
+remains usable.
+
+### Global Storage and Source-of-Truth Boundaries
+
+A global-mode config commits portable identity and policy, never a user-specific
+cache path:
+
+```yaml
+version: 2
+memory_key: example-project
+database_scope: global
+database_path: .agent-memory/memory.sqlite
+```
+
+- `memory_key` is the stable repository memory identifier. Clones share it, but
+  each checkout gets an isolated generated database. Use lowercase letters,
+  digits, dots, underscores, and hyphens; do not put paths or credentials in it.
+- `database_scope` is `global` or `local`. In global mode, `database_path` is
+  retained only as the local-mode fallback and is not the effective cache path.
+- `AGENT_MEMORY_HOME` optionally selects an absolute, private global home. The
+  default is `<user-home>/.agent-memory`.
+- Global generated state lives at `<global-home>/registry.json` and
+  `<global-home>/databases/<memory-key>/<checkout-fingerprint>/memory.sqlite`.
+
+Canonical Markdown/YAML under `docs/agent-memory/` and
+`agent-memory.config.yaml` remain the source of truth. Global SQLite databases,
+`registry.json`, registry locks, SQLite sidecars, `.agent-memory/`, and generated
+plan runs are rebuildable user-local state: do not commit or synchronize them.
+Registry maintenance never deletes canonical repository memory or custom
+wrappers.
+
+### Global Install Troubleshooting
+
+- **`agent-memory: command not found`:** confirm `node --version` is at least
+  25.9.0, reinstall with `npm install -g @jurgen1c/agent-memory-cli`, and ensure
+  the executable directory for `npm config get prefix` is on `PATH`. Until that
+  is fixed, an existing usable `bin/memory` wrapper can remain the entry point.
+- **Compiled database is missing:** from the repository root, run
+  `agent-memory sync` (or `agent-memory compile` followed by
+  `agent-memory doctor`). The database is generated; do not copy an old local
+  SQLite file into global home.
+- **Registry reports stale paths:** run `agent-memory registry doctor`, preview
+  `agent-memory registry prune`, verify every listed checkout is actually gone
+  or moved, then run `agent-memory registry prune --force`.
+- **Repository moved:** run `agent-memory sync` from the new root to create its
+  new checkout-specific cache. Then use the registry doctor/prune preview before
+  removing the old stale mapping; Agent Memory never reuses or deletes it
+  automatically.
+- **Duplicate or colliding `memory_key`:** do not prune an active checkout to
+  hide the collision. Give one unrelated repository a distinct committed
+  `memory_key`, then run `agent-memory sync`. Use
+  `agent-memory registry list` and `agent-memory registry show <memory-key>` to
+  confirm which roots and repository identities are involved.
+- **Custom wrapper during migration:** `upgrade --global --write` preserves it.
+  Review the wrapper manually and keep using it if needed; remove or revise it
+  only after global `sync` and `doctor` pass. `--force` is for eligible custom
+  generated support files and does not make an unknown wrapper safe to delete.
 
 ### Claim Relevance and Source Policy
 
@@ -134,32 +235,32 @@ An empty `allow` list permits every repository path. `deny` always wins. The pol
 Compile and check the repository memory:
 
 ```bash
-bin/memory sync
-bin/memory doctor
+agent-memory sync
+agent-memory doctor
 ```
 
 Retrieve task context before editing code:
 
 ```bash
-bin/memory context --task "fix student oauth"
-bin/memory context --changed-files src/auth.js
-bin/memory context --git-diff
+agent-memory context --task "fix student oauth"
+agent-memory context --changed-files src/auth.js
+agent-memory context --git-diff
 ```
 
 When a repository has workflow memory, `context` can also include matched recipes, plan-stage context, and task-specific profile traits:
 
 ```bash
-bin/memory recipes search "student oauth"
-bin/memory plans suggest --task "change student oauth provider"
-bin/memory plans new --template plan_template.auth.oauth_change --task "change student oauth provider"
-bin/memory context --plan plan_run.20260702.oauth_change.1234abcd --stage inspect
-bin/memory profiles match --task "review auth changes" --changed-files src/auth.js
+agent-memory recipes search "student oauth"
+agent-memory plans suggest --task "change student oauth provider"
+agent-memory plans new --template plan_template.auth.oauth_change --task "change student oauth provider"
+agent-memory context --plan plan_run.20260702.oauth_change.1234abcd --stage inspect
+agent-memory profiles match --task "review auth changes" --changed-files src/auth.js
 ```
 
 Open the local browser UI when you want to inspect memory visually:
 
 ```bash
-bin/memory ui
+agent-memory ui
 ```
 
 The command prints a local URL with a session token. Open that URL in your browser and keep the command running while using the UI.
@@ -167,12 +268,12 @@ The command prints a local URL with a session token. Open that URL in your brows
 When behavior changes, add or update memory before finishing:
 
 ```bash
-bin/memory new claim --type fact --system auth --title "Student OAuth UID is tenant scoped"
-bin/memory new recipe --system auth --title "Modify OAuth safely"
-bin/memory validate
-bin/memory compile
-bin/memory coverage --git-diff
-bin/memory audit --git-diff
+agent-memory new claim --type fact --system auth --title "Student OAuth UID is tenant scoped"
+agent-memory new recipe --system auth --title "Modify OAuth safely"
+agent-memory validate
+agent-memory compile
+agent-memory coverage --git-diff
+agent-memory audit --git-diff
 ```
 
 ## Command Reference
@@ -252,25 +353,25 @@ Command usage cheat sheet:
 Useful examples:
 
 ```bash
-bin/memory query "student oauth tenant" --system auth
-bin/memory show auth.student_oauth.uid_is_tenant_scoped --include-related
-bin/memory system auth --json
-bin/memory recipes search "student oauth"
-bin/memory context --recipe recipe.auth.modify_student_oauth
-bin/memory plans suggest --task "change student oauth provider"
-bin/memory plans next plan_run.20260702.oauth_change.1234abcd
-bin/memory plans finish plan_run.20260702.oauth_change.1234abcd --confirm-unresolved
-bin/memory profiles match --task "review auth changes" --profile review
-bin/memory context --task "review auth changes" --profile review
-bin/memory ui --port 0
-bin/memory init --yes --agent codex --skill-location .agents
-bin/memory install-skill --agent codex --location .codex
-bin/memory install-skill --agent codex --kind migration
-bin/memory migrate-docs --from docs/legacy --system auth
-bin/memory migrate-docs --from docs/legacy --system auth --automatic
-bin/memory upgrade --write
+agent-memory query "student oauth tenant" --system auth
+agent-memory show auth.student_oauth.uid_is_tenant_scoped --include-related
+agent-memory system auth --json
+agent-memory recipes search "student oauth"
+agent-memory context --recipe recipe.auth.modify_student_oauth
+agent-memory plans suggest --task "change student oauth provider"
+agent-memory plans next plan_run.20260702.oauth_change.1234abcd
+agent-memory plans finish plan_run.20260702.oauth_change.1234abcd --confirm-unresolved
+agent-memory profiles match --task "review auth changes" --profile review
+agent-memory context --task "review auth changes" --profile review
+agent-memory ui --port 0
+agent-memory init --yes --agent codex --skill-location .agents
+agent-memory install-skill --agent codex --location .codex
+agent-memory install-skill --agent codex --kind migration
+agent-memory migrate-docs --from docs/legacy --system auth
+agent-memory migrate-docs --from docs/legacy --system auth --automatic
+agent-memory upgrade --write
 agent-memory upgrade --global --write
-bin/memory agent-manifest --json
+agent-memory agent-manifest --json
 ```
 
 ## Contextual Workflow Guide
@@ -282,9 +383,9 @@ Contextual workflows layer reusable procedures, staged work plans, and task-spec
 Recipes are reusable workflow procedures stored under `docs/agent-memory/recipes/**/*.yaml`. Use them for repeatable project work such as "modify student OAuth", "add a billing webhook", or "review a migration".
 
 ```bash
-bin/memory recipes search "student oauth"
-bin/memory recipes show recipe.auth.modify_student_oauth
-bin/memory context --recipe recipe.auth.modify_student_oauth
+agent-memory recipes search "student oauth"
+agent-memory recipes show recipe.auth.modify_student_oauth
+agent-memory context --recipe recipe.auth.modify_student_oauth
 ```
 
 `context --task` automatically includes matching recipes when they are relevant. Recipe `required_claims` are pulled into context so the agent does not need a second lookup for the constraints that make the recipe safe to follow.
@@ -294,31 +395,31 @@ bin/memory context --recipe recipe.auth.modify_student_oauth
 Plan templates are reusable staged workflows stored under `docs/agent-memory/plans/**/*.yaml`. Plan runs are local generated state stored under `.agent-memory/plans/`.
 
 ```bash
-bin/memory plans suggest --task "change student oauth provider"
-bin/memory plans new --template plan_template.auth.oauth_change --task "change student oauth provider"
-bin/memory plans next plan_run.20260702.oauth_change.1234abcd
-bin/memory context --plan plan_run.20260702.oauth_change.1234abcd --stage inspect
+agent-memory plans suggest --task "change student oauth provider"
+agent-memory plans new --template plan_template.auth.oauth_change --task "change student oauth provider"
+agent-memory plans next plan_run.20260702.oauth_change.1234abcd
+agent-memory context --plan plan_run.20260702.oauth_change.1234abcd --stage inspect
 ```
 
 Use plan runs for multi-step work where each stage needs different claims, recipes, files, and verification. Complete or block stages as work progresses:
 
 ```bash
-bin/memory plans complete-stage plan_run.20260702.oauth_change.1234abcd --stage inspect --evidence "Reviewed callback contract"
-bin/memory plans block-stage plan_run.20260702.oauth_change.1234abcd --stage implement --reason "Waiting on provider docs"
+agent-memory plans complete-stage plan_run.20260702.oauth_change.1234abcd --stage inspect --evidence "Reviewed callback contract"
+agent-memory plans block-stage plan_run.20260702.oauth_change.1234abcd --stage implement --reason "Waiting on provider docs"
 ```
 
 Finish plan runs when they are done, and prune old local runs so `.agent-memory/plans` does not accumulate stale state:
 
 ```bash
-bin/memory plans finish plan_run.20260702.oauth_change.1234abcd --confirm-unresolved
-bin/memory plans finish plan_run.20260702.oauth_change.1234abcd --abandon-blocked --reason "Provider change was cancelled"
-bin/memory plans prune --completed --older-than 7d
+agent-memory plans finish plan_run.20260702.oauth_change.1234abcd --confirm-unresolved
+agent-memory plans finish plan_run.20260702.oauth_change.1234abcd --abandon-blocked --reason "Provider change was cancelled"
+agent-memory plans prune --completed --older-than 7d
 ```
 
 Do not commit `.agent-memory/plans` files. If a one-off run becomes a reusable workflow, promote it into a proposed canonical template:
 
 ```bash
-bin/memory plans promote plan_run.20260702.oauth_change.1234abcd --to-template --system auth --title "OAuth provider behavior change"
+agent-memory plans promote plan_run.20260702.oauth_change.1234abcd --to-template --system auth --title "OAuth provider behavior change"
 ```
 
 ### Profiles
@@ -326,9 +427,9 @@ bin/memory plans promote plan_run.20260702.oauth_change.1234abcd --to-template -
 Profile traits are small pieces of task-specific guidance stored under `docs/agent-memory/profiles/**/*.yaml`. Use them for guidance that depends on intent, changed files, systems, recipes, plan templates, or profile aliases such as `review`.
 
 ```bash
-bin/memory profiles match --task "review auth changes" --changed-files src/auth.js
-bin/memory profiles show profile_trait.review.findings_first
-bin/memory context --task "review auth changes" --profile review
+agent-memory profiles match --task "review auth changes" --changed-files src/auth.js
+agent-memory profiles show profile_trait.review.findings_first
+agent-memory context --task "review auth changes" --profile review
 ```
 
 Profile traits are context, not instruction hierarchy. Treat them as repository guidance below system, developer, user, and local `AGENTS.md` instructions.
@@ -340,15 +441,15 @@ The UI is a local developer tool for browsing and reviewing canonical memory fil
 Start it from the repository that owns the memory:
 
 ```bash
-bin/memory ui
+agent-memory ui
 ```
 
 By default the server binds to `127.0.0.1:4317`. If the port is busy, it automatically tries the next available port. Use `--port 0` to request an ephemeral port:
 
 ```bash
-bin/memory ui --port 0
-bin/memory ui --host 127.0.0.1 --port 4317
-bin/memory ui --json
+agent-memory ui --port 0
+agent-memory ui --host 127.0.0.1 --port 4317
+agent-memory ui --json
 ```
 
 The command prints:
@@ -380,7 +481,7 @@ The status dropdown can also set `proposed`, `stale`, `deprecated`, `experimenta
 If the health banner says the database is missing or stale, click `Sync` in the UI or run:
 
 ```bash
-bin/memory sync
+agent-memory sync
 ```
 
 ## Claim Authoring Guide
@@ -390,7 +491,7 @@ Claims are Markdown files with YAML frontmatter. Keep one atomic claim per file.
 Create a starter claim with:
 
 ```bash
-bin/memory new claim --type constraint --system auth --title "OAuth identity requires tenant context"
+agent-memory new claim --type constraint --system auth --title "OAuth identity requires tenant context"
 ```
 
 New claims are deliberately created with `status: needs_review` and `confidence: low`. Fill in every generated TODO value, run the verification steps, and only then promote the claim to `current`. Validation rejects TODO placeholders in current claims.
@@ -414,7 +515,7 @@ Use `current` for checked knowledge. Use `needs_verification` or `needs_review` 
 Create reusable procedures as first-class recipes:
 
 ```bash
-bin/memory new recipe \
+agent-memory new recipe \
   --system auth \
   --title "Modify OAuth safely" \
   --trigger "change oauth" \
@@ -451,7 +552,7 @@ Supported relations include:
 - `same_area`: claims are related but not dependent.
 - `causes`, `caused_by`, `blocks`, `unblocks`, `implemented_by`, `tested_by`.
 
-Run `bin/memory validate` after editing graph files. Validation fails when graph edges reference missing claims.
+Run `agent-memory validate` after editing graph files. Validation fails when graph edges reference missing claims.
 
 ## CI Integration
 
@@ -473,10 +574,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 25.9.0
-      - run: npm install
-      - run: npx agent-memory sync
-      - run: npx agent-memory coverage --git-diff --base origin/main
-      - run: npx agent-memory audit --git-diff --base origin/main
+      - run: npm install -g @jurgen1c/agent-memory-cli
+      - run: agent-memory sync
+      - run: agent-memory coverage --git-diff --base origin/main
+      - run: agent-memory audit --git-diff --base origin/main
 ```
 
 If the repository uses the generated wrapper, prefer:
@@ -501,7 +602,7 @@ Use `migrate-docs` when a repository already has human-written docs that should 
 Usage:
 
 ```bash
-bin/memory migrate-docs --from <path-to-docs> --system <system> [--automatic] [--force] [--json]
+agent-memory migrate-docs --from <path-to-docs> --system <system> [--automatic] [--force] [--json]
 ```
 
 Required arguments:
@@ -524,13 +625,13 @@ Optional flags:
 Plan migration first. Plan mode does not write files:
 
 ```bash
-bin/memory migrate-docs --from docs/legacy --system auth
+agent-memory migrate-docs --from docs/legacy --system auth
 ```
 
 For canonical repository docs, a docs namespace is often a good first pass:
 
 ```bash
-bin/memory migrate-docs --from docs/canonical --system docs --automatic
+agent-memory migrate-docs --from docs/canonical --system docs --automatic
 ```
 
 The plan lists each source doc, suggested claim ID, and target path. For example, `docs/legacy/oauth.md` under `--system auth` may plan a draft like:
@@ -543,7 +644,7 @@ id: auth.migrated_oauth
 Create starter drafts when you are ready. Automatic mode writes files under the configured memory root:
 
 ```bash
-bin/memory migrate-docs --from docs/legacy --system auth --automatic
+agent-memory migrate-docs --from docs/legacy --system auth --automatic
 ```
 
 Automatic drafts are `needs_review`, low-confidence starter claims. Review them, split broad prose into atomic claims, add graph edges, and verify against code before promoting them to current memory. Automatic mode only writes drafts for docs inside the repository; use plan mode for external docs, then copy the source docs into the repo before creating drafts.
