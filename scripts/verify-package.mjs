@@ -32,7 +32,12 @@ try {
     "dist/agent-memory.js",
     "dist/web/index.html",
     "packages/schemas/claim.schema.json",
-    "packages/schemas/config.schema.json"
+    "packages/schemas/config.schema.json",
+    "packages/schemas/graph.schema.json",
+    "packages/schemas/index.schema.json",
+    "packages/schemas/plan.schema.json",
+    "packages/schemas/profile.schema.json",
+    "packages/schemas/recipe.schema.json"
   ]) {
     if (!files.includes(required)) fail(`Packed artifact is missing ${required}.`);
   }
@@ -140,6 +145,18 @@ console.log("Agent Memory tarball smoke test passed.");
   }
   run("npm", ["audit", "--audit-level", "moderate"], consumerRoot);
   run(process.execPath, ["smoke.mjs"], consumerRoot);
+  run(process.execPath, [
+    path.join(repositoryRoot, "scripts", "verify-global-cli.mjs"),
+    "--binary",
+    path.join(
+      consumerRoot,
+      "node_modules",
+      "@jurgen1c",
+      "agent-memory-cli",
+      "dist",
+      "agent-memory.js"
+    )
+  ], consumerRoot);
 
   console.log(
     `Verified ${manifest.name}@${manifest.version}: ${files.length} packed files and a clean consumer install.`

@@ -84,7 +84,8 @@
     "dev": "bun packages/cli/src/index.ts",
     "ui:mock": "scripts/run-mock-ui.sh",
     "prepack": "bun run build",
-    "verify:package": "node scripts/verify-package.mjs"
+    "verify:package": "node scripts/verify-package.mjs",
+    "verify:global-cli": "node scripts/verify-global-cli.mjs"
   },
   "engines": {
     "node": ">=25.9.0"

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const readme = fs.readFileSync(path.resolve("README.md"), "utf8").replace(/\r\n/g, "\n");
+const releasing = fs.readFileSync(path.resolve("docs/releasing.md"), "utf8").replace(/\r\n/g, "\n");
 
 describe("global install documentation", () => {
   test("provides copy-pastable global setup and local migration workflows", () => {
@@ -51,5 +52,12 @@ describe("global install documentation", () => {
     expect(guideStart).toBeGreaterThanOrEqual(0);
     const wrapperlessGuides = readme.slice(guideStart);
     expect(wrapperlessGuides.replace(explicitWrapperExample, "")).not.toContain("bin/memory");
+  });
+
+  test("documents the packaged global CLI release smoke checklist", () => {
+    expect(releasing).toContain("bun run verify:global-cli");
+    expect(releasing).toContain("temporary `AGENT_MEMORY_HOME`");
+    expect(releasing).toMatch(/global init, sync,\s+compile, doctor, context, registry list\/show/);
+    expect(releasing).toContain("does not use\nthe network");
   });
 });

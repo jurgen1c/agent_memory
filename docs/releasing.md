@@ -23,6 +23,7 @@ alone does not run `.github/workflows/publish.yml`.
    bun install --frozen-lockfile
    bun run ci
    bun run verify:package
+   bun run verify:global-cli
    dist/agent-memory.js help
    dist/agent-memory.js --version
    ```
@@ -37,9 +38,16 @@ alone does not run `.github/workflows/publish.yml`.
    npm view @jurgen1c/agent-memory-cli version
    ```
 
+`verify:global-cli` creates a temporary consuming Git repository and a private
+temporary `AGENT_MEMORY_HOME`, then exercises packaged global init, sync,
+compile, doctor, context, registry list/show, templates, help, and version
+output. It removes both temporary directories when it finishes and does not use
+the network. The package verifier repeats that workflow against the installed
+tarball.
+
 The workflow validates tag and package versions, performs a frozen install,
-runs the complete gate, installs the tarball in a clean consumer, and
-publishes with public access and npm provenance.
+runs the complete gate, installs the tarball in a clean consumer, and publishes
+with public access and npm provenance.
 
 Configure npm Trusted Publishing for GitHub user `jurgen1c`, repository
 `agent_memory`, workflow `publish.yml`, allowed action `npm publish`, and no
