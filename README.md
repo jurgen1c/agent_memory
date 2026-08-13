@@ -573,7 +573,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 26.7.0
+          node-version: 25.9.0
       - run: npm install -g @jurgen1c/agent-memory-cli
       - run: agent-memory sync
       - run: agent-memory coverage --git-diff --base origin/main

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 
-const readme = fs.readFileSync(path.resolve("README.md"), "utf8");
+const readme = fs.readFileSync(path.resolve("README.md"), "utf8").replace(/\r\n/g, "\n");
 
 describe("global install documentation", () => {
   test("provides copy-pastable global setup and local migration workflows", () => {
@@ -15,6 +15,7 @@ describe("global install documentation", () => {
     expect(readme).toContain("agent-memory upgrade --global\n");
     expect(readme).toContain("agent-memory upgrade --global --write");
     expect(readme).toContain("- run: npm install -g @jurgen1c/agent-memory-cli");
+    expect(readme).toContain("node-version: 25.9.0");
     expect(readme).not.toContain("- run: npm install\n");
     expect(readme).not.toContain("- run: npx agent-memory");
   });
@@ -40,13 +41,15 @@ describe("global install documentation", () => {
   });
 
   test("uses the global command in wrapperless workflow examples", () => {
-    const wrapperlessGuides = readme.slice(readme.indexOf("## Contextual Workflow Guide"));
+    const guideStart = readme.indexOf("## Contextual Workflow Guide");
     const explicitWrapperExample = [
       "bin/memory sync",
       "bin/memory coverage --git-diff --base origin/main",
       "bin/memory audit --git-diff --base origin/main"
     ].join("\n");
 
+    expect(guideStart).toBeGreaterThanOrEqual(0);
+    const wrapperlessGuides = readme.slice(guideStart);
     expect(wrapperlessGuides.replace(explicitWrapperExample, "")).not.toContain("bin/memory");
   });
 });
