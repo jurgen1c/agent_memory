@@ -46,7 +46,10 @@ for (const variant of ["original", "corrected"] as const) {
     for (const runner of ["current", ...(installed ? ["installed"] : [])]) {
       const run = async (args: string[]) => {
         if (runner === "current") {
-          try { return await dispatch(args, { cwd }); } catch (error) { return { exitCode: 1, stdout: String(error) }; }
+          try {
+            const result = await dispatch(args, { cwd });
+            return { ...result, stdout: result.stdout ?? "" };
+          } catch (error) { return { exitCode: 1, stdout: String(error) }; }
         }
         const result = spawnSync("node", [installed!, ...args], { cwd, encoding: "utf8", env: process.env });
         if (result.error) throw result.error;

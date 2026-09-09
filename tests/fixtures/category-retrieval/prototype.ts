@@ -62,9 +62,15 @@ function outside(claim: Claim, request: Request) {
 }
 export function retrieve(claims: Claim[], request: Request, watched: string[] = []) {
   const cap = request.maxBytes ?? caps.medium;
-  if (!Number.isSafeInteger(cap) || cap < 512 || cap > 16777216) throw new Error("BUDGET_TOO_SMALL: --max-bytes must be an integer >= 512");
+  if (!Number.isSafeInteger(cap) || cap < 512 || cap > 16777216) throw new Error("BUDGET_TOO_SMALL: --max-bytes must be an integer from 512 through 16777216");
   for (const category of request.categories ?? []) {
     if (!Object.hasOwn(vocabulary, category) && category !== "uncategorized") throw new Error("UNKNOWN_CATEGORY: browse categories list");
+  }
+  for (const system of request.systems ?? []) {
+    if (!claims.some(claim => claim.system === system)) throw new Error("UNKNOWN_SYSTEM: browse system vocabulary");
+  }
+  for (const status of request.statuses ?? []) {
+    if (!["current", "proposed", "needs_review", "stale", "deprecated", "experimental", "needs_verification", "rejected"].includes(status)) throw new Error("UNKNOWN_STATUS: use a supported lifecycle status");
   }
   const appliedFilters = {
     categories: [...new Set(request.categories ?? [])].sort(), systems: [...new Set(request.systems ?? [])].sort(),
@@ -120,7 +126,7 @@ export function retrieve(claims: Claim[], request: Request, watched: string[] = 
     completeness: "complete", claims: payloads, edges: [...edges.values()], files, commands,
     collections: { recipes: "empty", plans: "empty", profiles: "empty" },
     warnings: browse || directMatches ? [] : ["NO_TASK_MATCH"], suggestions: browse || directMatches ? [] : ["Use fewer task terms or exact source files; browse categories list."],
-    budget: { capBytes: cap, usedBytes: 0, omitted: { claims: 0, requiredClaims: missing.size, edges: 0, files: 0, commands: 0 } }
+    budget: { capBytes: cap, usedBytes: 0, omitted: { claims: 0, requiredClaims: 0, edges: 0, files: 0, commands: 0 } }
   };
   function measure() {
     // Solve the small decimal-width fixed point, including newline and usedBytes itself.

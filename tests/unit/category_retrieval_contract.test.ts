@@ -48,6 +48,12 @@ describe("AM-88 bounded design contract (not production retrieval)", () => {
     expect(() => retrieve(corpus(), { categories: ["SECURITY"] })).toThrow("UNKNOWN_CATEGORY");
     expect(() => retrieve(corpus(), { categories: ["toString"] })).toThrow("UNKNOWN_CATEGORY");
     expect(() => retrieve(corpus(), {})).toThrow("INPUT_REQUIRED");
+    expect(() => retrieve(corpus(), { systems: ["acounts"] })).toThrow("UNKNOWN_SYSTEM");
+    expect(() => retrieve(corpus(), { statuses: ["currnet"] })).toThrow("UNKNOWN_STATUS");
+    for (const status of ["rejected", "experimental", "needs_verification"]) {
+      expect(retrieve(corpus(), { statuses: [status] }).claims).toHaveLength(0);
+    }
+    expect(() => retrieve(corpus(), { task: "retry", maxBytes: 16777217 })).toThrow("from 512 through 16777216");
   });
   test("dangling and inactive required guidance cannot report complete", () => {
     const claims = corpus();
@@ -59,6 +65,8 @@ describe("AM-88 bounded design contract (not production retrieval)", () => {
     result = retrieve(claims.filter(claim => claim.id !== "ingestion.outbox"), { files: ["src/receipts-controller.ts"] });
     expect(result.completeness).toBe("incomplete");
     expect(result.warnings).toContain("REQUIRED_CONTEXT_MISSING");
+    expect(result.budget.omitted.requiredClaims).toBe(0);
+    expect(result.budget.omitted.claims).toBe(0);
   });
   test("browse lifecycle and required edge omissions stay explicit", () => {
     const claims = corpus();
