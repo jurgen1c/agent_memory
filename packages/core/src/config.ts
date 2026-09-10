@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { ConfigError } from "./errors";
+import { ConfigError, MissingConfigError } from "./errors";
 import { isValidMemoryKey } from "./memory_key";
 import { findRepoRoot, normalizeRepoRelativeOutputPath, normalizeRepoRelativePath, resolveInsideRepo } from "./repo";
 import type { AgentMemoryConfig, LoadedConfig, RepoInfo } from "./types";
@@ -72,7 +72,7 @@ export function loadConfig(options: LoadConfigOptions = {}): LoadedConfig {
   const configPath = resolveConfigPath(repo.root, options.configPath);
 
   if (!fs.existsSync(configPath)) {
-    throw new ConfigError(`Config file not found at ${configPath}`, {
+    throw new MissingConfigError(`Config file not found at ${configPath}`, {
       details: ["Run `agent-memory init` after Phase 2 is implemented, or create agent-memory.config.yaml."]
     });
   }

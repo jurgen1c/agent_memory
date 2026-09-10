@@ -43,6 +43,30 @@ describe("v2 audit health", () => {
     await expect(dispatch(["audit", "--format-version", "3"], { cwd })).rejects.toThrow("must be 1 or 2");
   });
 
+  test("configuration syntax and schema failures are invalid while missing or unreadable configuration is unavailable", async () => {
+    const cwd = fixture(); const configPath = path.join(cwd, "agent-memory.config.yaml");
+    const original = fs.readFileSync(configPath, "utf8");
+    for (const content of ["version: [unterminated\n", "version: 999\n", "memory_root: []\n", "memory_root: ../escape\n"]) {
+      fs.writeFileSync(configPath, content);
+      const result = await dispatch(["audit", "--format-version", "2", "--json"], { cwd });
+      expect(result.exitCode).toBe(6);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.structure.state).toBe("invalid");
+      expect(parsed.structure.diagnostics[0]).toMatchObject({ code: "STRUCTURE_INVALID", path: "agent-memory.config.yaml" });
+      expect(parsed.structure.diagnostics[0].remediation).toContain("Correct the configuration");
+      expect(parsed.structure.diagnostics[0].message.length).toBeLessThanOrEqual(512);
+    }
+    fs.rmSync(configPath);
+    expect((await auditMemoryV2({ cwd })).structure.state).toBe("unavailable");
+    fs.writeFileSync(configPath, original); fs.chmodSync(configPath, 0);
+    try {
+      const result = await auditMemoryV2({ cwd });
+      expect(result.structure.state).toBe("unavailable");
+      expect(result.structure.diagnostics[0].remediation).toContain("Restore configuration");
+    } finally { fs.chmodSync(configPath, 0o644); }
+    expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+  });
+
   test("invalid structure keeps validator source coordinates in JSON and human output", async () => {
     const cwd = fixture(); const claimPath = path.join(cwd, claimRelative);
     fs.writeFileSync(claimPath, fs.readFileSync(claimPath, "utf8").replace(/tags:\n(?:  - .*\n)+/, "tags: []\n"));

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { auditClaimVerification, auditMemory, type AuditOptions, type AuditResult } from "./audit";
 import { loadConfig } from "./config";
+import { AgentMemoryError, ConfigError, MissingConfigError } from "./errors";
 import { assertGlobalDatabaseProvenance, resolveConfiguredDatabaseLocation } from "./database";
 import { boundedGitDiagnostic, isFullGitObjectId } from "./git";
 import { createGitCommitVerifier, type GitVerificationDiagnostic, type VerificationCheckState } from "./git_verification";
@@ -44,7 +45,13 @@ export async function auditMemoryV2(options: AuditOptions = {}): Promise<AuditRe
     memoryRoot = resolveConfiguredPath(loaded.repo.root, loaded.config.memory_root);
   }
   catch (error) {
-    result.structure.diagnostics.push(diagnostic("STRUCTURE_UNAVAILABLE", error, "Restore configuration and canonical memory access, then rerun."));
+    const invalid = isInvalidConfiguration(error);
+    result.structure = { state: invalid ? "invalid" : "unavailable", diagnostics: [{
+      ...diagnostic(invalid ? "STRUCTURE_INVALID" : "STRUCTURE_UNAVAILABLE", error,
+        invalid ? "Correct the configuration syntax or values, then rerun." : "Restore configuration and canonical memory access, then rerun."),
+      path: "agent-memory.config.yaml"
+    }] };
+    result.cache.diagnostics.push(diagnostic("CACHE_UNAVAILABLE", "Cache location cannot be determined until configuration is valid and accessible.", result.structure.diagnostics[0].remediation));
     return result;
   }
   const repoRoot = loaded.repo.root;
@@ -65,7 +72,9 @@ export async function auditMemoryV2(options: AuditOptions = {}): Promise<AuditRe
         ({ ...diagnostic(issue.code, issue.message, "Review the canonical source and validation finding."), path: issue.path, id: issue.id })) };
     }
   } catch (error) {
-    result.structure = { state: "unavailable", diagnostics: [accessFailure(error)] };
+    result.structure = isInvalidConfiguration(error)
+      ? { state: "invalid", diagnostics: [{ ...diagnostic("STRUCTURE_INVALID", error, "Correct the canonical configuration or syntax, then rerun."), path: "agent-memory.config.yaml" }] }
+      : { state: "unavailable", diagnostics: [accessFailure(error)] };
   }
   result.cache = await auditCacheHealth(loaded);
   try {
@@ -164,4 +173,12 @@ export async function auditCacheHealth(loaded: ReturnType<typeof loadConfig>): P
 function isFilesystemFailure(error: unknown): boolean {
   return error !== null && typeof error === "object" && "code" in error && typeof error.code === "string" &&
     ["EACCES", "EPERM", "ENOENT", "EIO", "EMFILE", "ENFILE", "ENOTDIR", "EISDIR", "ELOOP", "ENAMETOOLONG", "EBUSY", "ESTALE"].includes(error.code);
+}
+
+function isInvalidConfiguration(error: unknown): boolean {
+  if (error instanceof MissingConfigError || isFilesystemFailure(error)) return false;
+  if (error instanceof ConfigError) return true;
+  // Path normalization exposes typed configuration boundary errors through the
+  // existing generic AgentMemoryError API; keep its v1 shape unchanged.
+  return error instanceof AgentMemoryError && !isFilesystemFailure(error.cause);
 }
