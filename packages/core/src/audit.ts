@@ -232,7 +232,8 @@ function findOutdatedVerifiedClaims(
         claimIds: [claim.id], paths: [memoryPath(memoryRootRelative, claim.sourcePath)], shared_values: {},
         remediation: resolution.remediation
       });
-      if (resolution.state === "unavailable") break;
+      if (resolution.state === "unavailable" &&
+        (resolution.phase !== "object" || resolution.code !== "GIT_CHECK_FAILED")) break;
       continue;
     }
     const commit = reference.toLowerCase();
@@ -266,6 +267,9 @@ function findOutdatedVerifiedClaims(
 
         if (unavailableGit) {
           findings.push(verificationUnavailableFinding(claim, memoryRootRelative, unavailableGit));
+          // A failed commit-to-HEAD diff can be specific to this reference. Spawn
+          // failures and working-tree discovery failures prevent all comparisons.
+          if (error instanceof GitCommandError && !error.cause && !error.signal && error.status !== null && !error.timedOut) continue;
           break;
         }
 

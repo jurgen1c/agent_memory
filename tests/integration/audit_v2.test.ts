@@ -95,6 +95,23 @@ describe("v2 audit health", () => {
     } finally { fs.chmodSync(graph, 0o755); }
   });
 
+  test("a corrupt referenced commit cannot hide another claim's source drift", async () => {
+    const cwd = fixture(); const old = commit(cwd);
+    fs.appendFileSync(path.join(cwd, "README.md"), "\nNew verification commit\n");
+    const current = commit(cwd);
+    const first = path.join(cwd, claimRelative);
+    const second = path.join(cwd, "docs/agent-memory/claims/tenancy/current_tenant_required_for_student_auth.md");
+    fs.writeFileSync(first, fs.readFileSync(first, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${old}`));
+    fs.writeFileSync(second, fs.readFileSync(second, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${current}`));
+    fs.appendFileSync(path.join(cwd, "src/tenant.js"), "\n// source drift\n");
+    const corrupt = path.join(cwd, ".git/objects", old.slice(0, 2), old.slice(2));
+    fs.chmodSync(corrupt, 0o644); fs.writeFileSync(corrupt, "corrupt loose commit");
+    const result = await auditMemoryV2({ cwd });
+    expect(result.claims[0].diagnostic).toMatchObject({ code: "GIT_CHECK_FAILED", phase: "object" });
+    expect(result.claims[1].verificationCheck).toBe("verified");
+    expect(result.claims[1].qualitySignals.some((signal) => signal.code === "SOURCE_CHANGED_SINCE_VERIFICATION")).toBe(true);
+  });
+
   test("inaccessible canonical files report unavailable structure and retain other readable claims", async () => {
     const cwd = fixture(); const claimPath = path.join(cwd, claimRelative);
     const original = fs.readFileSync(claimPath, "utf8");

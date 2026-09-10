@@ -11,6 +11,7 @@ export interface GitVerificationDiagnostic {
   message: string;
   remediation: string;
   errorCode?: string;
+  phase?: "repository" | "object";
   status: number | null;
   signal: string | null;
   timedOut: boolean;
@@ -79,7 +80,7 @@ export function createGitCommitVerifier(repoRoot: string, options: GitCommandOpt
             }
           }
           preparation = format === "sha1" ? 40 : 64;
-        } catch (error) { preparation = gitFailureDiagnostic(error); }
+        } catch (error) { preparation = { ...gitFailureDiagnostic(error), phase: "repository" }; }
       }
       if (typeof preparation !== "number") return preparation;
       if (!isFullGitObjectId(reference, preparation)) return malformed();
@@ -90,7 +91,7 @@ export function createGitCommitVerifier(repoRoot: string, options: GitCommandOpt
         "Inspect fetch and history, then repair the reference only after review.");
       if (output !== `${oid} commit\n`) return malformed();
       return outcome("GIT_VERIFIED", "verified", "The exact recorded commit object resolves; claim truth and verification commands were not checked.", "No reference repair needed.");
-    } catch (error) { return gitFailureDiagnostic(error); }
+    } catch (error) { return { ...gitFailureDiagnostic(error), phase: "object" }; }
   };
 }
 
