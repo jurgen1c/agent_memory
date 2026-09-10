@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { GitCommandError, runGit, type GitCommandOptions } from "../../packages/core/src/git";
-import { verifyGitCommit } from "../../packages/core/src/git_verification";
+import { createGitCommitVerifier, verifyGitCommit } from "../../packages/core/src/git_verification";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
@@ -72,6 +72,40 @@ describe("production Git verification diagnostics", () => {
     fs.chmodSync(objectDir, 0);
     try { expect(verifyGitCommit(root, "f".repeat(40)).code).toBe("GIT_PERMISSION_DENIED"); }
     finally { fs.chmodSync(objectDir, 0o755); }
+  });
+
+  test("corrupt packed-object indexes preserve successful stderr and cannot suggest repairing existing history", () => {
+    const { root, oid } = repository();
+    runGit(root, ["gc", "--prune=now"]);
+    const pack = path.join(root, ".git/objects/pack");
+    const index = fs.readdirSync(pack).find((name) => name.endsWith(".idx"))!;
+    fs.chmodSync(path.join(pack, index), 0o644);
+    fs.writeFileSync(path.join(pack, index), "corrupt index");
+    const diagnostic = verifyGitCommit(root, oid);
+    expect(diagnostic.code).toBe("GIT_CHECK_FAILED"); expect(diagnostic.state).toBe("unavailable");
+    expect(diagnostic.status).toBe(0); expect(diagnostic.diagnostic.length).toBeGreaterThan(0);
+    expect(diagnostic.remediation).not.toContain("repair");
+  });
+
+  test("dangling alternate stores are unavailable while readable alternates resolve exact commits", () => {
+    const original = repository(); const alternate = repository();
+    const alternatesPath = path.join(original.root, ".git/objects/info/alternates");
+    fs.writeFileSync(alternatesPath, `${alternate.root}/.git/objects\n`);
+    expect(verifyGitCommit(original.root, alternate.oid).code).toBe("GIT_VERIFIED");
+    fs.writeFileSync(alternatesPath, `${original.root}/missing-store\n`);
+    expect(verifyGitCommit(original.root, "f".repeat(40)).code).toBe("GIT_CHECK_FAILED");
+  });
+
+  test("audit verifier reuses store preflight across distinct references and disables lazy fetching", () => {
+    const { root, oid } = repository(); let preflights = 0;
+    const verify = createGitCommitVerifier(root, { spawn: (binary, args, options) => {
+      if (args.includes("count-objects")) preflights++;
+      expect(options.env?.GIT_NO_LAZY_FETCH).toBe("1");
+      return spawnSync(binary, args, options);
+    } });
+    expect(verify(oid).code).toBe("GIT_VERIFIED");
+    expect(verify("f".repeat(40)).code).toBe("GIT_UNKNOWN_OBJECT");
+    expect(preflights).toBe(1);
   });
 
   test("malformed, wrong OID, noncommit and extra output never verify", () => {

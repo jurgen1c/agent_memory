@@ -5,7 +5,7 @@ import { auditMemory, type AuditOptions, type AuditResult } from "./audit";
 import { loadConfig } from "./config";
 import { assertGlobalDatabaseProvenance, resolveConfiguredDatabaseLocation } from "./database";
 import { boundedGitDiagnostic, isFullGitObjectId } from "./git";
-import { verifyGitCommit, type GitVerificationDiagnostic, type VerificationCheckState } from "./git_verification";
+import { createGitCommitVerifier, type GitVerificationDiagnostic, type VerificationCheckState } from "./git_verification";
 import { canonicalMemoryFileInventory, resolveConfiguredPath } from "./files";
 import { loadMemory } from "./memory";
 import { claimQualitySignals, type ClaimQualitySignal } from "./quality_signals";
@@ -25,14 +25,14 @@ export interface AuditHealthDimension<T extends string> {
   diagnostics: { code: string; message: string; remediation: string }[];
 }
 export interface AuditResultV2 extends AuditResult {
-  formatVersion: 2;
+  schemaVersion: 2;
   structure: AuditHealthDimension<"valid" | "invalid" | "unavailable">;
   cache: AuditHealthDimension<"fresh" | "stale" | "missing" | "unsupported" | "unavailable">;
   claims: AuditClaimHealth[];
 }
 
 export async function auditMemoryV2(options: AuditOptions = {}): Promise<AuditResultV2> {
-  const result: AuditResultV2 = { formatVersion: 2, ok: false, changedFiles: options.changedFiles ?? [], findings: [], warnings: [],
+  const result: AuditResultV2 = { schemaVersion: 2, ok: false, changedFiles: options.changedFiles ?? [], findings: [], warnings: [],
     structure: { state: "unavailable", diagnostics: [] }, cache: { state: "unavailable", diagnostics: [] }, claims: [] };
   const diagnostic = (code: string, error: unknown, remediation: string) =>
     ({ code, message: boundedGitDiagnostic(error instanceof Error ? error.message : String(error)), remediation });
@@ -53,15 +53,17 @@ export async function auditMemoryV2(options: AuditOptions = {}): Promise<AuditRe
   result.cache = await auditCacheHealth(loaded);
   try {
     const memory = loadMemory(repoRoot);
+    const verify = createGitCommitVerifier(repoRoot, { gitBinary: options.gitBinary, timeoutMs: options.gitTimeoutMs });
     const checks = new Map<string, GitVerificationDiagnostic>();
     result.claims = memory.claims.map((claim): AuditClaimHealth => {
-      const reference = claim.raw.last_verified_commit;
+      const rawReference = claim.raw.last_verified_commit;
+      const reference = typeof rawReference === "string" ? rawReference.trim() : rawReference;
       const missing = reference == null;
       const valid = typeof reference === "string" && isFullGitObjectId(reference);
       let check: GitVerificationDiagnostic | undefined;
       if (!missing) {
         const key = typeof reference === "string" ? reference : "";
-        check = checks.get(key) ?? verifyGitCommit(repoRoot, key, { gitBinary: options.gitBinary, timeoutMs: options.gitTimeoutMs });
+        check = checks.get(key) ?? verify(key);
         checks.set(key, check);
       }
       return { id: claim.id, path: claim.sourcePath,
@@ -105,6 +107,11 @@ export async function auditCacheHealth(loaded: ReturnType<typeof loadConfig>): P
       assertGlobalDatabaseProvenance(database, location, loaded, { includeConfigHash: false });
       const table = database.get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'compile_metadata'");
       if (!table) return state("unsupported", "Cache metadata schema is missing.");
+      const requiredTables = ["claims", "claim_files", "claim_symbols", "claim_tags", "claim_routes", "claim_relations",
+        "indexes", "recipes", "recipe_claims", "profile_traits", "plan_templates", "plan_stages", "claims_fts",
+        "recipes_fts", "plan_templates_fts", "profile_traits_fts"];
+      const tables = new Set(database.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").map((row) => row.name));
+      if (requiredTables.some((name) => !tables.has(name))) return state("unsupported", "Required cache query tables are missing.");
       const metadata = new Map(database.all<{ key: string; value: string }>("SELECT key, value FROM compile_metadata").map((row) => [row.key, row.value]));
       if (metadata.get("schema_version") !== "1") return state("unsupported", "Cache schema version is unsupported.");
       const hash = (text: string) => crypto.createHash("sha256").update(text).digest("hex");

@@ -31,7 +31,7 @@ describe("v2 audit health", () => {
     expect(Object.keys(v1)).toEqual(["ok", "changedFiles", "findings", "warnings"]);
     const result = await dispatch(["audit", "--format-version", "2", "--json"], { cwd });
     const v2 = JSON.parse(result.stdout);
-    expect(result.exitCode).toBe(0); expect(v2.formatVersion).toBe(2);
+    expect(result.exitCode).toBe(0); expect(v2.schemaVersion).toBe(2);
     expect(v2.structure.state).toBe("valid"); expect(v2.cache.state).toBe("missing");
     expect(v2.claims[0].verificationMetadata).toBe("missing"); expect(v2.claims[0].verificationCheck).toBe("not_run");
     expect(v2.claims[0].qualitySignals[0].code).toBe("VERIFICATION_METADATA_MISSING");
@@ -49,6 +49,10 @@ describe("v2 audit health", () => {
     const claimPath = path.join(cwd, claimRelative); const stat = fs.statSync(claimPath);
     fs.appendFileSync(claimPath, "\nBody-only review note.\n"); fs.utimesSync(claimPath, stat.atime, stat.mtime);
     expect((await auditMemoryV2({ cwd })).cache.state).toBe("stale");
+    const incomplete = await openSqliteDatabase(compiled.databasePath);
+    incomplete.run("DROP TABLE claims_fts"); incomplete.close();
+    expect((await auditMemoryV2({ cwd })).cache.state).toBe("unsupported");
+    await compileMemory({ cwd });
     const database = await openSqliteDatabase(compiled.databasePath);
     database.run("UPDATE compile_metadata SET value = '999' WHERE key = 'schema_version'"); database.close();
     expect((await auditMemoryV2({ cwd })).cache.state).toBe("unsupported");
@@ -60,7 +64,7 @@ describe("v2 audit health", () => {
     const cwd = fixture(); const oid = commit(cwd);
     const claimPath = path.join(cwd, claimRelative);
     const original = fs.readFileSync(claimPath, "utf8");
-    const changed = original.replace("last_verified_commit: null", `last_verified_commit: ${oid}`)
+    const changed = original.replace("last_verified_commit: null", `last_verified_commit: "  ${oid}  "`)
       .replace("verification:\n  - bun test", "verification:\n  - touch SHOULD_NOT_EXIST")
       .replace(/claim:.*\n/, 'claim: "This interaction preserves the documented data contract and failure modes."\n')
       .replace(/tags:\n(?:  - .*\n)+/, "tags:\n  - auth.student_oauth.uid_is_tenant_scoped\n")
@@ -87,7 +91,7 @@ describe("v2 audit health", () => {
 
   test("built Node CLI supports v2 health and exit 6 without executing memory", () => {
     const cwd = fixture(); const oid = commit(cwd); const claimPath = path.join(cwd, claimRelative);
-    const content = fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${oid}`);
+    const content = fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: "  ${oid}  "`);
     fs.writeFileSync(claimPath, content);
     const cli = path.join(cwd, "audit-cli.js");
     const build = spawnSync("bun", ["build", path.resolve("packages/cli/src/index.ts"), "--target=node", "--packages=external", `--outfile=${cli}`], { encoding: "utf8" });

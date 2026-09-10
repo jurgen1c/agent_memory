@@ -8,7 +8,7 @@ import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, configuredPathRelativeToRepo, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
 import { readGitBlobs } from "./git_blob_reader";
 import { GitCommandError, isFullGitObjectId, runGit } from "./git";
-import { verifyGitCommit, type GitVerificationDiagnostic } from "./git_verification";
+import { createGitCommitVerifier, type GitVerificationDiagnostic } from "./git_verification";
 import {
   loadMemory,
   type LoadedMemory,
@@ -169,6 +169,7 @@ function findOutdatedVerifiedClaims(
   const findings: AuditFinding[] = [];
   const warnings: string[] = [];
   const commitResolutionByReference = new Map<string, GitVerificationDiagnostic>();
+  const verify = createGitCommitVerifier(repoRoot, { gitBinary: options.gitBinary, timeoutMs: options.gitTimeoutMs });
   const changedFilesByCommit = new Map<string, string[]>();
   let workingTreeFiles: string[] | undefined;
 
@@ -206,7 +207,7 @@ function findOutdatedVerifiedClaims(
     let resolution = commitResolutionByReference.get(reference);
 
     if (!resolution) {
-      resolution = verifyGitCommit(repoRoot, reference, { gitBinary: options.gitBinary, timeoutMs: options.gitTimeoutMs });
+      resolution = verify(reference);
       commitResolutionByReference.set(reference, resolution);
     }
     if (resolution.state !== "verified") {

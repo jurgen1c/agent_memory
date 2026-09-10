@@ -60,10 +60,23 @@ export function repositoryObjectIdLength(repoRoot: string): 40 | 64 | undefined 
   return repositoryFormatVersion === "1" && objectFormat?.toLowerCase() === "sha256" ? 64 : 40;
 }
 
+export interface GitCommandResult {
+  stdout: string;
+  diagnostic: string;
+  status: 0;
+  signal: null;
+  timedOut: false;
+}
+
 export function runGit(repoRoot: string, args: string[], options: GitCommandOptions = {}): string {
+  return runGitResult(repoRoot, args, options).stdout;
+}
+
+export function runGitResult(repoRoot: string, args: string[], options: GitCommandOptions = {}): GitCommandResult {
   const timeoutMs = options.timeoutMs ?? DEFAULT_GIT_COMMAND_TIMEOUT_MS;
   const result = (options.spawn ?? spawnSync)(options.gitBinary ?? "git", args, {
     cwd: repoRoot,
+    env: { ...process.env, GIT_NO_LAZY_FETCH: "1" },
     encoding: "utf8",
     input: options.input,
     maxBuffer: options.maxBuffer ?? DEFAULT_GIT_MAX_BUFFER_BYTES,
@@ -73,7 +86,8 @@ export function runGit(repoRoot: string, args: string[], options: GitCommandOpti
   });
 
   assertGitResult(result.error, result.status, result.stderr, args, timeoutMs, result.signal);
-  return options.trim === false ? result.stdout : result.stdout.trim();
+  return { stdout: options.trim === false ? result.stdout : result.stdout.trim(),
+    diagnostic: boundedGitDiagnostic(result.stderr ?? ""), status: 0, signal: null, timedOut: false };
 }
 
 export function runGitBuffer(
@@ -84,6 +98,7 @@ export function runGitBuffer(
   const timeoutMs = options.timeoutMs ?? DEFAULT_GIT_COMMAND_TIMEOUT_MS;
   const result = spawnSync(options.gitBinary ?? "git", args, {
     cwd: repoRoot,
+    env: { ...process.env, GIT_NO_LAZY_FETCH: "1" },
     input: options.input,
     maxBuffer: options.maxBuffer ?? DEFAULT_GIT_MAX_BUFFER_BYTES,
     stdio: ["pipe", "pipe", "pipe"],

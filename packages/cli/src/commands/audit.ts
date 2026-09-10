@@ -134,7 +134,7 @@ function renderAuditResult(result: AuditResult | AuditResultV2): string {
     `Findings: ${result.findings.length} (${counts.error} errors, ${counts.warning} warnings, ${counts.info} info)`
   ];
 
-  if ("formatVersion" in result) {
+  if ("schemaVersion" in result) {
     lines.push(`Structure: ${result.structure.state}`, `Cache: ${result.cache.state}`);
     for (const dimension of [result.structure, result.cache]) {
       for (const diagnostic of dimension.diagnostics) lines.push(`${diagnostic.code}: ${diagnostic.message}`, `  Remediation: ${diagnostic.remediation}`);

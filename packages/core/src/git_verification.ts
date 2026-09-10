@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { boundedGitDiagnostic, GitCommandError, isFullGitObjectId, runGit, type GitCommandOptions } from "./git";
+import { boundedGitDiagnostic, GitCommandError, isFullGitObjectId, runGitResult, type GitCommandOptions } from "./git";
 
 export type VerificationCheckState = "verified" | "invalid_reference" | "unavailable" | "not_run";
 export type GitVerificationCode = "GIT_PERMISSION_DENIED" | "GIT_EXECUTABLE_MISSING" | "GIT_TIMEOUT" |
@@ -37,30 +37,51 @@ export function gitFailureDiagnostic(error: unknown): GitVerificationDiagnostic 
 
 /** Resolves only exact immutable commit objects. Never executes stored verification commands. */
 export function verifyGitCommit(repoRoot: string, reference: string, options: GitCommandOptions = {}): GitVerificationDiagnostic {
+  return createGitCommitVerifier(repoRoot, options)(reference);
+}
+
+/** Reuses one accessible-store preflight for a read-only audit invocation. */
+export function createGitCommitVerifier(repoRoot: string, options: GitCommandOptions = {}): (reference: string) => GitVerificationDiagnostic {
+  let preparation: 40 | 64 | GitVerificationDiagnostic | undefined;
+  const probe = (args: string[], extra: GitCommandOptions = {}): string => {
+    const result = runGitResult(repoRoot, args, { ...options, ...extra });
+    // Even status-zero Git probes report damaged packs on stderr. Any diagnostic
+    // makes a missing-object conclusion unsafe; do not parse localized messages.
+    if (result.diagnostic) throw new GitCommandError("Git reported diagnostics while inspecting the repository object store.",
+      { status: result.status, diagnostic: result.diagnostic });
+    return result.stdout;
+  };
   const outcome = (code: GitVerificationCode, state: VerificationCheckState, message: string, remediation: string): GitVerificationDiagnostic =>
     ({ code, state, message, remediation, status: 0, signal: null, timedOut: false, diagnostic: "" });
   const malformed = () => outcome("VERIFICATION_METADATA_MALFORMED", "invalid_reference",
     "Verification metadata or Git output does not identify the exact full commit object.",
     "Review the recorded metadata and Git output; retain the recorded value until reviewed.");
-  if (!isFullGitObjectId(reference)) return malformed();
-  try {
-    const format = runGit(repoRoot, ["rev-parse", "--show-object-format"], options);
-    if (format !== "sha1" && format !== "sha256") throw new GitCommandError("Git returned an unsupported repository object format.", { status: 0 });
-    const objectPath = runGit(repoRoot, ["rev-parse", "--git-path", "objects"], options);
-    if (!objectPath || objectPath.includes("\n")) throw new GitCommandError("Git returned an invalid object-store path.", { status: 0 });
-    assertObjectStoreAccessible(path.resolve(repoRoot, objectPath));
-    runGit(repoRoot, ["count-objects", "-v"], options);
-    if (!isFullGitObjectId(reference, format === "sha1" ? 40 : 64)) return malformed();
-    const oid = reference.toLowerCase();
-    const output = runGit(repoRoot, ["--no-replace-objects", "cat-file", "--batch-check=%(objectname) %(objecttype)"], { ...options, input: `${oid}\n`, trim: false });
-    if (output === `${oid} missing\n`) return outcome("GIT_UNKNOWN_OBJECT", "invalid_reference",
-      "The accessible Git object store explicitly reports the recorded commit is missing.",
-      "Inspect fetch and history, then repair the reference only after review.");
-    if (output !== `${oid} commit\n`) return malformed();
-    return outcome("GIT_VERIFIED", "verified", "The exact recorded commit object resolves; claim truth and verification commands were not checked.", "No reference repair needed.");
-  } catch (error) {
-    return gitFailureDiagnostic(error);
-  }
+  return (reference) => {
+    reference = reference.trim();
+    if (!isFullGitObjectId(reference)) return malformed();
+    try {
+      if (preparation === undefined) {
+        try {
+          const format = probe(["rev-parse", "--show-object-format"]);
+          if (format !== "sha1" && format !== "sha256") throw new GitCommandError("Git returned an unsupported repository object format.", { status: 0 });
+          const objectPath = probe(["rev-parse", "--git-path", "objects"]);
+          if (!objectPath || objectPath.includes("\n")) throw new GitCommandError("Git returned an invalid object-store path.", { status: 0 });
+          assertObjectStoreAccessible(path.resolve(repoRoot, objectPath));
+          probe(["count-objects", "-v"]);
+          preparation = format === "sha1" ? 40 : 64;
+        } catch (error) { preparation = gitFailureDiagnostic(error); }
+      }
+      if (typeof preparation !== "number") return preparation;
+      if (!isFullGitObjectId(reference, preparation)) return malformed();
+      const oid = reference.toLowerCase();
+      const output = probe(["--no-replace-objects", "cat-file", "--batch-check=%(objectname) %(objecttype)"], { input: `${oid}\n`, trim: false });
+      if (output === `${oid} missing\n`) return outcome("GIT_UNKNOWN_OBJECT", "invalid_reference",
+        "The accessible Git object store explicitly reports the recorded commit is missing.",
+        "Inspect fetch and history, then repair the reference only after review.");
+      if (output !== `${oid} commit\n`) return malformed();
+      return outcome("GIT_VERIFIED", "verified", "The exact recorded commit object resolves; claim truth and verification commands were not checked.", "No reference repair needed.");
+    } catch (error) { return gitFailureDiagnostic(error); }
+  };
 }
 
 // Git can report inaccessible loose objects as missing. Check every local and alternate
