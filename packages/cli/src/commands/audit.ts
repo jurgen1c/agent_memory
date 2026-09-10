@@ -137,7 +137,12 @@ function renderAuditResult(result: AuditResult | AuditResultV2): string {
   if ("schemaVersion" in result) {
     lines.push(`Structure: ${result.structure.state}`, `Cache: ${result.cache.state}`);
     for (const dimension of [result.structure, result.cache]) {
-      for (const diagnostic of dimension.diagnostics) lines.push(`${diagnostic.code}: ${diagnostic.message}`, `  Remediation: ${diagnostic.remediation}`);
+      for (const diagnostic of dimension.diagnostics) {
+        lines.push(`${diagnostic.code}: ${diagnostic.message}`);
+        if (diagnostic.path) lines.push(`  Source: ${JSON.stringify(diagnostic.path)}`);
+        if (diagnostic.id) lines.push(`  Claim: ${JSON.stringify(diagnostic.id)}`);
+        lines.push(`  Remediation: ${diagnostic.remediation}`);
+      }
     }
     for (const claim of result.claims) {
       lines.push(`${claim.id}: verificationMetadata=${claim.verificationMetadata}; verificationCheck=${claim.verificationCheck}`);

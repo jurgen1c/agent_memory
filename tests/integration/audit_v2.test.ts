@@ -42,6 +42,21 @@ describe("v2 audit health", () => {
     await expect(dispatch(["audit", "--format-version", "3"], { cwd })).rejects.toThrow("must be 1 or 2");
   });
 
+  test("invalid structure keeps validator source coordinates in JSON and human output", async () => {
+    const cwd = fixture(); const claimPath = path.join(cwd, claimRelative);
+    fs.writeFileSync(claimPath, fs.readFileSync(claimPath, "utf8").replace(/tags:\n(?:  - .*\n)+/, "tags: []\n"));
+    const json = await dispatch(["audit", "--format-version", "2", "--json"], { cwd });
+    expect(json.exitCode).toBe(6);
+    const result = JSON.parse(json.stdout);
+    expect(result.structure.state).toBe("invalid");
+    expect(result.structure.diagnostics.find((item: { code: string }) => item.code === "claim.tags.required")).toMatchObject({
+      path: claimRelative, id: "auth.student_oauth.uid_is_tenant_scoped"
+    });
+    const human = await dispatch(["audit", "--format-version", "2"], { cwd });
+    expect(human.stdout).toContain(`Source: "${claimRelative}"`);
+    expect(human.stdout).toContain('Claim: "auth.student_oauth.uid_is_tenant_scoped"');
+  });
+
   test("cache uses canonical content digests including bodies, not timestamps", async () => {
     const cwd = fixture();
     const compiled = await compileMemory({ cwd });

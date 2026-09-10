@@ -22,7 +22,7 @@ export interface AuditClaimHealth {
 }
 export interface AuditHealthDimension<T extends string> {
   state: T;
-  diagnostics: { code: string; message: string; remediation: string }[];
+  diagnostics: { code: string; message: string; remediation: string; path?: string; id?: string }[];
 }
 export interface AuditResultV2 extends AuditResult {
   schemaVersion: 2;
@@ -46,7 +46,7 @@ export async function auditMemoryV2(options: AuditOptions = {}): Promise<AuditRe
   try {
     const validation = validateRepository({ cwd: repoRoot });
     result.structure = { state: validation.valid ? "valid" : "invalid", diagnostics: validation.errors.map((issue) =>
-      diagnostic(issue.code, issue.message, "Review the canonical source and validation finding.")) };
+      ({ ...diagnostic(issue.code, issue.message, "Review the canonical source and validation finding."), path: issue.path, id: issue.id })) };
   } catch (error) {
     result.structure.diagnostics.push(diagnostic("STRUCTURE_UNAVAILABLE", error, "Restore canonical memory access and rerun."));
   }
