@@ -1,3 +1,4 @@
+import { canonicalMemoryContentDigest } from "./canonical_digest";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -632,6 +633,7 @@ function insertMetadata(
     compiled_at: new Date().toISOString(),
     memory_root: memory.loadedConfig.config.memory_root,
     config_hash: sha256(fs.readFileSync(configPath, "utf8")),
+    canonical_content_hash: canonicalMemoryContentDigest(memoryRoot, memory.loadedConfig.config),
     canonical_files_hash: sha256(JSON.stringify(canonicalFileInventory)),
     canonical_files_count: String(canonicalFileInventory.length),
     database_path: databaseLocation.path

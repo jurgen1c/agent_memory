@@ -340,7 +340,7 @@ Command usage cheat sheet:
 | `profiles match` | Task, changed files, recipe, system, alias, or explicit trait. | `--task <task>`, `--changed-files <files...>`, `--recipe <id>`, `--system <system>`, `--profile <alias>`, `--profile-trait <id>`, `--json` |
 | `context` | One of `--task`, `--changed-files`, `--git-diff`, `--recipe`, or `--plan`. | `--stage <id>`, `--profile <alias>`, `--profile-trait <id>`, `--budget small`, `--budget medium`, `--budget full`, `--depth <n>`, `--include-inferred`, `--no-include-inferred`, `--json` |
 | `coverage` | `--changed-files` or `--git-diff`. | `--base <ref>` with `--git-diff`, `--json` |
-| `audit` | `--changed-files` or `--git-diff`. | `--base <ref>` with `--git-diff`, `--strict`, `--json` |
+| `audit` | `--changed-files` or `--git-diff` on v1; optional on v2. | `--base <ref>` with `--git-diff`, `--strict`, `--json`, `--format-version 1|2` |
 | `doctor` | None. | `--json` |
 | `sync` | None. | `--json` |
 | `upgrade` | None. Dry-run by default. | `--write`, `--force`, `--json`, `--global`, `--memory-key <key>` |
@@ -590,6 +590,30 @@ bin/memory audit --git-diff --base origin/main
 
 `coverage` exits with code `6` when a changed watched file has no related memory update or valid waiver.
 `audit` exits with code `6` for error findings. Shared routes, shared symbols, and same-system claims with at least two shared `source_files` are strong overlap signals and require review. Shared source or related files are warnings, while tag-only overlap is informational. Any semantically accurate explicit graph relationship records that an overlap pair was reviewed; invalid `deprecated_by` references and unresolved active conflicts remain blocking. A recorded `last_verified_commit` must be a full immutable commit object ID that resolves to a commit, and audit warns when referenced source files changed afterward.
+
+Use `agent-memory audit --format-version 2 --json` for independent `structure`,
+`cache`, and per-claim `verificationMetadata`/`verificationCheck` states. Version 1
+remains the default with its existing JSON shape. Version 2 exits 6 for invalid
+structure, unsupported/unavailable cache, unavailable checks, invalid references,
+or other audit errors. Missing/stale cache and absent verification metadata are
+advisory; they do not rewrite lifecycle, confidence, or recorded commit IDs.
+
+Git diagnostics preserve bounded messages/stderr (512 characters), error code,
+exit status, signal and timeout. Permission errors, missing Git, timeouts and
+repository/object-store failures describe environment remediation. Only an
+explicit missing-object result after accessible-store preflight suggests inspecting
+fetch/history and repairing a reference after review. Exact full SHA-1/SHA-256
+commit verification never establishes claim truth or runs listed commands.
+
+V2 cache freshness compares configured canonical paths and content, including
+Markdown bodies. Older caches without the additive content digest report stale
+until recompiled. `GENERIC_SUMMARY` identifies summaries containing the literal
+phrase `preserves the documented data contract`; `ID_ONLY_TAGS` identifies a sole
+self-ID tag; absent commit metadata produces `VERIFICATION_METADATA_MISSING`.
+These advisory signals include the source field/text. Source changes produce
+`SOURCE_CHANGED_SINCE_VERIFICATION`; existing source files do not validate a claim's
+meaning. Reusable `auditMemoryV2`, `auditCacheHealth`, `verifyGitCommit`,
+`gitFailureDiagnostic`, and `claimQualitySignals` APIs are exported for adoption tools.
 
 With `--git-diff`, audit compares overlap findings with the resolved base revision and reports new or more severe pairs. Use `--strict` to retain the legacy behavior that blocks every overlap, accepts only `replaces` or `conflicts_with` as graph review decisions, blocks `source.related_claims_not_reviewed`, and does not suppress base findings.
 

@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -11,17 +11,24 @@ export interface GitCommandOptions {
   maxBuffer?: number;
   input?: string | Buffer;
   trim?: boolean;
+  spawn?: (binary: string, args: string[], options: SpawnSyncOptionsWithStringEncoding) => SpawnSyncReturns<string>;
 }
 
 export class GitCommandError extends Error {
   readonly timedOut: boolean;
   readonly status: number | null;
+  readonly code?: string;
+  readonly signal: string | null;
+  readonly diagnostic: string;
 
-  constructor(message: string, options: { timedOut?: boolean; status?: number | null; cause?: unknown } = {}) {
+  constructor(message: string, options: { timedOut?: boolean; status?: number | null; cause?: unknown; code?: string; signal?: string | null; diagnostic?: string } = {}) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause });
     this.name = "GitCommandError";
     this.timedOut = options.timedOut ?? false;
     this.status = options.status ?? null;
+    this.code = options.code;
+    this.signal = options.signal ?? null;
+    this.diagnostic = boundedGitDiagnostic(options.diagnostic ?? "");
   }
 }
 
@@ -55,7 +62,7 @@ export function repositoryObjectIdLength(repoRoot: string): 40 | 64 | undefined 
 
 export function runGit(repoRoot: string, args: string[], options: GitCommandOptions = {}): string {
   const timeoutMs = options.timeoutMs ?? DEFAULT_GIT_COMMAND_TIMEOUT_MS;
-  const result = spawnSync(options.gitBinary ?? "git", args, {
+  const result = (options.spawn ?? spawnSync)(options.gitBinary ?? "git", args, {
     cwd: repoRoot,
     encoding: "utf8",
     input: options.input,
@@ -65,14 +72,14 @@ export function runGit(repoRoot: string, args: string[], options: GitCommandOpti
     killSignal: "SIGKILL"
   });
 
-  assertGitResult(result.error, result.status, result.stderr, args, timeoutMs);
+  assertGitResult(result.error, result.status, result.stderr, args, timeoutMs, result.signal);
   return options.trim === false ? result.stdout : result.stdout.trim();
 }
 
 export function runGitBuffer(
   repoRoot: string,
   args: string[],
-  options: Omit<GitCommandOptions, "trim"> = {}
+  options: Omit<GitCommandOptions, "trim" | "spawn"> = {}
 ): Buffer {
   const timeoutMs = options.timeoutMs ?? DEFAULT_GIT_COMMAND_TIMEOUT_MS;
   const result = spawnSync(options.gitBinary ?? "git", args, {
@@ -84,7 +91,7 @@ export function runGitBuffer(
     killSignal: "SIGKILL"
   });
 
-  assertGitResult(result.error, result.status, result.stderr, args, timeoutMs);
+  assertGitResult(result.error, result.status, result.stderr, args, timeoutMs, result.signal);
   return result.stdout;
 }
 
@@ -93,7 +100,8 @@ function assertGitResult(
   status: number | null,
   stderr: string | Buffer,
   args: string[],
-  timeoutMs: number
+  timeoutMs: number,
+  signal: string | null
 ): void {
   const command = `git ${args.join(" ")}`;
 
@@ -104,18 +112,18 @@ function assertGitResult(
       throw new GitCommandError(`Git command timed out after ${timeoutMs}ms: ${command}`, {
         timedOut: true,
         status,
-        cause: error
+        cause: error, code: String(code), signal, diagnostic: (stderr?.toString() ?? "")
       });
     }
 
-    throw new GitCommandError(`Could not start ${command}: ${error.message}`, { status, cause: error });
+    throw new GitCommandError(`Could not start ${command}: ${boundedGitDiagnostic(error.message)}`, { status, cause: error, code: typeof code === "string" ? code : undefined, signal, diagnostic: (stderr?.toString() ?? "") });
   }
 
-  if (status !== 0) {
-    const detail = stderr.toString().trim();
+  if (status !== 0 || signal) {
+    const detail = boundedGitDiagnostic((stderr?.toString() ?? ""));
     throw new GitCommandError(
       `Git command exited with status ${status ?? "unknown"}: ${command}${detail ? `: ${detail}` : ""}`,
-      { status }
+      { status, signal, diagnostic: detail }
     );
   }
 }
@@ -200,4 +208,8 @@ function normalizeGitConfigValue(value: string): string {
   }
 
   return normalized.trim();
+}
+
+export function boundedGitDiagnostic(value: string): string {
+  return value.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").trim().slice(0, 512);
 }
