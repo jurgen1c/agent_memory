@@ -57,6 +57,39 @@ describe("v2 audit health", () => {
     expect(human.stdout).toContain('Claim: "auth.student_oauth.uid_is_tenant_scoped"');
   });
 
+  test("unrelated malformed artifacts do not erase readable claim diagnostics", async () => {
+    const cwd = fixture();
+    const before = await auditMemoryV2({ cwd });
+    fs.mkdirSync(path.join(cwd, "docs/agent-memory/graph"), { recursive: true });
+    fs.writeFileSync(path.join(cwd, "docs/agent-memory/graph/bad.yaml"), "edges: [unterminated\n");
+    const brokenGraph = await auditMemoryV2({ cwd });
+    expect(brokenGraph.structure.state).toBe("invalid");
+    expect(brokenGraph.claims).toEqual(before.claims);
+    const claimPath = path.join(cwd, claimRelative);
+    fs.writeFileSync(claimPath, "---\ntags: [unterminated\n---\n");
+    const brokenClaim = await auditMemoryV2({ cwd });
+    expect(brokenClaim.structure.state).toBe("invalid");
+    expect(brokenClaim.claims).toHaveLength(before.claims.length - 1);
+    expect(brokenClaim.claims[0].qualitySignals.length).toBeGreaterThan(0);
+  });
+
+  test("inaccessible canonical files report unavailable structure and retain other readable claims", async () => {
+    const cwd = fixture(); const claimPath = path.join(cwd, claimRelative);
+    const original = fs.readFileSync(claimPath, "utf8");
+    fs.chmodSync(claimPath, 0);
+    try {
+      const result = await auditMemoryV2({ cwd });
+      expect(result.structure.state).toBe("unavailable");
+      expect(result.ok).toBe(false);
+      expect(result.structure.diagnostics.every((item) => item.code === "STRUCTURE_UNAVAILABLE")).toBe(true);
+      expect(result.structure.diagnostics[0].path).toBe(claimRelative.replace("docs/agent-memory/", ""));
+      expect(result.structure.diagnostics[0].remediation).toContain("Restore canonical memory access");
+      expect(result.claims).toHaveLength(1);
+      expect(result.claims[0].verificationCheck).toBe("not_run");
+    } finally { fs.chmodSync(claimPath, 0o644); }
+    expect(fs.readFileSync(claimPath, "utf8")).toBe(original);
+  });
+
   test("cache uses canonical content digests including bodies, not timestamps", async () => {
     const cwd = fixture();
     const compiled = await compileMemory({ cwd });

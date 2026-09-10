@@ -1,13 +1,14 @@
 import { canonicalMemoryContentDigest } from "./canonical_digest";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import { auditMemory, type AuditOptions, type AuditResult } from "./audit";
 import { loadConfig } from "./config";
 import { assertGlobalDatabaseProvenance, resolveConfiguredDatabaseLocation } from "./database";
 import { boundedGitDiagnostic, isFullGitObjectId } from "./git";
 import { createGitCommitVerifier, type GitVerificationDiagnostic, type VerificationCheckState } from "./git_verification";
-import { canonicalMemoryFileInventory, resolveConfiguredPath } from "./files";
-import { loadMemory } from "./memory";
+import { canonicalMemoryFileInventory, discoverFiles, resolveConfiguredPath } from "./files";
+import { readMemoryClaim, type MemoryClaim } from "./memory";
 import { claimQualitySignals, type ClaimQualitySignal } from "./quality_signals";
 import { openSqliteDatabase } from "./sqlite";
 import { validateRepository } from "./validator";
@@ -37,25 +38,53 @@ export async function auditMemoryV2(options: AuditOptions = {}): Promise<AuditRe
   const diagnostic = (code: string, error: unknown, remediation: string) =>
     ({ code, message: boundedGitDiagnostic(error instanceof Error ? error.message : String(error)), remediation });
   let loaded: ReturnType<typeof loadConfig>;
-  try { loaded = loadConfig({ cwd: options.cwd }); }
+  let memoryRoot: string;
+  try {
+    loaded = loadConfig({ cwd: options.cwd });
+    memoryRoot = resolveConfiguredPath(loaded.repo.root, loaded.config.memory_root);
+  }
   catch (error) {
     result.structure.diagnostics.push(diagnostic("STRUCTURE_UNAVAILABLE", error, "Restore configuration and canonical memory access, then rerun."));
     return result;
   }
   const repoRoot = loaded.repo.root;
+  const accessFailures: AuditResultV2["structure"]["diagnostics"] = [];
+  const accessFailure = (error: unknown, sourcePath?: string) => ({
+    ...diagnostic("STRUCTURE_UNAVAILABLE", error, "Restore canonical memory access and rerun; retain canonical content and metadata."), path: sourcePath
+  });
   try {
-    const validation = validateRepository({ cwd: repoRoot });
-    result.structure = { state: validation.valid ? "valid" : "invalid", diagnostics: validation.errors.map((issue) =>
-      ({ ...diagnostic(issue.code, issue.message, "Review the canonical source and validation finding."), path: issue.path, id: issue.id })) };
+    fs.accessSync(memoryRoot, fs.constants.R_OK | fs.constants.X_OK);
+    for (const sourcePath of canonicalMemoryFileInventory(memoryRoot, loaded.config)) {
+      try { fs.accessSync(path.join(memoryRoot, sourcePath), fs.constants.R_OK); }
+      catch (error) { accessFailures.push(accessFailure(error, sourcePath)); }
+    }
+    if (accessFailures.length > 0) result.structure = { state: "unavailable", diagnostics: accessFailures };
+    else {
+      const validation = validateRepository({ cwd: repoRoot });
+      result.structure = { state: validation.valid ? "valid" : "invalid", diagnostics: validation.errors.map((issue) =>
+        ({ ...diagnostic(issue.code, issue.message, "Review the canonical source and validation finding."), path: issue.path, id: issue.id })) };
+    }
   } catch (error) {
-    result.structure.diagnostics.push(diagnostic("STRUCTURE_UNAVAILABLE", error, "Restore canonical memory access and rerun."));
+    result.structure = { state: "unavailable", diagnostics: [accessFailure(error)] };
   }
   result.cache = await auditCacheHealth(loaded);
   try {
-    const memory = loadMemory(repoRoot);
+    const claims: MemoryClaim[] = [];
+    for (const filePath of discoverFiles(memoryRoot, loaded.config.claims)) {
+      try { claims.push(readMemoryClaim(memoryRoot, filePath)); }
+      catch (error) {
+        const sourcePath = path.relative(memoryRoot, filePath);
+        if (isFilesystemFailure(error)) {
+          if (result.structure.state !== "unavailable") result.structure = { state: "unavailable", diagnostics: [] };
+          if (!result.structure.diagnostics.some((item) => item.path === sourcePath)) result.structure.diagnostics.push(accessFailure(error, sourcePath));
+        } else if (result.structure.state === "valid") {
+          result.structure = { state: "invalid", diagnostics: [{ ...diagnostic("claim.parse", error, "Review the canonical claim syntax."), path: sourcePath }] };
+        }
+      }
+    }
     const verify = createGitCommitVerifier(repoRoot, { gitBinary: options.gitBinary, timeoutMs: options.gitTimeoutMs });
     const checks = new Map<string, GitVerificationDiagnostic>();
-    result.claims = memory.claims.map((claim): AuditClaimHealth => {
+    result.claims = claims.map((claim): AuditClaimHealth => {
       const rawReference = claim.raw.last_verified_commit;
       const reference = typeof rawReference === "string" ? rawReference.trim() : rawReference;
       const missing = reference == null;
@@ -122,4 +151,9 @@ export async function auditCacheHealth(loaded: ReturnType<typeof loadConfig>): P
       return state("fresh", "Cache matches canonical inventory.");
     } finally { database.close(); }
   } catch (error) { return state("unavailable", boundedGitDiagnostic(error instanceof Error ? error.message : String(error))); }
+}
+
+function isFilesystemFailure(error: unknown): boolean {
+  return error !== null && typeof error === "object" && "code" in error && typeof error.code === "string" &&
+    ["EACCES", "EPERM", "ENOENT", "EIO", "EMFILE", "ENFILE", "ENOTDIR", "EISDIR", "ELOOP", "ENAMETOOLONG", "EBUSY", "ESTALE"].includes(error.code);
 }

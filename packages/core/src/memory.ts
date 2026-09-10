@@ -123,30 +123,33 @@ export function loadMemory(cwd?: string): LoadedMemory {
 }
 
 function loadClaims(memoryRoot: string, files: string[]): MemoryClaim[] {
-  return files.map((filePath) => {
-    const relativePath = path.relative(memoryRoot, filePath);
-    const markdown = parseMarkdownFile(filePath);
-    const raw = asRecord(markdown.frontmatter);
+  return files.map((filePath) => readMemoryClaim(memoryRoot, filePath));
+}
 
-    return {
-      id: readString(raw, "id"),
-      type: readString(raw, "type"),
-      system: readString(raw, "system"),
-      status: readString(raw, "status"),
-      confidence: readString(raw, "confidence"),
-      severity: readString(raw, "severity"),
-      title: readString(raw, "title"),
-      claim: readString(raw, "claim"),
-      sourcePath: relativePath,
-      sourceFiles: readStringArray(raw, "source_files"),
-      relatedFiles: readOptionalStringArray(raw, "related_files"),
-      symbols: readOptionalStringArray(raw, "symbols"),
-      routes: readOptionalStringArray(raw, "routes"),
-      tags: readStringArray(raw, "tags"),
-      verification: readOptionalStringArray(raw, "verification"),
-      raw
-    };
-  });
+/** Parse one canonical claim as data, independently of other artifact types. */
+export function readMemoryClaim(memoryRoot: string, filePath: string): MemoryClaim {
+  const relativePath = path.relative(memoryRoot, filePath);
+  const markdown = parseMarkdownFile(filePath);
+  const raw = asRecord(markdown.frontmatter);
+
+  return {
+    id: readString(raw, "id"),
+    type: readString(raw, "type"),
+    system: readString(raw, "system"),
+    status: readString(raw, "status"),
+    confidence: readString(raw, "confidence"),
+    severity: readString(raw, "severity"),
+    title: readString(raw, "title"),
+    claim: readString(raw, "claim"),
+    sourcePath: relativePath,
+    sourceFiles: readStringArray(raw, "source_files"),
+    relatedFiles: readOptionalStringArray(raw, "related_files"),
+    symbols: readOptionalStringArray(raw, "symbols"),
+    routes: readOptionalStringArray(raw, "routes"),
+    tags: readStringArray(raw, "tags"),
+    verification: readOptionalStringArray(raw, "verification"),
+    raw
+  };
 }
 
 function loadGraphs(memoryRoot: string, files: string[]): MemoryGraph[] {
