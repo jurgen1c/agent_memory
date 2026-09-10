@@ -6,6 +6,7 @@ import path from "node:path";
 import { dispatch } from "../../packages/cli/src/router";
 import { auditMemoryV2 } from "../../packages/core/src/audit_v2";
 import { compileMemory } from "../../packages/core/src/compiler";
+import { discoverFiles } from "../../packages/core/src/files";
 import { runGit } from "../../packages/core/src/git";
 import { openSqliteDatabase } from "../../packages/core/src/sqlite";
 
@@ -71,6 +72,27 @@ describe("v2 audit health", () => {
     expect(brokenClaim.structure.state).toBe("invalid");
     expect(brokenClaim.claims).toHaveLength(before.claims.length - 1);
     expect(brokenClaim.claims[0].qualitySignals.length).toBeGreaterThan(0);
+  });
+
+  test("source drift and readable claim health survive unrelated malformed and inaccessible graph artifacts", async () => {
+    const cwd = fixture(); const oid = commit(cwd); const claimPath = path.join(cwd, claimRelative);
+    fs.writeFileSync(claimPath, fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${oid}`));
+    fs.appendFileSync(path.join(cwd, "src/auth.js"), "\n// source drift\n");
+    const before = await auditMemoryV2({ cwd });
+    expect(before.claims[0].qualitySignals.some((signal) => signal.code === "SOURCE_CHANGED_SINCE_VERIFICATION")).toBe(true);
+    const graph = path.join(cwd, "docs/agent-memory/graph");
+    fs.writeFileSync(path.join(graph, "bad.yaml"), "edges: [unterminated\n");
+    const malformed = await auditMemoryV2({ cwd });
+    expect(malformed.structure.state).toBe("invalid");
+    expect(malformed.claims).toEqual(before.claims);
+    fs.chmodSync(graph, 0);
+    try {
+      expect(() => discoverFiles(path.join(cwd, "docs/agent-memory"), ["claims/**/*.md"])).toThrow();
+      const inaccessible = await auditMemoryV2({ cwd });
+      expect(inaccessible.structure.state).toBe("unavailable");
+      expect(inaccessible.claims).toEqual(before.claims);
+      expect(inaccessible.structure.diagnostics.some((item) => item.path === "graph")).toBe(true);
+    } finally { fs.chmodSync(graph, 0o755); }
   });
 
   test("inaccessible canonical files report unavailable structure and retain other readable claims", async () => {

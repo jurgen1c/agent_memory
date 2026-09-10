@@ -2,12 +2,12 @@ import { canonicalMemoryContentDigest } from "./canonical_digest";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { auditMemory, type AuditOptions, type AuditResult } from "./audit";
+import { auditClaimVerification, auditMemory, type AuditOptions, type AuditResult } from "./audit";
 import { loadConfig } from "./config";
 import { assertGlobalDatabaseProvenance, resolveConfiguredDatabaseLocation } from "./database";
 import { boundedGitDiagnostic, isFullGitObjectId } from "./git";
 import { createGitCommitVerifier, type GitVerificationDiagnostic, type VerificationCheckState } from "./git_verification";
-import { canonicalMemoryFileInventory, discoverFiles, resolveConfiguredPath } from "./files";
+import { canonicalMemoryFileInventory, configuredPathRelativeToRepo, discoverFiles, resolveConfiguredPath } from "./files";
 import { readMemoryClaim, type MemoryClaim } from "./memory";
 import { claimQualitySignals, type ClaimQualitySignal } from "./quality_signals";
 import { openSqliteDatabase } from "./sqlite";
@@ -70,7 +70,12 @@ export async function auditMemoryV2(options: AuditOptions = {}): Promise<AuditRe
   result.cache = await auditCacheHealth(loaded);
   try {
     const claims: MemoryClaim[] = [];
-    for (const filePath of discoverFiles(memoryRoot, loaded.config.claims)) {
+    for (const filePath of discoverFiles(memoryRoot, loaded.config.claims, {
+      onDirectoryError: (directory, error) => {
+        if (result.structure.state !== "unavailable") result.structure = { state: "unavailable", diagnostics: [] };
+        result.structure.diagnostics.push(accessFailure(error, path.relative(memoryRoot, directory)));
+      }
+    })) {
       try { claims.push(readMemoryClaim(memoryRoot, filePath)); }
       catch (error) {
         const sourcePath = path.relative(memoryRoot, filePath);
@@ -99,8 +104,11 @@ export async function auditMemoryV2(options: AuditOptions = {}): Promise<AuditRe
         verificationMetadata: missing ? "missing" : valid && check?.code !== "VERIFICATION_METADATA_MALFORMED" ? "present" : "malformed",
         verificationCheck: check?.state ?? "not_run", diagnostic: check, qualitySignals: claimQualitySignals(claim) };
     }).sort((a, b) => a.id.localeCompare(b.id));
-    if (result.structure.state === "valid") {
-      const audit = auditMemory(options);
+    {
+      const audit = result.structure.state === "valid" ? auditMemory(options) : {
+        ...auditClaimVerification(repoRoot, claims, configuredPathRelativeToRepo(repoRoot, loaded.config.memory_root), options),
+        changedFiles: result.changedFiles
+      };
       result.changedFiles = audit.changedFiles;
       result.warnings = audit.warnings;
       result.findings = audit.findings.filter((finding) => !["claim.last_verified_commit_invalid"].includes(finding.code));

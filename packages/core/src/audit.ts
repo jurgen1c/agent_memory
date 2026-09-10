@@ -160,6 +160,16 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
   };
 }
 
+/** Audit recorded commits and source drift without loading unrelated canonical artifacts. */
+export function auditClaimVerification(
+  repoRoot: string,
+  claims: MemoryClaim[],
+  memoryRootRelative: string,
+  options: Pick<AuditOptions, "gitBinary" | "gitTimeoutMs"> = {}
+): { findings: AuditFinding[]; warnings: string[] } {
+  return findOutdatedVerifiedClaims(repoRoot, claims.map(normalizeClaimForAudit), memoryRootRelative, options);
+}
+
 function findOutdatedVerifiedClaims(
   repoRoot: string,
   claims: ClaimRecord[],
