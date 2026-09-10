@@ -68,8 +68,16 @@ export function createGitCommitVerifier(repoRoot: string, options: GitCommandOpt
           if (format !== "sha1" && format !== "sha256") throw new GitCommandError("Git returned an unsupported repository object format.", { status: 0 });
           const objectPath = probe(["rev-parse", "--git-path", "objects"]);
           if (!objectPath || objectPath.includes("\n")) throw new GitCommandError("Git returned an invalid object-store path.", { status: 0 });
-          assertObjectStoreAccessible(path.resolve(repoRoot, objectPath));
-          probe(["count-objects", "-v"]);
+          const visited = new Set<string>();
+          assertObjectStoreAccessible(path.resolve(repoRoot, objectPath), visited);
+          const inventory = probe(["count-objects", "-v"]);
+          // Git resolves file comments, quoted paths, nested alternates and environment
+          // alternates itself. Its output C-quotes paths, including embedded newlines.
+          for (const line of inventory.split("\n")) {
+            if (line.startsWith("alternate: ")) {
+              assertObjectStoreAccessible(path.resolve(repoRoot, decodeAlternatePath(line.slice("alternate: ".length))), visited);
+            }
+          }
           preparation = format === "sha1" ? 40 : 64;
         } catch (error) { preparation = gitFailureDiagnostic(error); }
       }
@@ -98,12 +106,7 @@ function assertObjectStoreAccessible(root: string, visited = new Set<string>()):
     if (fs.statSync(target).isDirectory()) assertObjectStoreAccessible(target, visited);
     else fs.accessSync(target, fs.constants.R_OK);
   }
-  const alternates = path.join(real, "info", "alternates");
-  if (fs.existsSync(alternates)) {
-    for (const alternate of fs.readFileSync(alternates, "utf8").split(/\r?\n/).filter(Boolean)) {
-      assertObjectStoreAccessible(path.resolve(real, decodeAlternatePath(alternate)), visited);
-    }
-  }
+
 }
 
 // Git alternate files use C-style quoting, including octal UTF-8 bytes.

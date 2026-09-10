@@ -102,9 +102,25 @@ describe("production Git verification diagnostics", () => {
     fs.renameSync(path.join(alternate.root, ".git/objects"), store);
     const encodings = [JSON.stringify(store), '"' + [...Buffer.from(store)].map((byte) => "\\" + byte.toString(8).padStart(3, "0")).join("") + '"'];
     for (const quoted of encodings) {
-      fs.writeFileSync(path.join(original.root, ".git/objects/info/alternates"), `${quoted}\n`);
+      fs.writeFileSync(path.join(original.root, ".git/objects/info/alternates"), `# Documented alternate store\n${quoted}\n`);
       expect(runGit(original.root, ["cat-file", "-t", alternate.oid])).toBe("commit");
       expect(verifyGitCommit(original.root, alternate.oid).code).toBe("GIT_VERIFIED");
+    }
+  });
+
+  test("environment alternates are included in accessible-store preflight", () => {
+    const original = repository(); const alternate = repository();
+    const previous = process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES;
+    process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES = path.join(alternate.root, ".git/objects");
+    const objectDirectory = path.join(alternate.root, ".git/objects", alternate.oid.slice(0, 2));
+    try {
+      expect(verifyGitCommit(original.root, alternate.oid).code).toBe("GIT_VERIFIED");
+      fs.chmodSync(objectDirectory, 0);
+      expect(verifyGitCommit(original.root, "f".repeat(40)).code).toBe("GIT_PERMISSION_DENIED");
+    } finally {
+      fs.chmodSync(objectDirectory, 0o755);
+      if (previous === undefined) delete process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES;
+      else process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES = previous;
     }
   });
 
