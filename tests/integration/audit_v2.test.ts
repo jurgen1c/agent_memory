@@ -89,6 +89,25 @@ describe("v2 audit health", () => {
     expect(malformed.claims.find((claim) => claim.id === health.id)?.verificationMetadata).toBe("malformed");
   });
 
+  test("built Node Git verification supports quoted alternate paths containing backslashes", () => {
+    const cwd = fixture(); commit(cwd);
+    const alternate = fixture(); fs.appendFileSync(path.join(alternate, "README.md"), "\nAlternate fixture\n");
+    const oid = commit(alternate);
+    const store = path.join(alternate, "objects with-é\\quotes\"");
+    fs.renameSync(path.join(alternate, ".git/objects"), store);
+    fs.writeFileSync(path.join(cwd, ".git/objects/info/alternates"), JSON.stringify(store) + "\n");
+    expect(runGit(cwd, ["cat-file", "-t", oid])).toBe("commit");
+    // Bun's realpath currently rejects literal backslashes in valid POSIX paths;
+    // run this filesystem case against the supported built Node runtime.
+    const module = path.join(cwd, "git-verification.mjs");
+    const build = spawnSync("bun", ["build", path.resolve("packages/core/src/git_verification.ts"), "--target=node", `--outfile=${module}`], { encoding: "utf8" });
+    expect(build.status).toBe(0);
+    const script = `import { verifyGitCommit } from ${JSON.stringify(module)}; console.log(JSON.stringify(verifyGitCommit(${JSON.stringify(cwd)}, ${JSON.stringify(oid)})));`;
+    const node = spawnSync("node", ["--input-type=module", "-e", script], { cwd, encoding: "utf8" });
+    expect(node.error).toBeUndefined(); expect(node.status).toBe(0);
+    expect(JSON.parse(node.stdout).code).toBe("GIT_VERIFIED");
+  });
+
   test("built Node CLI supports v2 health and exit 6 without executing memory", () => {
     const cwd = fixture(); const oid = commit(cwd); const claimPath = path.join(cwd, claimRelative);
     const content = fs.readFileSync(claimPath, "utf8").replace("last_verified_commit: null", `last_verified_commit: "  ${oid}  "`);

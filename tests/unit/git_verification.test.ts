@@ -98,7 +98,7 @@ describe("production Git verification diagnostics", () => {
 
   test("quoted alternate paths decode C escapes and octal UTF-8 bytes", () => {
     const original = repository(); const alternate = repository();
-    const store = path.join(alternate.root, "objects\nwith-é\"\\\t");
+    const store = path.join(alternate.root, "objects\nwith-é\"\t");
     fs.renameSync(path.join(alternate.root, ".git/objects"), store);
     const encodings = [JSON.stringify(store), '"' + [...Buffer.from(store)].map((byte) => "\\" + byte.toString(8).padStart(3, "0")).join("") + '"'];
     for (const quoted of encodings) {
