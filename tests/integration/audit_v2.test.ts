@@ -50,10 +50,10 @@ describe("v2 audit health", () => {
     const result = JSON.parse(json.stdout);
     expect(result.structure.state).toBe("invalid");
     expect(result.structure.diagnostics.find((item: { code: string }) => item.code === "claim.tags.required")).toMatchObject({
-      path: claimRelative, id: "auth.student_oauth.uid_is_tenant_scoped"
+      path: claimRelative.replace("docs/agent-memory/", ""), id: "auth.student_oauth.uid_is_tenant_scoped"
     });
     const human = await dispatch(["audit", "--format-version", "2"], { cwd });
-    expect(human.stdout).toContain(`Source: "${claimRelative}"`);
+    expect(human.stdout).toContain(`Source: "${claimRelative.replace("docs/agent-memory/", "")}"`);
     expect(human.stdout).toContain('Claim: "auth.student_oauth.uid_is_tenant_scoped"');
   });
 
