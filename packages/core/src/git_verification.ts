@@ -19,7 +19,7 @@ export interface GitVerificationDiagnostic {
 
 export function gitFailureDiagnostic(error: unknown): GitVerificationDiagnostic {
   const command = error instanceof GitCommandError ? error : undefined;
-  const errorCode = command?.code ?? (error && typeof error === "object" && "code" in error ? String(error.code) : undefined);
+  const errorCode = command?.code ?? (error && typeof error === "object" && "code" in error ? typeof error.code === "string" ? error.code : undefined : undefined);
   const code = errorCode === "EPERM" || errorCode === "EACCES" ? "GIT_PERMISSION_DENIED"
     : errorCode === "ETIMEDOUT" || command?.timedOut ? "GIT_TIMEOUT"
     : errorCode === "ENOENT" && command ? "GIT_EXECUTABLE_MISSING"
@@ -62,6 +62,8 @@ export function createGitCommitVerifier(repoRoot: string, options: GitCommandOpt
     try {
       if (preparation === undefined) {
         try {
+          fs.accessSync(repoRoot, fs.constants.R_OK | fs.constants.X_OK);
+          if (!fs.statSync(repoRoot).isDirectory()) throw new GitCommandError("Repository path is not a directory.", { status: 0 });
           const format = probe(["rev-parse", "--show-object-format"]);
           if (format !== "sha1" && format !== "sha256") throw new GitCommandError("Git returned an unsupported repository object format.", { status: 0 });
           const objectPath = probe(["rev-parse", "--git-path", "objects"]);
@@ -99,7 +101,30 @@ function assertObjectStoreAccessible(root: string, visited = new Set<string>()):
   const alternates = path.join(real, "info", "alternates");
   if (fs.existsSync(alternates)) {
     for (const alternate of fs.readFileSync(alternates, "utf8").split(/\r?\n/).filter(Boolean)) {
-      assertObjectStoreAccessible(path.resolve(real, alternate), visited);
+      assertObjectStoreAccessible(path.resolve(real, decodeAlternatePath(alternate)), visited);
     }
   }
+}
+
+// Git alternate files use C-style quoting, including octal UTF-8 bytes.
+function decodeAlternatePath(value: string): string {
+  if (!value.startsWith('"')) return value;
+  if (!value.endsWith('"')) throw new GitCommandError("Malformed quoted Git alternate path.", { status: 0 });
+  const bytes: Buffer[] = [];
+  const escapes: Record<string, string> = { a: "\x07", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v", '\\': '\\', '"': '"' };
+  for (let index = 1; index < value.length - 1; index++) {
+    if (value[index] !== "\\") {
+      const point = value.codePointAt(index)!;
+      bytes.push(Buffer.from(String.fromCodePoint(point)));
+      if (point > 0xffff) index++;
+      continue;
+    }
+    const escape = value[++index];
+    const octal = value.slice(index, index + 3);
+    if (/^[0-3][0-7]{2}$/.test(octal)) {
+      bytes.push(Buffer.from([parseInt(octal, 8)])); index += 2;
+    } else if (Object.hasOwn(escapes, escape)) bytes.push(Buffer.from(escapes[escape]));
+    else throw new GitCommandError("Unsupported escape in Git alternate path.", { status: 0 });
+  }
+  return Buffer.concat(bytes).toString("utf8");
 }

@@ -96,6 +96,27 @@ describe("production Git verification diagnostics", () => {
     expect(verifyGitCommit(original.root, "f".repeat(40)).code).toBe("GIT_CHECK_FAILED");
   });
 
+  test("quoted alternate paths decode C escapes and octal UTF-8 bytes", () => {
+    const original = repository(); const alternate = repository();
+    const store = path.join(alternate.root, "objects\nwith-é\"\\\t");
+    fs.renameSync(path.join(alternate.root, ".git/objects"), store);
+    const encodings = [JSON.stringify(store), '"' + [...Buffer.from(store)].map((byte) => "\\" + byte.toString(8).padStart(3, "0")).join("") + '"'];
+    for (const quoted of encodings) {
+      fs.writeFileSync(path.join(original.root, ".git/objects/info/alternates"), `${quoted}\n`);
+      expect(runGit(original.root, ["cat-file", "-t", alternate.oid])).toBe("commit");
+      expect(verifyGitCommit(original.root, alternate.oid).code).toBe("GIT_VERIFIED");
+    }
+  });
+
+  test("missing repository paths do not masquerade as missing executables", () => {
+    const { root, oid } = repository();
+    const diagnostic = verifyGitCommit(path.join(root, "no-checkout"), oid);
+    expect(diagnostic.code).toBe("GIT_CHECK_FAILED");
+    expect(diagnostic.errorCode).toBe("ENOENT");
+    const failed = verifyGitCommit(root, oid, { spawn: () => result("", { status: 128 }) });
+    expect(failed.errorCode).toBeUndefined();
+  });
+
   test("audit verifier reuses store preflight across distinct references and disables lazy fetching", () => {
     const { root, oid } = repository(); let preflights = 0;
     const verify = createGitCommitVerifier(root, { spawn: (binary, args, options) => {
