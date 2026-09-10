@@ -36,6 +36,7 @@ The packer is pure in-memory code; it never reads or executes stored content.
   are excluded; suggestions are ordered by their highest-ranked contributor.
   All retained command origins survive as `state: suggested_not_run`.
 - Collections preserve selector-supplied `totalEligible`, `matched`, and `state`.
+  Duplicate item IDs retain the first ranked payload and its authored obligations.
   An omitted collection item does not change matching diagnostics. Unrequested
   collections default to `not_requested`. Opaque collection `data` is authored
   content; put emitted claim links in `requiredClaimIds`, which is filtered to
@@ -55,6 +56,13 @@ returned `exitCode` rather than v1 error mappings. `stderr` is separately bounde
 to 2 KiB. The human renderer reads this same selected model and independently
 checks the cap, falling back to the bounded complete JSON representation if its
 layout expands beyond it. Neither renderer runs verification commands.
+
+Packing caches immutable encoded record sizes and updates byte totals, graph links,
+collection references and omission counters incrementally. The same sequential
+removal order is preserved across warning and decimal-width transitions; the
+actual final serialization independently confirms the cap. A 3,000-claim
+regression bounds encoded work, and a straightforward serialization oracle checks
+output parity across small-budget transitions.
 
 Packing removes lowest-ranked commands, then files, then optional collections
 and optional claims, before required groups. Within a class, later ranked items

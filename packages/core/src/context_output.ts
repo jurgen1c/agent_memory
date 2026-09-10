@@ -1,3 +1,4 @@
+import { ContextOutputByteCounter } from "./context_output_budget";
 import { boundContextDiagnostics, contextOutputError, resolveContextOutputCap, serializeContextOutput } from "./context_output_serialization";
 import type { ContextFacet, ContextOutputCandidates, ContextOutputClaim, ContextOutputCollection, ContextOutputEdge, ContextOutputFilters, ContextOutputModel, ContextOutputOwner, ContextOutputReason, ContextOutputRequest, ContextOutputResult, ContextOutputSuggestion } from "./context_output_types";
 
@@ -9,10 +10,6 @@ const unique = (values: string[]) => [...new Set(values)].sort(compare);
 const edgeKey = (edge: ContextOutputEdge) => JSON.stringify([edge.sourceClaimId, edge.targetClaimId, edge.relation]);
 const ownerKey = (owner: ContextOutputOwner) => JSON.stringify([owner.kind, owner.id, owner.sourcePath]);
 const requiredEdge = (edge: ContextOutputEdge) => edge.origin === "explicit" && edge.relation === "requires";
-const lastIndex = <T>(values: T[], predicate: (value: T) => boolean): number => {
-  for (let index = values.length - 1; index >= 0; index--) if (predicate(values[index])) return index;
-  return -1;
-};
 const emptyCollection = (): ContextOutputCollection => ({ totalEligible: 0, matched: 0, state: "not_requested", items: [] });
 
 export function normalizeContextOutputFilters(filters: ContextOutputFilters = {}): Required<ContextOutputFilters> {
@@ -51,7 +48,11 @@ export function packContextOutput(request: ContextOutputRequest, candidates: Con
   }
   const orderedEdges = [...edges.values()].sort((a, b) => Number(requiredEdge(b)) - Number(requiredEdge(a)) || (b.strength ?? 0) - (a.strength ?? 0) || compare(edgeKey(a), edgeKey(b)));
   const outgoing = new Map<string, ContextOutputEdge[]>();
-  for (const edge of orderedEdges.filter(requiredEdge)) outgoing.set(edge.sourceClaimId, [...(outgoing.get(edge.sourceClaimId) ?? []), edge]);
+  for (const edge of orderedEdges.filter(requiredEdge)) {
+    const targets = outgoing.get(edge.sourceClaimId) ?? [];
+    targets.push(edge);
+    outgoing.set(edge.sourceClaimId, targets);
+  }
   const eligibleRoots = input.roots.filter((root) => {
     const claim = claims.get(root.claimId);
     return claim && !contextClaimOutsideFilters(claim, filters).length &&
@@ -103,7 +104,9 @@ export function packContextOutput(request: ContextOutputRequest, candidates: Con
   }
   const collections = Object.fromEntries(COLLECTIONS.map((name) => {
     const collection = input[name] ?? emptyCollection();
-    collection.items = [...new Map(collection.items.map((item) => [item.id, item])).values()];
+    const itemsById = new Map<string, typeof collection.items[number]>();
+    for (const item of collection.items) if (!itemsById.has(item.id)) itemsById.set(item.id, item);
+    collection.items = [...itemsById.values()];
     for (const item of collection.items) for (const id of item.requiredClaimIds) { requireClaim(id); expand(id); }
     return [name, collection];
   })) as Record<typeof COLLECTIONS[number], ContextOutputCollection>;
@@ -124,15 +127,16 @@ export function packContextOutput(request: ContextOutputRequest, candidates: Con
     ownerPriorities.set(ownerKey({ kind, id: item.id, sourcePath: item.sourcePath }), { tier: item.required ? 0 : 1, rank });
   }
   const suggestions = (items: ContextOutputSuggestion[]) => {
-    const byValue = new Map<string, ContextOutputSuggestion>();
-    for (const item of items) {
-      const origins = item.origins.filter((origin) => ownerPriorities.has(ownerKey(origin)));
-      if (!origins.length) continue;
-      const existing = byValue.get(item.value) ?? { value: item.value, origins: [] };
-      existing.origins = [...new Map([...existing.origins, ...origins].map((origin) => [ownerKey(origin), origin])).values()].sort((a, b) => compareOwners(a, b) || compare(ownerKey(a), ownerKey(b)));
-      byValue.set(item.value, existing);
+    const byValue = new Map<string, Map<string, ContextOutputOwner>>();
+    for (const item of items) for (const origin of item.origins) {
+      const key = ownerKey(origin);
+      if (!ownerPriorities.has(key)) continue;
+      const origins = byValue.get(item.value) ?? new Map<string, ContextOutputOwner>();
+      if (!origins.has(key)) origins.set(key, origin);
+      byValue.set(item.value, origins);
     }
-    return [...byValue.values()].sort((a, b) => compareOwners(a.origins[0], b.origins[0]) || compare(a.value, b.value));
+    return [...byValue].map(([value, origins]) => ({ value, origins: [...origins.values()].sort((a, b) => compareOwners(a, b) || compare(ownerKey(a), ownerKey(b))) }))
+      .sort((a, b) => compareOwners(a.origins[0], b.origins[0]) || compare(a.value, b.value));
   };
   const allFiles = suggestions(input.files ?? []);
   const allCommands = suggestions(input.commands ?? []);
@@ -145,56 +149,112 @@ export function packContextOutput(request: ContextOutputRequest, candidates: Con
     profiles: { ...collections.profiles, items: [...collections.profiles.items] },
     warnings: [], budget: { maxBytes: cap, usedBytes: 0, omitted: { claims: 0, requiredClaims: 0, edges: 0, sections: 0, files: 0, commands: 0, recipes: 0, plans: 0, profiles: 0 } }
   };
-  const refresh = () => {
-    const retained = new Set(model.claims.map((claim) => claim.id));
-    model.roots = model.roots.filter((id) => retained.has(id));
-    model.edges = allEdges.filter((edge) => retained.has(edge.sourceClaimId) && retained.has(edge.targetClaimId));
-    const retainedEdges = new Set(model.edges.map(edgeKey));
-    const omittedClaims = allClaims.filter((claim) => !retained.has(claim.id));
-    const omitted = model.budget.omitted;
-    omitted.claims = omittedClaims.length;
-    omitted.requiredClaims = omittedClaims.filter((claim) => requiredIds.has(claim.id)).length;
-    omitted.sections = omittedClaims.reduce((count, claim) => count + claim.sections.length, 0);
-    omitted.edges = allEdges.length - model.edges.length;
-    omitted.files = allFiles.length - model.files.length;
-    omitted.commands = allCommands.length - model.commands.length;
-    for (const name of COLLECTIONS) {
-      omitted[name] = collections[name].items.length - model[name].items.length;
-      // These are emitted references, unlike opaque authored collection data.
-      model[name].items = model[name].items.map((item) => ({ ...item, requiredClaimIds: item.requiredClaimIds.filter((id) => retained.has(id)) }));
+  const retained = new Set(allClaims.map((claim) => claim.id));
+  const retainedRoots = new Set(model.roots);
+  const retainedEdges = new Set(allEdges);
+  const retainedItems = Object.fromEntries(COLLECTIONS.map((name) => [name, new Set(model[name].items)])) as Record<typeof COLLECTIONS[number], Set<ContextOutputModel["recipes"]["items"][number]>>;
+  for (const name of COLLECTIONS) for (const item of model[name].items) item.requiredClaimIds = item.requiredClaimIds.filter((id) => retained.has(id));
+  const counter = new ContextOutputByteCounter(model);
+  const itemSizes = new Map(COLLECTIONS.flatMap((name) => model[name].items.map((item) => [item, counter.recordBytes(item)] as const)));
+  const itemRefCounts = new Map(COLLECTIONS.flatMap((name) => model[name].items.map((item) => [item, item.requiredClaimIds.length] as const)));
+  const itemLinks = new Map<string, Array<{ name: typeof COLLECTIONS[number]; item: ContextOutputModel["recipes"]["items"][number]; count: number }>>();
+  for (const name of COLLECTIONS) for (const item of model[name].items) {
+    const counts = new Map<string, number>();
+    for (const id of item.requiredClaimIds) counts.set(id, (counts.get(id) ?? 0) + 1);
+    for (const [id, count] of counts) {
+      const links = itemLinks.get(id) ?? [];
+      links.push({ name, item, count });
+      itemLinks.set(id, links);
     }
-    const requiredCollectionOmitted = COLLECTIONS.some((name) => {
-      const retainedItems = new Set(model[name].items.map((item) => item.id));
-      return collections[name].items.some((item) => item.required && !retainedItems.has(item.id));
-    });
-    const requiredOmitted = requiredCollectionOmitted || omitted.requiredClaims > 0 || allEdges.some((edge) => requiredEdges.has(edgeKey(edge)) && !retainedEdges.has(edgeKey(edge)));
+  }
+  const touchingEdges = new Map<string, ContextOutputEdge[]>();
+  for (const edge of allEdges) for (const id of new Set([edge.sourceClaimId, edge.targetClaimId])) {
+    const touching = touchingEdges.get(id) ?? [];
+    touching.push(edge);
+    touchingEdges.set(id, touching);
+  }
+  let requiredOmitted = false;
+  let filesCount = allFiles.length;
+  let commandsCount = allCommands.length;
+  const hasBaseline = allClaims.some((claim) => claim.reasons.some((reason) => reason.code === "BASELINE_FALLBACK"));
+  const refreshState = () => {
     model.completeness = missingIds.size || inactiveIds.size || requiredOmitted ? "incomplete" : "complete";
     model.warnings = [
       ...(request.mode === "task" && !taskMatches ? ["NO_TASK_MATCH"] : []),
-      ...(allClaims.some((claim) => claim.reasons.some((reason) => reason.code === "BASELINE_FALLBACK")) ? ["BASELINE_FALLBACK"] : []),
+      ...(hasBaseline ? ["BASELINE_FALLBACK"] : []),
       ...(missingIds.size ? ["REQUIRED_CONTEXT_MISSING"] : []),
       ...(inactiveIds.size ? ["REQUIRED_CONTEXT_INACTIVE"] : []),
       ...(requiredOmitted ? ["REQUIRED_CONTEXT_OMITTED"] : []),
-      ...(Object.values(omitted).some((value) => value > 0) ? ["OUTPUT_TRUNCATED"] : [])
+      ...(Object.values(model.budget.omitted).some((value) => value > 0) ? ["OUTPUT_TRUNCATED"] : [])
     ];
   };
-  // Suggestions go first, so later claim/collection removals cannot dangle origins.
-  for (;;) {
-    refresh();
+  const resultIfFits = (): ContextOutputResult | undefined => {
+    refreshState();
+    if (counter.measure(model) > cap) return undefined;
+    model.roots = [...retainedRoots];
+    model.claims = allClaims.filter((claim) => retained.has(claim.id));
+    model.edges = allEdges.filter((edge) => retainedEdges.has(edge));
+    model.files = allFiles.slice(0, filesCount);
+    model.commands = model.commands.slice(0, commandsCount);
+    for (const name of COLLECTIONS) model[name].items = [...retainedItems[name]].map((item) => ({ ...item, requiredClaimIds: item.requiredClaimIds.filter((id) => retained.has(id)) }));
     const stdout = serializeContextOutput(model);
-    if (model.budget.usedBytes <= cap) return { exitCode: 0, model, stdout, stderr: boundContextDiagnostics(options.stderr ?? "") };
-    if (model.commands.length) { model.commands.pop(); continue; }
-    if (model.files.length) { model.files.pop(); continue; }
-    let removed = false;
-    for (const required of [false, true]) {
-      for (const name of [...COLLECTIONS].reverse()) {
-        const index = lastIndex(model[name].items, (item) => item.required === required);
-        if (index >= 0) { model[name].items.splice(index, 1); removed = true; break; }
-      }
-      if (removed) break;
-      const index = lastIndex(model.claims, (claim) => protectedIds.has(claim.id) === required);
-      if (index >= 0) { model.claims.splice(index, 1); removed = true; break; }
-    }
-    if (!removed) return contextOutputError("BUDGET_TOO_SMALL", { maxBytes: cap, stderr: options.stderr });
+    // Actual serialized bytes remain the final authority, independently of caching.
+    if (model.budget.usedBytes > cap) return undefined;
+    return { exitCode: 0, model, stdout, stderr: boundContextDiagnostics(options.stderr ?? "") };
+  };
+  const initial = resultIfFits();
+  if (initial) return initial;
+  // Preserve the exact sequential removal order, even at nonmonotone warning or
+  // decimal-width transitions. Each payload/edge is encoded once and removed once.
+  for (const command of [...model.commands].reverse()) {
+    counter.remove("commands", command);
+    commandsCount--;
+    model.budget.omitted.commands++;
+    const result = resultIfFits();
+    if (result) return result;
   }
+  for (const file of [...allFiles].reverse()) {
+    counter.remove("files", file);
+    filesCount--;
+    model.budget.omitted.files++;
+    const result = resultIfFits();
+    if (result) return result;
+  }
+  for (const required of [false, true]) {
+    for (const name of [...COLLECTIONS].reverse()) for (const item of [...retainedItems[name]].reverse()) {
+      if (item.required !== required) continue;
+      retainedItems[name].delete(item);
+      counter.removeBytes(name, itemSizes.get(item)!);
+      model.budget.omitted[name]++;
+      if (item.required) requiredOmitted = true;
+      const result = resultIfFits();
+      if (result) return result;
+    }
+    for (const claim of [...allClaims].reverse()) {
+      if (protectedIds.has(claim.id) !== required) continue;
+      retained.delete(claim.id);
+      counter.remove("claims", claim);
+      model.budget.omitted.claims++;
+      model.budget.omitted.sections += claim.sections.length;
+      if (requiredIds.has(claim.id)) { model.budget.omitted.requiredClaims++; requiredOmitted = true; }
+      if (retainedRoots.delete(claim.id)) counter.remove("roots", claim.id);
+      for (const edge of touchingEdges.get(claim.id) ?? []) {
+        if (!retainedEdges.delete(edge)) continue;
+        counter.remove("edges", edge);
+        model.budget.omitted.edges++;
+        if (requiredEdges.has(edgeKey(edge))) requiredOmitted = true;
+      }
+      for (const { name, item, count } of itemLinks.get(claim.id) ?? []) {
+        if (!retainedItems[name].has(item)) continue;
+        const previous = itemRefCounts.get(item)!;
+        const delta = count * counter.recordBytes(claim.id) + Math.max(0, previous - 1) - Math.max(0, previous - count - 1);
+        itemRefCounts.set(item, previous - count);
+        itemSizes.set(item, itemSizes.get(item)! - delta);
+        counter.shrink(name, delta);
+      }
+      const result = resultIfFits();
+      if (result) return result;
+    }
+  }
+  return contextOutputError("BUDGET_TOO_SMALL", { maxBytes: cap, stderr: options.stderr });
 }

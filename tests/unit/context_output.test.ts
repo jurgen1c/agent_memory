@@ -234,6 +234,20 @@ describe("production v2 output", () => {
     expect(human).toContain(JSON.stringify(model.budget));
   });
 
+  test("collection duplicates preserve the first ranked payload and its obligations", () => {
+    for (const name of ["recipes", "plans", "profiles"] as const) {
+      const first = { id: "duplicate", sourcePath: `${name}/first.md`, required: true, requiredClaimIds: ["missing"], data: { steps: ["first guidance"] } };
+      const input: ContextOutputCandidates = { roots: [], claims: [], [name]: { totalEligible: 2, matched: 2, state: "matched", items: [first, { ...first, id: "second" }, { ...first, sourcePath: `${name}/last.md`, required: false, requiredClaimIds: [], data: { steps: ["last guidance"] } }] } };
+      const model = success(packContextOutput({ mode: "task" }, input));
+      expect(model[name].items.map((item) => item.id)).toEqual(["duplicate", "second"]);
+      expect(model[name].items[0]).toMatchObject({ sourcePath: first.sourcePath, required: true, data: first.data });
+      expect(model.completeness).toBe("incomplete");
+      expect(model.warnings).toContain("REQUIRED_CONTEXT_MISSING");
+      expect(model.budget.omitted[name]).toBe(0);
+      expect(model[name].totalEligible).toBe(2);
+    }
+  });
+
   test("bounded golden errors distinguish invalid caps and a valid minimum envelope", () => {
     for (const maxBytes of [0, 511, 16_777_217, 512.5, NaN, Infinity]) {
       const result = packContextOutput({ mode: "task", maxBytes }, graph());
