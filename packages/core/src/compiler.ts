@@ -5,6 +5,7 @@ import path from "node:path";
 import { sqliteArtifactPaths } from "@jurgen1c/agent-core/sqlite";
 import { resolveConfiguredDatabaseLocation } from "./database";
 import { AgentMemoryError } from "./errors";
+import { loadConfig } from "./config";
 import { canonicalMemoryFileInventory, resolveConfiguredPath } from "./files";
 import { runGit } from "./git";
 import { loadMemory, type LoadedMemory, type MemoryClaim, type MemoryGraphEdge, type MemoryPlanTemplate, type MemoryProfileTrait } from "./memory";
@@ -59,7 +60,20 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
     throw new CompileValidationError(validation);
   }
 
+  const sourceConfig = loadConfig({ cwd: options.cwd });
+  const sourceRoot = resolveConfiguredPath(sourceConfig.repo.root, sourceConfig.config.memory_root);
+  const snapshot = {
+    contentHash: canonicalMemoryContentDigest(sourceRoot, sourceConfig.config),
+    configHash: sha256(fs.readFileSync(sourceConfig.path, "utf8"))
+  };
+  const assertSnapshotUnchanged = () => {
+    if (snapshot.contentHash !== canonicalMemoryContentDigest(sourceRoot, sourceConfig.config) ||
+      snapshot.configHash !== sha256(fs.readFileSync(sourceConfig.path, "utf8"))) {
+      throw new AgentMemoryError("Canonical memory or configuration changed during compilation; retry compile.", { code: "COMPILE_SOURCE_CHANGED" });
+    }
+  };
   const memory = loadMemory(options.cwd);
+  assertSnapshotUnchanged();
   const repoRoot = memory.loadedConfig.repo.root;
   const databaseLocation = resolveConfiguredDatabaseLocation({
     loaded: memory.loadedConfig,
@@ -84,7 +98,7 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
     try {
       createSchema(database);
       insertMemory(database, memory);
-      insertMetadata(database, memory, databaseLocation);
+      insertMetadata(database, memory, databaseLocation, snapshot);
 
       const explicitRelations = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claim_relations WHERE origin = 'explicit'")?.count ?? 0;
       const inferredRelations = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claim_relations WHERE origin = 'inferred'")?.count ?? 0;
@@ -122,6 +136,7 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
     if (databaseLocation.scope === "global" && databaseLocation.source === "global_registry") {
       fs.chmodSync(tempDatabasePath, 0o600);
     }
+    assertSnapshotUnchanged();
     replaceDatabase(tempDatabasePath, databasePath);
     replaced = true;
     return result;
@@ -619,9 +634,9 @@ function relationKey(relation: RelationRow): string {
 function insertMetadata(
   database: SqliteDatabase,
   memory: LoadedMemory,
-  databaseLocation: ReturnType<typeof resolveConfiguredDatabaseLocation>
+  databaseLocation: ReturnType<typeof resolveConfiguredDatabaseLocation>,
+  snapshot: { contentHash: string; configHash: string }
 ): void {
-  const configPath = memory.loadedConfig.path;
   const repoRoot = memory.loadedConfig.repo.root;
   const memoryRoot = resolveConfiguredPath(repoRoot, memory.loadedConfig.config.memory_root);
   const canonicalFileInventory = canonicalMemoryFileInventory(memoryRoot, memory.loadedConfig.config);
@@ -632,8 +647,8 @@ function insertMetadata(
     repo_root: databaseLocation.source === "global_registry" ? canonicalRepositoryRoot(repoRoot) : repoRoot,
     compiled_at: new Date().toISOString(),
     memory_root: memory.loadedConfig.config.memory_root,
-    config_hash: sha256(fs.readFileSync(configPath, "utf8")),
-    canonical_content_hash: canonicalMemoryContentDigest(memoryRoot, memory.loadedConfig.config),
+    config_hash: snapshot.configHash,
+    canonical_content_hash: snapshot.contentHash,
     canonical_files_hash: sha256(JSON.stringify(canonicalFileInventory)),
     canonical_files_count: String(canonicalFileInventory.length),
     database_path: databaseLocation.path

@@ -171,6 +171,21 @@ describe("v2 audit health", () => {
     expect((await auditMemoryV2({ cwd })).cache.state).toBe("unavailable");
   });
 
+  test("concurrent canonical or configuration changes cannot certify an old compiled snapshot as fresh", async () => {
+    for (const changeConfig of [false, true]) {
+      const cwd = fixture(); const compiled = await compileMemory({ cwd });
+      const oldDatabase = fs.readFileSync(compiled.databasePath);
+      const compilation = compileMemory({ cwd });
+      const changedPath = path.join(cwd, changeConfig ? "agent-memory.config.yaml" : claimRelative);
+      fs.appendFileSync(changedPath, changeConfig ? "\n# Changed during compile\n" : "\nChanged canonical body during compile.\n");
+      await expect(compilation).rejects.toThrow("Canonical memory or configuration changed during compilation");
+      expect(fs.readFileSync(compiled.databasePath)).toEqual(oldDatabase);
+      expect((await auditMemoryV2({ cwd })).cache.state).toBe("stale");
+      await compileMemory({ cwd });
+      expect((await auditMemoryV2({ cwd })).cache.state).toBe("fresh");
+    }
+  });
+
   test("source-backed quality signals and all checks leave canonical data and stored commands untouched", async () => {
     const cwd = fixture(); const oid = commit(cwd);
     const claimPath = path.join(cwd, claimRelative);
