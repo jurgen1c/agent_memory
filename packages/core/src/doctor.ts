@@ -81,10 +81,10 @@ export async function doctorMemory(options: DoctorOptions = {}): Promise<DoctorR
     const configHash = metadata.get("config_hash");
     const canonicalFilesHash = metadata.get("canonical_files_hash");
 
-    if (schemaVersion === "1") {
+    if (schemaVersion === "2") {
       checks.push(ok("schema_version", "Database schema version is current."));
     } else {
-      checks.push(warn("schema_version", `Expected schema version 1, found ${schemaVersion ?? "missing"}.`, "Run `agent-memory compile`."));
+      checks.push(warn("schema_version", `Expected schema version 2, found ${schemaVersion ?? "missing"}.`, "Run `agent-memory compile`."));
     }
 
     if (packageVersion === PACKAGE_VERSION) {

@@ -412,7 +412,8 @@ export function renderHelp(topicName?: string): string {
       });
     }
 
-    return renderTopic(topic);
+    const v2 = ["query", "context", "show"].includes(topicName) ? "\n\nV2 retrieval (explicit opt-in):\n  --format-version 2 --json --budget small|medium|full --max-bytes N\n  query/context: --task TEXT, --changed-files PATH..., --symbol VALUE, --route VALUE\n  Repeated --system/--status filters use OR within each facet, AND across facets.\n  --limit N caps optional roots; --depth 0..10 caps optional graph expansion only.\n  --baseline explicitly enables zero-match fallback. --include-inferred adds optional inferred edges.\n  Tasks use Unicode NFKC lowercase prefix OR tokens (maximum 64 KiB).\n  Budgets are complete UTF-8 envelope bytes: 4096/16384/65536; max-bytes accepts 512..16777216.\n  show v2 returns the complete body/metadata/sections or BUDGET_TOO_SMALL.\n  Check taskMatches, completeness, reasons, warnings and omitted counts.\n  CACHE_STALE or CACHE_SCHEMA_UNSUPPORTED requires compile in the selected checkout.\n  Category/tag vocabulary and collection selectors are separate extensions." : "";
+    return renderTopic(topic) + v2;
   }
 
   return [

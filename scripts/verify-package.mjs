@@ -29,6 +29,8 @@ try {
     "LICENSE",
     "dist/index.js",
     "dist/index.d.ts",
+    "dist/retrieval_v2.d.ts",
+    "docs/features/category-retrieval/production-retrieval.md",
     "dist/agent-memory.js",
     "dist/web/index.html",
     "packages/schemas/claim.schema.json",
@@ -84,9 +86,19 @@ try {
 import { spawnSync } from "node:child_process";
 import {
   parseYaml,
+  queryClaimsV2,
+  buildContextV2,
+  showClaimV2,
+  parseClaimSections,
   openSqliteDatabase
 } from "@jurgen1c/agent-memory-cli";
 
+for (const api of [queryClaimsV2, buildContextV2, showClaimV2]) {
+  if (typeof api !== "function") throw new Error("Packaged v2 API is missing.");
+}
+if (parseClaimSections("Title\\n===\\n")[0]?.heading !== "Title") {
+  throw new Error("Packaged CommonMark parser is unavailable.");
+}
 if (parseYaml("enabled: true\\n").enabled !== true) {
   throw new Error("Agent Memory root API YAML smoke test failed.");
 }

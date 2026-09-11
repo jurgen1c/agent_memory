@@ -58,7 +58,7 @@ export function packContextOutput(request: ContextOutputRequest, candidates: Con
     return claim && !contextClaimOutsideFilters(claim, filters).length &&
       (root.reason !== "BASELINE_FALLBACK" || (request.baseline === true && request.mode === "task"));
   });
-  const taskMatches = request.mode === "browse" ? 0 : new Set(eligibleRoots.filter((root) => DIRECT.has(root.reason)).map((root) => root.claimId)).size;
+  const taskMatches = request.mode === "browse" ? 0 : Math.max(Number.isSafeInteger(input.taskMatchCount) ? input.taskMatchCount! : 0, new Set(eligibleRoots.filter((root) => DIRECT.has(root.reason)).map((root) => root.claimId)).size);
   const roots = eligibleRoots.filter((root) => root.reason !== "BASELINE_FALLBACK" || taskMatches === 0);
   const selected = new Map<string, ContextOutputModel["claims"][number]>();
   const requiredIds = new Set<string>();

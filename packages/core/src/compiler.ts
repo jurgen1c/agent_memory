@@ -3,6 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { sqliteArtifactPaths } from "@jurgen1c/agent-core/sqlite";
 import { resolveConfiguredDatabaseLocation } from "./database";
+import { canonicalContentDigest } from "./canonical_digest";
+import { claimBodyDigest, claimSearchTokens, normalizeClaimBody, parseClaimSections } from "./claim_sections";
+import { loadConfig } from "./config";
 import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, resolveConfiguredPath } from "./files";
 import { runGit } from "./git";
@@ -52,6 +55,7 @@ interface RelationRow {
 }
 
 export async function compileMemory(options: CompileOptions = {}): Promise<CompileResult> {
+  const initialDigest = canonicalContentDigest(loadConfig({ cwd: options.cwd }));
   const validation = validateRepository({ cwd: options.cwd });
 
   if (!validation.valid) {
@@ -83,7 +87,7 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
     try {
       createSchema(database);
       insertMemory(database, memory);
-      insertMetadata(database, memory, databaseLocation);
+      insertMetadata(database, memory, databaseLocation, initialDigest);
 
       const explicitRelations = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claim_relations WHERE origin = 'explicit'")?.count ?? 0;
       const inferredRelations = database.get<{ count: number }>("SELECT COUNT(*) AS count FROM claim_relations WHERE origin = 'inferred'")?.count ?? 0;
@@ -120,6 +124,9 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
 
     if (databaseLocation.scope === "global" && databaseLocation.source === "global_registry") {
       fs.chmodSync(tempDatabasePath, 0o600);
+    }
+    if (canonicalContentDigest(memory.loadedConfig) !== initialDigest) {
+      throw new AgentMemoryError("Canonical memory changed during compilation; retry compile.", { code: "CACHE_STALE", exitCode: 5 });
     }
     replaceDatabase(tempDatabasePath, databasePath);
     replaced = true;
@@ -161,6 +168,28 @@ CREATE TABLE claims (
   metadata_json TEXT NOT NULL,
   created_at TEXT,
   updated_at TEXT
+);
+
+CREATE TABLE claim_bodies (
+  claim_id TEXT PRIMARY KEY,
+  body TEXT NOT NULL,
+  body_sha256 TEXT NOT NULL
+);
+CREATE TABLE claim_sections (
+  claim_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  heading TEXT NOT NULL,
+  occurrence INTEGER NOT NULL,
+  start_line INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  PRIMARY KEY (claim_id, ordinal)
+);
+CREATE TABLE claim_terms (
+  claim_id TEXT NOT NULL,
+  field TEXT NOT NULL,
+  section_ordinal INTEGER NOT NULL,
+  token TEXT NOT NULL,
+  PRIMARY KEY (token, claim_id, field, section_ordinal)
 );
 
 CREATE TABLE claim_files (
@@ -434,6 +463,20 @@ function insertClaim(database: SqliteDatabase, claim: MemoryClaim): void {
     ]
   );
 
+  const body = normalizeClaimBody(claim.body);
+  const sections = parseClaimSections(body);
+  database.run("INSERT INTO claim_bodies VALUES (?, ?, ?)", [claim.id, body, claimBodyDigest(body)]);
+  const indexField = (field: string, text: string, ordinal = -1) => {
+    for (const token of claimSearchTokens(text)) database.run("INSERT INTO claim_terms VALUES (?, ?, ?, ?)", [claim.id, field, ordinal, token]);
+  };
+  indexField("title", claim.title);
+  indexField("claim", claim.claim);
+  indexField("tags", claim.tags.join(" "));
+  sections.forEach((section, ordinal) => {
+    database.run("INSERT INTO claim_sections VALUES (?, ?, ?, ?, ?, ?)", [claim.id, ordinal, section.heading, section.occurrence!, section.startLine, section.text]);
+    indexField("body", section.text, ordinal);
+  });
+
   for (const sourceFile of claim.sourceFiles) {
     database.run("INSERT INTO claim_files (claim_id, path, relation) VALUES (?, ?, ?)", [claim.id, sourceFile, "source"]);
   }
@@ -618,17 +661,19 @@ function relationKey(relation: RelationRow): string {
 function insertMetadata(
   database: SqliteDatabase,
   memory: LoadedMemory,
-  databaseLocation: ReturnType<typeof resolveConfiguredDatabaseLocation>
+  databaseLocation: ReturnType<typeof resolveConfiguredDatabaseLocation>,
+  contentDigest: string
 ): void {
   const configPath = memory.loadedConfig.path;
   const repoRoot = memory.loadedConfig.repo.root;
   const memoryRoot = resolveConfiguredPath(repoRoot, memory.loadedConfig.config.memory_root);
   const canonicalFileInventory = canonicalMemoryFileInventory(memoryRoot, memory.loadedConfig.config);
   const metadata: Record<string, string> = {
-    schema_version: "1",
+    schema_version: "2",
+    canonical_content_hash: contentDigest,
     package_version: PACKAGE_VERSION,
     git_commit: currentGitCommit(repoRoot),
-    repo_root: databaseLocation.source === "global_registry" ? canonicalRepositoryRoot(repoRoot) : repoRoot,
+    repo_root: canonicalRepositoryRoot(repoRoot),
     compiled_at: new Date().toISOString(),
     memory_root: memory.loadedConfig.config.memory_root,
     config_hash: sha256(fs.readFileSync(configPath, "utf8")),

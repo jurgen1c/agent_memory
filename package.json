@@ -31,6 +31,7 @@
   "dependencies": {
     "@jurgen1c/agent-core": "^0.2.0",
     "@xyflow/react": "^12.0.0",
+    "mdast-util-from-markdown": "^2.0.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
@@ -59,7 +60,8 @@
     "packages/schemas/*.schema.json",
     "dist/web/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/features/category-retrieval/production-retrieval.md"
   ],
   "publishConfig": {
     "access": "public"

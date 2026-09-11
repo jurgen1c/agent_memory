@@ -20,7 +20,8 @@ export function buildAgentCommands(commandPrefix: string): AgentCommandDescripti
       examples: [
         `${commandPrefix} context --task "fix student oauth"`,
         `${commandPrefix} context --changed-files src/auth.js`,
-        `${commandPrefix} context --git-diff`
+        `${commandPrefix} context --git-diff`,
+        `${commandPrefix} context --format-version 2 --task "receipt retry" --budget medium --json`
       ]
     },
     {
@@ -43,13 +44,13 @@ export function buildAgentCommands(commandPrefix: string): AgentCommandDescripti
       name: "query",
       purpose: "Search compiled claims by topic.",
       whenToUse: "Use when you need memory about a behavior, subsystem, file, symbol, or route.",
-      examples: [`${commandPrefix} query "student oauth tenant"`]
+      examples: [`${commandPrefix} query "student oauth tenant"`, `${commandPrefix} query --format-version 2 --system auth --json`]
     },
     {
       name: "show",
       purpose: "Show one claim and optionally graph-related claims.",
       whenToUse: "Use when you need exact claim metadata, linked files, tags, or graph context.",
-      examples: [`${commandPrefix} show auth.student_oauth.uid_is_tenant_scoped --include-related`]
+      examples: [`${commandPrefix} show auth.student_oauth.uid_is_tenant_scoped --include-related`, `${commandPrefix} show auth.student_oauth.uid_is_tenant_scoped --format-version 2 --json`]
     },
     {
       name: "system",

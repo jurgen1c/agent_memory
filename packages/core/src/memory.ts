@@ -15,6 +15,7 @@ export interface MemoryClaim {
   severity: string;
   title: string;
   claim: string;
+  body: string;
   sourcePath: string;
   sourceFiles: string[];
   relatedFiles: string[];
@@ -137,6 +138,7 @@ function loadClaims(memoryRoot: string, files: string[]): MemoryClaim[] {
       severity: readString(raw, "severity"),
       title: readString(raw, "title"),
       claim: readString(raw, "claim"),
+      body: markdown.body,
       sourcePath: relativePath,
       sourceFiles: readStringArray(raw, "source_files"),
       relatedFiles: readOptionalStringArray(raw, "related_files"),

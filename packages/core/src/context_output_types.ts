@@ -29,8 +29,9 @@ export interface ContextOutputClaim {
   sections: ContextOutputSection[];
   body?: string;
   bodySha256?: string;
+  cacheFreshness?: "current";
   metadata?: Record<string, ContextOutputData>;
-  associations?: { files: string[]; symbols: string[]; routes: string[] };
+  associations?: { files: string[]; symbols: string[]; routes: string[]; relatedFiles?: string[] };
 }
 export type ContextOutputData = null | boolean | number | string | ContextOutputData[] | { [key: string]: ContextOutputData };
 /** Input order is the selector's ranking, never authored semantic authority. */
@@ -60,6 +61,8 @@ export interface ContextOutputCollection {
 }
 export interface ContextOutputCandidates {
   roots: ContextOutputRoot[];
+  /** Selector count before an explicit optional-root limit; never counts broad/related roots. */
+  taskMatchCount?: number;
   claims: ContextOutputClaim[];
   edges?: ContextOutputEdge[];
   /** Authored collection or other explicit obligations, including missing IDs. */
