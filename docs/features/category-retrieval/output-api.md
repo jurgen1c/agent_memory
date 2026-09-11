@@ -3,9 +3,8 @@
 The core library now exports `packContextOutput`, `serializeContextOutput`,
 `renderContextOutputHuman`, `contextOutputError`, `boundContextDiagnostics`,
 `resolveContextOutputCap` and their `ContextOutput*` types. This implements the
-output foundation from the [engineering contract](specification.md). Public
-query/context/show v2 switches remain the searchable-evidence and category
-integration tickets; existing v1 CLI output and exports are unchanged.
+output foundation from the [engineering contract](specification.md). AM-91 now supplies the [production query/context/show adapters](production-retrieval.md);
+existing v1 CLI output and exports are unchanged.
 
 ## Selector integration
 
@@ -16,6 +15,9 @@ validation, evidence ranking, optional depth expansion, and collection matching.
 The packer is pure in-memory code; it never reads or executes stored content.
 
 - Supply ranked `roots` with explicit reason codes and generated `evidence`.
+  Selectors applying an optional-root limit supply the full pre-limit
+  `taskMatchCount` and seed every removed root that owns required obligations via
+  `requiredClaimIds`, so neither matching diagnostics nor obligations disappear.
   Multiple reasons for an ID are merged. Task matches count unique eligible
   text/exact roots before packing. Optional related/index rows are never matches.
 - Supply claim payloads and graph relationships, including every outgoing

@@ -720,3 +720,11 @@ npm publish --access public
 ```
 
 The workflow verifies that the release tag matches the package version, then tests, builds, dry-runs the package, and runs `npm publish --provenance --access public`. Configure npm Trusted Publishing for the `@jurgen1c/agent-memory-cli` package with GitHub user `jurgen1c`, repository `agent_memory`, workflow `publish.yml`, allowed action `npm publish`, and no environment.
+
+## Opt-in searchable retrieval
+
+Use `query`, `context`, or `show` with `--format-version 2` for searchable authored
+Markdown sections, exact source/symbol/route evidence and byte-bounded output.
+Recompile the selected checkout to schema 2 first; v1 defaults and APIs remain
+available. See [production retrieval](docs/features/category-retrieval/production-retrieval.md)
+for flags, complete inspection, cache rollback and measured fixture limitations.

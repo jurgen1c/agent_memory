@@ -1,3 +1,4 @@
+import { runRetrievalV2Command, usesV2Retrieval } from "./commands/retrieval_v2";
 import { AgentMemoryError, formatError, NotFoundError, toAgentMemoryError } from "../../core/src/errors";
 import type { ExitCode } from "../../core/src/types";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../../core/src/version";
@@ -137,6 +138,7 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
       };
     }
 
+    if (usesV2Retrieval(rest, command)) return runRetrievalV2Command("query", rest, context.cwd);
     return runQueryCommand(rest, { cwd: context.cwd });
   }
 
@@ -148,6 +150,7 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
       };
     }
 
+    if (usesV2Retrieval(rest, command)) return runRetrievalV2Command("show", rest, context.cwd);
     return runShowCommand(rest, { cwd: context.cwd });
   }
 
@@ -214,6 +217,7 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
       };
     }
 
+    if (usesV2Retrieval(rest, command)) return runRetrievalV2Command("context", rest, context.cwd);
     return runContextCommand(rest, { cwd: context.cwd });
   }
 

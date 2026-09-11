@@ -42,3 +42,8 @@ export * from "./yaml";
 export * from "./context_output";
 export * from "./context_output_types";
 export * from "./context_output_serialization";
+
+export { queryClaimsV2, buildContextV2, showClaimV2 } from "./retrieval_v2";
+export type { QueryClaimsV2Options, BuildContextV2Options, ShowClaimV2Options } from "./retrieval_v2";
+export { parseClaimSections, claimBodyDigest } from "./claim_sections";
+export { canonicalContentDigest } from "./canonical_digest";

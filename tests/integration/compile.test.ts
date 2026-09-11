@@ -49,7 +49,7 @@ describe("compile command", () => {
       expect(ftsMatch.map((row) => row.id)).toContain("auth.student_oauth.uid_is_tenant_scoped");
 
       const metadata = database.query("SELECT value FROM compile_metadata WHERE key = 'schema_version'").get() as { value: string };
-      expect(metadata.value).toBe("1");
+      expect(metadata.value).toBe("2");
     } finally {
       database.close();
     }
