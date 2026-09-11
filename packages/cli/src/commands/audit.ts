@@ -1,3 +1,4 @@
+import { auditMemoryV2, type AuditResultV2 } from "../../../core/src/audit_v2";
 import { auditMemory, type AuditFinding, type AuditResult } from "../../../core/src/audit";
 import { AgentMemoryError } from "../../../core/src/errors";
 import type { ExitCode } from "../../../core/src/types";
@@ -17,11 +18,12 @@ interface AuditCommandOptions {
   baseRef?: string;
   json: boolean;
   strict: boolean;
+  formatVersion?: 1 | 2;
 }
 
-export function runAuditCommand(args: string[], context: AuditCommandContext = {}): AuditCommandResult {
+export async function runVersionedAuditCommand(args: string[], context: AuditCommandContext = {}): Promise<AuditCommandResult> {
   const options = parseAuditArgs(args);
-  const result = auditMemory({
+  const result = await (options.formatVersion === 2 ? auditMemoryV2 : auditMemory)({
     cwd: context.cwd,
     changedFiles: options.changedFiles,
     gitDiff: options.gitDiff,
@@ -35,6 +37,14 @@ export function runAuditCommand(args: string[], context: AuditCommandContext = {
   };
 }
 
+export function runAuditCommand(args: string[], context: AuditCommandContext = {}): AuditCommandResult {
+  const options = parseAuditArgs(args);
+  if (options.formatVersion === 2) throw new AgentMemoryError("Use runVersionedAuditCommand for asynchronous v2 audits.");
+  const result = auditMemory({ cwd: context.cwd, changedFiles: options.changedFiles, gitDiff: options.gitDiff,
+    baseRef: options.baseRef, strict: options.strict });
+  return { exitCode: result.ok ? 0 : 6, stdout: options.json ? JSON.stringify(result, null, 2) : renderAuditResult(result) };
+}
+
 function parseAuditArgs(args: string[]): AuditCommandOptions {
   const options: AuditCommandOptions = {
     changedFiles: [],
@@ -45,6 +55,13 @@ function parseAuditArgs(args: string[]): AuditCommandOptions {
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+
+    if (arg === "--format-version" || arg.startsWith("--format-version=")) {
+      const value = arg === "--format-version" ? readValue(args, index++, arg) : arg.slice("--format-version=".length);
+      if (value !== "1" && value !== "2") throw new AgentMemoryError("audit --format-version must be 1 or 2.");
+      options.formatVersion = Number(value) as 1 | 2;
+      continue;
+    }
 
     if (arg === "--json") {
       options.json = true;
@@ -89,7 +106,7 @@ function parseAuditArgs(args: string[]): AuditCommandOptions {
     });
   }
 
-  if (options.changedFiles.length === 0 && !options.gitDiff) {
+  if (options.formatVersion !== 2 && options.changedFiles.length === 0 && !options.gitDiff) {
     throw new AgentMemoryError("audit requires --changed-files or --git-diff.", {
       details: ["Example: agent-memory audit --changed-files docs/agent-memory/claims/auth/example.md"]
     });
@@ -104,7 +121,7 @@ function parseAuditArgs(args: string[]): AuditCommandOptions {
   return options;
 }
 
-function renderAuditResult(result: AuditResult): string {
+function renderAuditResult(result: AuditResult | AuditResultV2): string {
   const counts = {
     error: result.findings.filter((finding) => finding.severity === "error").length,
     warning: result.findings.filter((finding) => finding.severity === "warning").length,
@@ -116,6 +133,23 @@ function renderAuditResult(result: AuditResult): string {
     `Changed files: ${result.changedFiles.length}`,
     `Findings: ${result.findings.length} (${counts.error} errors, ${counts.warning} warnings, ${counts.info} info)`
   ];
+
+  if ("schemaVersion" in result) {
+    lines.push(`Structure: ${result.structure.state}`, `Cache: ${result.cache.state}`);
+    for (const dimension of [result.structure, result.cache]) {
+      for (const diagnostic of dimension.diagnostics) {
+        lines.push(`${diagnostic.code}: ${diagnostic.message}`);
+        if (diagnostic.path) lines.push(`  Source: ${JSON.stringify(diagnostic.path)}`);
+        if (diagnostic.id) lines.push(`  Claim: ${JSON.stringify(diagnostic.id)}`);
+        lines.push(`  Remediation: ${diagnostic.remediation}`);
+      }
+    }
+    for (const claim of result.claims) {
+      lines.push(`${claim.id}: verificationMetadata=${claim.verificationMetadata}; verificationCheck=${claim.verificationCheck}`);
+      if (claim.diagnostic) lines.push(`  ${claim.diagnostic.code}: ${claim.diagnostic.message}`, `  Remediation: ${claim.diagnostic.remediation}`);
+      for (const signal of claim.qualitySignals) lines.push(`  [advisory] ${signal.code} ${signal.field}=${JSON.stringify(signal.text)}`);
+    }
+  }
 
   if (result.findings.length > 0) {
     lines.push("", "Findings:");

@@ -1,0 +1,187 @@
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { GitCommandError, runGit, type GitCommandOptions } from "../../packages/core/src/git";
+import { createGitCommitVerifier, verifyGitCommit } from "../../packages/core/src/git_verification";
+
+const roots: string[] = [];
+afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
+function repository(format = "sha1") {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "am-git-verification-")); roots.push(root);
+  runGit(root, ["init", `--object-format=${format}`]);
+  runGit(root, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "fixture"]);
+  return { root, oid: runGit(root, ["rev-parse", "HEAD"]) };
+}
+function result(stdout: string, overrides: Partial<SpawnSyncReturns<string>> = {}): SpawnSyncReturns<string> {
+  return { pid: 1, output: [null, stdout, ""], stdout, stderr: "", status: 0, signal: null, ...overrides };
+}
+
+describe("production Git verification diagnostics", () => {
+  for (const format of ["sha1", "sha256"]) test(`exact ${format} commits and actual status-zero missing objects`, () => {
+    const { root, oid } = repository(format);
+    expect(verifyGitCommit(root, oid.toUpperCase()).code).toBe("GIT_VERIFIED");
+    const missing = "f".repeat(oid.length);
+    const actual = spawnSync("git", ["cat-file", "--batch-check=%(objectname) %(objecttype)"], { cwd: root, input: `${missing}\n`, encoding: "utf8" });
+    expect(actual.status).toBe(0); expect(actual.stdout).toBe(`${missing} missing\n`);
+    const diagnostic = verifyGitCommit(root, missing);
+    expect(diagnostic.code).toBe("GIT_UNKNOWN_OBJECT"); expect(diagnostic.remediation).toContain("repair the reference only after review");
+  });
+
+  for (const [errorCode, code] of [["EPERM", "GIT_PERMISSION_DENIED"], ["EACCES", "GIT_PERMISSION_DENIED"],
+    ["ENOENT", "GIT_EXECUTABLE_MISSING"], ["ETIMEDOUT", "GIT_TIMEOUT"], ["EIO", "GIT_UNAVAILABLE"]]) {
+    test(`${errorCode} dominates status zero and complete valid stdout at the object probe`, () => {
+      const { root, oid } = repository();
+      const error = Object.assign(new Error("fixture failure"), { code: errorCode });
+      const spawn: GitCommandOptions["spawn"] = (binary, args, options) => args.includes("cat-file")
+        ? result(`${oid} commit\n`, { error, stderr: "x".repeat(3000) }) : spawnSync(binary, args, options);
+      const diagnostic = verifyGitCommit(root, oid, { spawn });
+      expect(diagnostic.code).toBe(code); expect(diagnostic.state).toBe("unavailable");
+      expect(diagnostic.status).toBe(0); expect(diagnostic.errorCode).toBe(errorCode);
+      expect(diagnostic.diagnostic.length).toBe(512); expect(diagnostic.message.length).toBeLessThanOrEqual(512);
+      expect(diagnostic.remediation).not.toContain("repair"); expect(diagnostic.remediation).not.toContain("fetch");
+      try { runGit(root, ["cat-file"], { spawn }); } catch (caught) {
+        expect(caught).toBeInstanceOf(GitCommandError); expect((caught as GitCommandError).cause).toBe(error);
+      }
+    });
+  }
+
+  for (const overrides of [{ signal: "SIGKILL" as const }, { status: null }, { status: 128, stderr: "localized failure" }]) {
+    test(`killed, no-status and repository failures: ${JSON.stringify(overrides)}`, () => {
+      const { root, oid } = repository();
+      const diagnostic = verifyGitCommit(root, oid, { spawn: () => result("sha1\n", overrides) });
+      expect(diagnostic.code).toBe(overrides.status === 128 ? "GIT_CHECK_FAILED" : "GIT_UNAVAILABLE");
+      expect(diagnostic.state).toBe("unavailable"); expect(diagnostic.signal).toBe(overrides.signal ?? null);
+      expect(diagnostic.remediation).not.toContain("repair");
+    });
+  }
+
+  test("repository and missing object-store failures never suggest unknown history", () => {
+    const { root, oid } = repository();
+    fs.renameSync(path.join(root, ".git/objects"), path.join(root, ".git/objects-unavailable"));
+    expect(verifyGitCommit(root, oid).code).toBe("GIT_CHECK_FAILED");
+    fs.rmSync(path.join(root, ".git"), { recursive: true });
+    expect(verifyGitCommit(root, oid).code).toBe("GIT_CHECK_FAILED");
+    expect(verifyGitCommit(root, oid, { gitBinary: path.join(root, "nonexistent-git") }).code).toBe("GIT_EXECUTABLE_MISSING");
+  });
+
+  test("unreadable object directories cannot become missing objects", () => {
+    const { root, oid } = repository();
+    const objectDir = path.join(root, ".git/objects", oid.slice(0, 2));
+    fs.chmodSync(objectDir, 0);
+    try { expect(verifyGitCommit(root, "f".repeat(40)).code).toBe("GIT_PERMISSION_DENIED"); }
+    finally { fs.chmodSync(objectDir, 0o755); }
+  });
+
+  test("preflight never enumerates loose object files and does not traverse fanout symlinks", () => {
+    const { root, oid } = repository();
+    const fanout = path.join(root, ".git/objects", oid.slice(0, 2));
+    for (let index = 0; index < 100; index++) runGit(root, ["hash-object", "-w", "--stdin"], { input: `unrelated object ${index}` });
+    const enumerate = spyOn(fs, "readdirSync");
+    try {
+      expect(verifyGitCommit(root, oid).code).toBe("GIT_VERIFIED");
+      expect(enumerate.mock.calls.some(([target]) => String(target) === fanout)).toBe(false);
+    } finally { enumerate.mockRestore(); }
+    const moved = path.join(root, "fanout-target");
+    fs.renameSync(fanout, moved); fs.symlinkSync(moved, fanout, "dir");
+    const diagnostic = verifyGitCommit(root, oid);
+    expect(diagnostic.code).toBe("GIT_CHECK_FAILED"); expect(diagnostic.remediation).not.toContain("repair");
+  });
+
+  test("requested unreadable loose objects remain unavailable without reading unrelated loose files", () => {
+    const { root, oid } = repository();
+    const object = path.join(root, ".git/objects", oid.slice(0, 2), oid.slice(2));
+    fs.chmodSync(object, 0);
+    try {
+      const diagnostic = verifyGitCommit(root, oid);
+      expect(diagnostic.code).toBe("GIT_PERMISSION_DENIED"); expect(diagnostic.remediation).not.toContain("repair");
+    } finally { fs.chmodSync(object, 0o444); }
+  });
+
+  test("corrupt packed-object indexes preserve successful stderr and cannot suggest repairing existing history", () => {
+    const { root, oid } = repository();
+    runGit(root, ["gc", "--prune=now"]);
+    const pack = path.join(root, ".git/objects/pack");
+    const index = fs.readdirSync(pack).find((name) => name.endsWith(".idx"))!;
+    fs.chmodSync(path.join(pack, index), 0o644);
+    fs.writeFileSync(path.join(pack, index), "corrupt index");
+    const diagnostic = verifyGitCommit(root, oid);
+    expect(diagnostic.code).toBe("GIT_CHECK_FAILED"); expect(diagnostic.state).toBe("unavailable");
+    expect(diagnostic.status).toBe(0); expect(diagnostic.diagnostic.length).toBeGreaterThan(0);
+    expect(diagnostic.remediation).not.toContain("repair");
+  });
+
+  test("dangling alternate stores are unavailable while readable alternates resolve exact commits", () => {
+    const original = repository(); const alternate = repository();
+    const alternatesPath = path.join(original.root, ".git/objects/info/alternates");
+    fs.writeFileSync(alternatesPath, `${alternate.root}/.git/objects\n`);
+    expect(verifyGitCommit(original.root, alternate.oid).code).toBe("GIT_VERIFIED");
+    fs.writeFileSync(alternatesPath, `${original.root}/missing-store\n`);
+    expect(verifyGitCommit(original.root, "f".repeat(40)).code).toBe("GIT_CHECK_FAILED");
+  });
+
+  test("quoted alternate paths decode C escapes and octal UTF-8 bytes", () => {
+    const original = repository(); const alternate = repository();
+    const store = path.join(alternate.root, "objects\nwith-é\"\t");
+    fs.renameSync(path.join(alternate.root, ".git/objects"), store);
+    const encodings = [JSON.stringify(store), '"' + [...Buffer.from(store)].map((byte) => "\\" + byte.toString(8).padStart(3, "0")).join("") + '"'];
+    for (const quoted of encodings) {
+      fs.writeFileSync(path.join(original.root, ".git/objects/info/alternates"), `# Documented alternate store\n${quoted}\n`);
+      expect(runGit(original.root, ["cat-file", "-t", alternate.oid])).toBe("commit");
+      expect(verifyGitCommit(original.root, alternate.oid).code).toBe("GIT_VERIFIED");
+    }
+  });
+
+  test("environment alternates are included in accessible-store preflight", () => {
+    const original = repository(); const alternate = repository();
+    const previous = process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES;
+    process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES = path.join(alternate.root, ".git/objects");
+    const objectDirectory = path.join(alternate.root, ".git/objects", alternate.oid.slice(0, 2));
+    try {
+      expect(verifyGitCommit(original.root, alternate.oid).code).toBe("GIT_VERIFIED");
+      fs.chmodSync(objectDirectory, 0);
+      expect(verifyGitCommit(original.root, "f".repeat(40)).code).toBe("GIT_PERMISSION_DENIED");
+    } finally {
+      fs.chmodSync(objectDirectory, 0o755);
+      if (previous === undefined) delete process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES;
+      else process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES = previous;
+    }
+  });
+
+  test("missing repository paths do not masquerade as missing executables", () => {
+    const { root, oid } = repository();
+    const diagnostic = verifyGitCommit(path.join(root, "no-checkout"), oid);
+    expect(diagnostic.code).toBe("GIT_CHECK_FAILED");
+    expect(diagnostic.errorCode).toBe("ENOENT");
+    const failed = verifyGitCommit(root, oid, { spawn: () => result("", { status: 128 }) });
+    expect(failed.errorCode).toBeUndefined();
+  });
+
+  test("audit verifier reuses store preflight across distinct references and disables lazy fetching", () => {
+    const { root, oid } = repository(); let preflights = 0;
+    const verify = createGitCommitVerifier(root, { spawn: (binary, args, options) => {
+      if (args.includes("count-objects")) preflights++;
+      expect(options.env?.GIT_NO_LAZY_FETCH).toBe("1");
+      return spawnSync(binary, args, options);
+    } });
+    expect(verify(oid).code).toBe("GIT_VERIFIED");
+    expect(verify("f".repeat(40)).code).toBe("GIT_UNKNOWN_OBJECT");
+    expect(preflights).toBe(1);
+  });
+
+  test("malformed, wrong OID, noncommit and extra output never verify", () => {
+    const { root, oid } = repository();
+    for (const stdout of ["", `${oid} blob\n`, `${oid} tag\n`, `${oid} tree\n`, `${oid} mystery\n`, `${"e".repeat(40)} commit\n`, `${oid} commit\nextra\n`, "missing\n"]) {
+      const diagnostic = verifyGitCommit(root, oid, { spawn: (binary, args, options) =>
+        args.includes("cat-file") ? result(stdout) : spawnSync(binary, args, options) });
+      expect(diagnostic.code).toBe("VERIFICATION_METADATA_MALFORMED"); expect(diagnostic.state).toBe("invalid_reference");
+      expect(diagnostic.remediation).not.toContain("repair");
+    }
+    const blob = runGit(root, ["hash-object", "-w", "--stdin"], { input: "fixture" });
+    expect(verifyGitCommit(root, blob).code).toBe("VERIFICATION_METADATA_MALFORMED");
+    runGit(root, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "tag", "-a", "fixture", "-m", "tag"]);
+    expect(verifyGitCommit(root, runGit(root, ["rev-parse", "fixture"])).code).toBe("VERIFICATION_METADATA_MALFORMED");
+    expect(verifyGitCommit(root, "HEAD").code).toBe("VERIFICATION_METADATA_MALFORMED");
+  });
+});

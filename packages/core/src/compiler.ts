@@ -56,7 +56,13 @@ interface RelationRow {
 }
 
 export async function compileMemory(options: CompileOptions = {}): Promise<CompileResult> {
-  const initialDigest = canonicalContentDigest(loadConfig({ cwd: options.cwd }));
+  const sourceConfig = loadConfig({ cwd: options.cwd });
+  const initialDigest = canonicalContentDigest(sourceConfig);
+  const assertSnapshotUnchanged = () => {
+    if (canonicalContentDigest(sourceConfig) !== initialDigest) {
+      throw new AgentMemoryError("Canonical memory or configuration changed during compilation; retry compile.", { code: "CACHE_STALE", exitCode: 5 });
+    }
+  };
   const validation = validateRepository({ cwd: options.cwd });
 
   if (!validation.valid) {
@@ -64,6 +70,7 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
   }
 
   const memory = loadMemory(options.cwd);
+  assertSnapshotUnchanged();
   const repoRoot = memory.loadedConfig.repo.root;
   const databaseLocation = resolveConfiguredDatabaseLocation({
     loaded: memory.loadedConfig,
@@ -126,9 +133,7 @@ export async function compileMemory(options: CompileOptions = {}): Promise<Compi
     if (databaseLocation.scope === "global" && databaseLocation.source === "global_registry") {
       fs.chmodSync(tempDatabasePath, 0o600);
     }
-    if (canonicalContentDigest(memory.loadedConfig) !== initialDigest) {
-      throw new AgentMemoryError("Canonical memory changed during compilation; retry compile.", { code: "CACHE_STALE", exitCode: 5 });
-    }
+    assertSnapshotUnchanged();
     replaceDatabase(tempDatabasePath, databasePath);
     replaced = true;
     return result;

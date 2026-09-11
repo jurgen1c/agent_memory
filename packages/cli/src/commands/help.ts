@@ -284,12 +284,14 @@ const TOPICS: HelpTopic[] = [
       "agent-memory audit --git-diff",
       "agent-memory audit --git-diff --base origin/main",
       "agent-memory audit --git-diff --json",
-      "agent-memory audit --git-diff --strict"
+      "agent-memory audit --git-diff --strict",
+      "agent-memory audit --format-version 2 --json"
     ],
     examples: ["agent-memory audit --changed-files docs/agent-memory/claims/auth/example.md", "agent-memory audit --git-diff --base origin/main"],
     agentNotes: [
       "Returns exit code 6 for strong unreviewed overlap or invalid stale markers; weak file overlap and tag-only overlap are advisory.",
-      "Use --strict to retain legacy blocking behavior for every overlap and related-claim review finding."
+      "Use --strict to retain legacy blocking behavior for every overlap and related-claim review finding.",
+      "Use --format-version 2 for separate structure, cache, verification metadata and Git check states. Git verification never executes stored commands or establishes claim truth."
     ],
     phase: "Phase 9"
   },

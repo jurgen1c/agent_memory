@@ -4,7 +4,7 @@ import { AgentMemoryError, formatError, NotFoundError, toAgentMemoryError } from
 import type { ExitCode } from "../../core/src/types";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../../core/src/version";
 import { runAgentManifestCommand } from "./commands/agent_manifest";
-import { runAuditCommand } from "./commands/audit";
+import { runVersionedAuditCommand } from "./commands/audit";
 import { runCompileCommand } from "./commands/compile";
 import { runContextCommand } from "./commands/context";
 import { runCoverageCommand } from "./commands/coverage";
@@ -246,7 +246,7 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
       };
     }
 
-    return runAuditCommand(rest, { cwd: context.cwd });
+    return runVersionedAuditCommand(rest, { cwd: context.cwd });
   }
 
   if (command === "doctor") {

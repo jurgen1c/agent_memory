@@ -16,12 +16,16 @@ export interface CanonicalMemoryFilePatterns {
   waivers: string[];
 }
 
-export function discoverFiles(root: string, patterns: string[]): string[] {
+export interface FileDiscoveryOptions {
+  onDirectoryError?: (directory: string, error: unknown) => void;
+}
+
+export function discoverFiles(root: string, patterns: string[], options: FileDiscoveryOptions = {}): string[] {
   if (!fs.existsSync(root)) {
     return [];
   }
 
-  const allFiles = walkFiles(root).filter((filePath) => !filePath.endsWith(".gitkeep"));
+  const allFiles = walkFiles(root, options).filter((filePath) => !filePath.endsWith(".gitkeep"));
 
   return allFiles
     .filter((filePath) => {
@@ -86,15 +90,21 @@ export function configuredPathRelativeToRepo(repoRoot: string, configuredPath: s
     .replace(/\/+$/, "");
 }
 
-function walkFiles(root: string): string[] {
-  const entries = fs.readdirSync(root, { withFileTypes: true });
+function walkFiles(root: string, options: FileDiscoveryOptions): string[] {
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); }
+  catch (error) {
+    if (!options.onDirectoryError) throw error;
+    options.onDirectoryError(root, error);
+    return [];
+  }
   const files: string[] = [];
 
   for (const entry of entries) {
     const entryPath = path.join(root, entry.name);
 
     if (entry.isDirectory()) {
-      files.push(...walkFiles(entryPath));
+      files.push(...walkFiles(entryPath, options));
     } else if (entry.isFile()) {
       files.push(entryPath);
     }

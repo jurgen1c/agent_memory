@@ -1205,13 +1205,17 @@ describe("audit command", () => {
       const verificationCommit = (resolves ? "a" : "b").repeat(40);
       const invocationLog = path.join(cwd, "git-invocations.log");
       const fakeGit = path.join(cwd, "verification-git");
-      const resolutionCommand = `rev-parse --verify ${verificationCommit}^{commit}`;
+      fs.mkdirSync(path.join(cwd, ".git/objects"), { recursive: true });
+      const resolutionCommand = "--no-replace-objects cat-file --batch-check=%(objectname) %(objecttype)";
       fs.writeFileSync(
         fakeGit,
         `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> ${JSON.stringify(invocationLog)}
 case "$*" in
-  ${JSON.stringify(resolutionCommand)}) ${resolves ? `printf '%s\\n' "${verificationCommit}"` : "exit 9"} ;;
+  "rev-parse --show-object-format") printf 'sha1\\n' ;;
+  "rev-parse --git-path objects") printf '.git/objects\\n' ;;
+  "count-objects -v") exit 0 ;;
+  ${JSON.stringify(resolutionCommand)}) printf '%s\\n' "${verificationCommit} ${resolves ? "commit" : "missing"}" ;;
   *) exit 9 ;;
 esac
 `
@@ -1249,7 +1253,7 @@ esac
       stalledGit,
       `#!/usr/bin/env bash
 case "$*" in
-  "rev-parse --verify ${verificationCommit}^{commit}") printf '%s\\n' "${verificationCommit}" ;;
+  "rev-parse --show-object-format") while true; do :; done ;;
   "diff --no-renames --name-only ${verificationCommit}..HEAD") exit 0 ;;
   "rev-parse --is-inside-work-tree") while true; do :; done ;;
   *) exit 9 ;;

@@ -8,6 +8,7 @@ import { AgentMemoryError } from "./errors";
 import { canonicalMemoryFileInventory, configuredPathRelativeToRepo, pathMatchesPattern, resolveConfiguredPath, toPosix } from "./files";
 import { readGitBlobs } from "./git_blob_reader";
 import { GitCommandError, isFullGitObjectId, runGit } from "./git";
+import { createGitCommitVerifier, type GitVerificationDiagnostic } from "./git_verification";
 import {
   loadMemory,
   type LoadedMemory,
@@ -159,6 +160,16 @@ export function auditMemory(options: AuditOptions = {}): AuditResult {
   };
 }
 
+/** Audit recorded commits and source drift without loading unrelated canonical artifacts. */
+export function auditClaimVerification(
+  repoRoot: string,
+  claims: MemoryClaim[],
+  memoryRootRelative: string,
+  options: Pick<AuditOptions, "gitBinary" | "gitTimeoutMs"> = {}
+): { findings: AuditFinding[]; warnings: string[] } {
+  return findOutdatedVerifiedClaims(repoRoot, claims.map(normalizeClaimForAudit), memoryRootRelative, options);
+}
+
 function findOutdatedVerifiedClaims(
   repoRoot: string,
   claims: ClaimRecord[],
@@ -167,10 +178,8 @@ function findOutdatedVerifiedClaims(
 ): { findings: AuditFinding[]; warnings: string[] } {
   const findings: AuditFinding[] = [];
   const warnings: string[] = [];
-  const commitResolutionByReference = new Map<
-    string,
-    { ok: true; commit: string } | { ok: false; error: unknown }
-  >();
+  const commitResolutionByReference = new Map<string, GitVerificationDiagnostic>();
+  const verify = createGitCommitVerifier(repoRoot, { gitBinary: options.gitBinary, timeoutMs: options.gitTimeoutMs });
   const changedFilesByCommit = new Map<string, string[]>();
   let workingTreeFiles: string[] | undefined;
 
@@ -208,51 +217,26 @@ function findOutdatedVerifiedClaims(
     let resolution = commitResolutionByReference.get(reference);
 
     if (!resolution) {
-      try {
-        resolution = {
-          ok: true,
-          commit: runGit(repoRoot, ["rev-parse", "--verify", `${reference}^{commit}`], {
-            gitBinary: options.gitBinary,
-            timeoutMs: options.gitTimeoutMs
-          })
-        };
-      } catch (error) {
-        resolution = { ok: false, error };
-      }
-
+      resolution = verify(reference);
       commitResolutionByReference.set(reference, resolution);
     }
-
-    if (!resolution.ok) {
-      const unavailableGit = unavailableGitFailure(resolution.error);
-
-      if (unavailableGit) {
-        findings.push(verificationUnavailableFinding(claim, memoryRootRelative, unavailableGit));
-        break;
-      }
-
+    if (resolution.state !== "verified") {
       findings.push({
-        code: "claim.last_verified_commit_invalid",
+        code: resolution.state === "unavailable" ? "claim.verification_check_unavailable" : "claim.last_verified_commit_invalid",
         severity: "error",
-        message: `Claim ${claim.id} references an unknown last_verified_commit: ${reference}.`,
-        claimIds: [claim.id],
-        paths: [memoryPath(memoryRootRelative, claim.sourcePath)],
-        shared_values: {},
-        remediation: "Record a reachable full verification commit object ID or set last_verified_commit to null and lower confidence."
+        message: resolution.code === "GIT_UNKNOWN_OBJECT"
+          ? `Claim ${claim.id} references an unknown last_verified_commit: ${reference}.`
+          : resolution.code === "VERIFICATION_METADATA_MALFORMED"
+            ? `Claim ${claim.id} must use the repository's full immutable Git commit object ID for last_verified_commit: ${reference}.`
+            : `Could not inspect Git verification state for ${claim.id}: ${resolution.message}`,
+        claimIds: [claim.id], paths: [memoryPath(memoryRootRelative, claim.sourcePath)], shared_values: {},
+        remediation: resolution.remediation
       });
+      if (resolution.state === "unavailable" &&
+        (resolution.phase !== "object" || !["GIT_CHECK_FAILED", "GIT_PERMISSION_DENIED"].includes(resolution.code))) break;
       continue;
     }
-
-    const commit = resolution.commit;
-
-    if (commit.toLowerCase() !== reference.toLowerCase()) {
-      findings.push(invalidVerificationFinding(
-        claim,
-        memoryRootRelative,
-        `Claim ${claim.id} must use the repository's full immutable Git commit object ID for last_verified_commit: ${reference}.`
-      ));
-      continue;
-    }
+    const commit = reference.toLowerCase();
 
     if (!isActiveClaim(claim)) {
       continue;
@@ -283,6 +267,9 @@ function findOutdatedVerifiedClaims(
 
         if (unavailableGit) {
           findings.push(verificationUnavailableFinding(claim, memoryRootRelative, unavailableGit));
+          // A failed commit-to-HEAD diff can be specific to this reference. Spawn
+          // failures and working-tree discovery failures prevent all comparisons.
+          if (error instanceof GitCommandError && !error.cause && !error.signal && error.status !== null && !error.timedOut) continue;
           break;
         }
 
@@ -1040,7 +1027,7 @@ function invalidVerificationFinding(claim: ClaimRecord, memoryRootRelative: stri
 
 function unavailableGitFailure(error: unknown): GitCommandError | undefined {
   if (error instanceof GitCommandError) {
-    return error.timedOut || error.status === null ? error : undefined;
+    return error;
   }
 
   if (error instanceof AgentMemoryError) {

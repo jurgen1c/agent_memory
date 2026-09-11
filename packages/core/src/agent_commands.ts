@@ -37,7 +37,8 @@ export function buildAgentCommands(commandPrefix: string): AgentCommandDescripti
       examples: [
         `${commandPrefix} audit --git-diff`,
         `${commandPrefix} audit --git-diff --base origin/main`,
-        `${commandPrefix} audit --git-diff --strict`
+        `${commandPrefix} audit --git-diff --strict`,
+        `${commandPrefix} audit --format-version 2 --json`
       ]
     },
     {

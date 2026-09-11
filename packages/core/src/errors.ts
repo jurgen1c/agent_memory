@@ -34,6 +34,9 @@ export class ConfigError extends AgentMemoryError {
   }
 }
 
+/** Retains ConfigError's v1 code, name and exit semantics while identifying missing input. */
+export class MissingConfigError extends ConfigError {}
+
 export class NotFoundError extends AgentMemoryError {
   constructor(message: string, options: Omit<AgentMemoryErrorOptions, "code" | "exitCode"> = {}) {
     super(message, {
