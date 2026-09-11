@@ -1,3 +1,4 @@
+import { claimCategories } from "./category_vocabulary";
 import { ContextOutputByteCounter } from "./context_output_budget";
 import { boundContextDiagnostics, contextOutputError, resolveContextOutputCap, serializeContextOutput } from "./context_output_serialization";
 import type { ContextFacet, ContextOutputCandidates, ContextOutputClaim, ContextOutputCollection, ContextOutputEdge, ContextOutputFilters, ContextOutputModel, ContextOutputOwner, ContextOutputReason, ContextOutputRequest, ContextOutputResult, ContextOutputSuggestion } from "./context_output_types";
@@ -17,8 +18,7 @@ export function normalizeContextOutputFilters(filters: ContextOutputFilters = {}
 }
 
 export function contextClaimOutsideFilters(claim: ContextOutputClaim, filters: Required<ContextOutputFilters>): ContextFacet[] {
-  const categories = claim.tags.filter((tag) => tag.startsWith("concern:")).map((tag) => tag.slice(8));
-  if (!categories.length) categories.push("uncategorized");
+  const categories = claimCategories(claim.tags);
   const outside: ContextFacet[] = [];
   if (filters.categories.length && !filters.categories.some((category) => categories.includes(category))) outside.push("category");
   if (filters.tags.length && !filters.tags.some((tag) => claim.tags.includes(tag))) outside.push("tag");

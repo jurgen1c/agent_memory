@@ -1,3 +1,4 @@
+import { runCategoriesCommand } from "./commands/categories";
 import { runRetrievalV2Command, usesV2Retrieval } from "./commands/retrieval_v2";
 import { AgentMemoryError, formatError, NotFoundError, toAgentMemoryError } from "../../core/src/errors";
 import type { ExitCode } from "../../core/src/types";
@@ -78,6 +79,11 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
       exitCode: 0,
       stdout: `${PACKAGE_NAME} ${PACKAGE_VERSION}`
     };
+  }
+
+  if (command === "categories") {
+    if (rest.includes("--help") || rest.includes("-h")) return { exitCode: 0, stdout: renderHelp("categories") };
+    return runCategoriesCommand(rest, context.cwd);
   }
 
   if (command === "init") {

@@ -40,6 +40,7 @@ type DeprecatedAliasWarningMode = "applied" | "planned" | "deferred";
 
 const CONFIG_SCHEMA: ConfigSchema = {
   version: true,
+  category_vocabulary: true,
   memory_root: true,
   database_path: true,
   memory_key: true,

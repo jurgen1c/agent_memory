@@ -18,6 +18,7 @@ export interface ClaimSourcePolicy {
 
 export interface AgentMemoryConfig {
   version: number;
+  category_vocabulary?: Record<string, string>;
   memory_key?: string;
   database_scope?: "local" | "global";
   memory_root: string;

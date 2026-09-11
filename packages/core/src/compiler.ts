@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { claimCategories } from "./category_vocabulary";
 import fs from "node:fs";
 import path from "node:path";
 import { sqliteArtifactPaths } from "@jurgen1c/agent-core/sqlite";
@@ -207,6 +208,14 @@ CREATE TABLE claim_tags (
   claim_id TEXT NOT NULL,
   tag TEXT NOT NULL
 );
+
+CREATE TABLE claim_categories (
+  claim_id TEXT NOT NULL,
+  category TEXT NOT NULL,
+  PRIMARY KEY (claim_id, category)
+);
+CREATE INDEX claim_categories_category ON claim_categories (category, claim_id);
+CREATE INDEX claim_tags_tag ON claim_tags (tag, claim_id);
 
 CREATE TABLE claim_routes (
   claim_id TEXT NOT NULL,
@@ -489,6 +498,7 @@ function insertClaim(database: SqliteDatabase, claim: MemoryClaim): void {
     database.run("INSERT INTO claim_symbols (claim_id, symbol) VALUES (?, ?)", [claim.id, symbol]);
   }
 
+  for (const category of claimCategories(claim.tags)) database.run("INSERT INTO claim_categories (claim_id, category) VALUES (?, ?)", [claim.id, category]);
   for (const tag of claim.tags) {
     database.run("INSERT INTO claim_tags (claim_id, tag) VALUES (?, ?)", [claim.id, tag]);
   }

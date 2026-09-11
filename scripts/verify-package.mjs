@@ -30,6 +30,7 @@ try {
     "dist/index.js",
     "dist/index.d.ts",
     "dist/retrieval_v2.d.ts",
+    "dist/categories.d.ts",
     "docs/features/category-retrieval/production-retrieval.md",
     "dist/agent-memory.js",
     "dist/web/index.html",
@@ -86,6 +87,7 @@ try {
 import { spawnSync } from "node:child_process";
 import {
   parseYaml,
+  listCategories,
   queryClaimsV2,
   buildContextV2,
   showClaimV2,
@@ -93,7 +95,7 @@ import {
   openSqliteDatabase
 } from "@jurgen1c/agent-memory-cli";
 
-for (const api of [queryClaimsV2, buildContextV2, showClaimV2]) {
+for (const api of [listCategories, queryClaimsV2, buildContextV2, showClaimV2]) {
   if (typeof api !== "function") throw new Error("Packaged v2 API is missing.");
 }
 if (parseClaimSections("Title\\n===\\n")[0]?.heading !== "Title") {

@@ -5,6 +5,15 @@
   "required": ["version", "memory_root", "database_path", "claims", "graphs", "indexes", "recipes", "plans", "profiles", "waivers"],
   "properties": {
     "version": { "enum": [1, 2] },
+    "category_vocabulary": {
+      "type": "object",
+      "description": "Repository-owned concern extensions. Duplicate YAML keys are rejected; descriptions are limited to 512 UTF-8 bytes by config validation.",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", "maxLength": 48,
+        "not": { "enum": ["security", "reliability", "billing", "localization", "delivery", "uncategorized"] }
+      },
+      "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "\\S" }
+    },
     "memory_key": {
       "type": "string",
       "pattern": "^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\.|$))[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9_-])?$"

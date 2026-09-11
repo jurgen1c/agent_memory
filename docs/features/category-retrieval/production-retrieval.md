@@ -46,8 +46,8 @@ Canonical deletion after compilation returns `CACHE_STALE` first.
 
 No-match is successful with `NO_TASK_MATCH`; optional `--baseline` admits eligible
 critical claims only when there are no exact/prose hits. It never grants them task
-match status. System/status facets are available here. Category/tag vocabulary and
-collection integration remain their respective subsequent tickets; collections
+match status. Category/tag/system/status facets are available.
+Collection integration remains a subsequent ticket; collections
 report `not_requested`. Existing v1 collection commands and selectors are unchanged.
 
 Compilation reconstructs schema 2 in a temporary database, checks the same complete
@@ -98,3 +98,69 @@ so both endpoints become tier 1. This is a separate curation gain. The held-out
 expected pair is `identity.rotation` and `identity.overlap`; generic OR terms also
 retain all four retry claims. These results demonstrate the specified behavior,
 not perfect precision, replay of the full historical consumer, or time savings.
+
+## Category vocabulary and exact facets (AM-92)
+
+```sh
+agent-memory categories list --counts --json
+agent-memory categories list --system ingestion --status current --json
+agent-memory query --format-version 2 --category security --category reliability --json
+agent-memory context --format-version 2 --category reliability --system ingestion --status current --json
+agent-memory query --format-version 2 --tag concern:security --json
+```
+
+`categories list` is intrinsically v2; it optionally accepts `--format-version 2`.
+`listCategories({cwd, counts, filters: {systems, statuses}, budget, maxBytes})`
+exports the same typed model. Entries sort by slug and include descriptions,
+zero-count vocabulary entries and virtual `uncategorized`. Without `--counts`,
+count properties are absent. Counts are distinct eligible claims, with no graph
+expansion. The entire list, filters and self-accounting budget must fit the cap;
+an undersized cap returns `BUDGET_TOO_SMALL` (exit 7), never a partial vocabulary.
+Human and JSON output honor the same cap and model. Presets and errors use the
+shared v2 budget rules above.
+
+Categories are authored only as `concern:<slug>` in claim `tags`. Ordinary tags
+remain exact free-form labels: `security` is not `concern:security`. Claims with
+no concern tag remain valid and browse under `uncategorized`; that virtual name
+cannot be authored as `concern:uncategorized`. Duplicate/empty tags and unknown
+reserved concern tags fail validation. A parallel claim `categories` field is
+rejected; existing profile `category` remains independent.
+
+Built-in meanings are security (authority, privacy, access), reliability (recovery,
+idempotency, durable handoffs), billing (charges, entitlements, usage), localization
+(language/locale), and delivery (review/verification). Maintainers may extend them
+in repository config without redefining a built-in:
+
+```yaml
+category_vocabulary:
+  privacy: "Personal-data collection, disclosure and retention"
+```
+
+Slugs match `[a-z][a-z0-9]*(?:-[a-z0-9]+)*`, at most 48 ASCII bytes. Descriptions
+are nonempty strings, at most 512 UTF-8 bytes. Duplicate YAML keys and reserved
+`uncategorized` are errors. Vocabulary is checkout-owned and participates in the
+canonical config digest: recompile after any config edit. It is never merged with
+another registry entry. Compilation adds derived `claim_categories` and tag indexes
+to schema 2; v1 tables/output remain compatible and tags remain the source of truth.
+
+All facets match exactly and case-sensitively: OR within repeated values, AND
+across category/tag/system/status. Applied arrays deduplicate and sort. Facet-only
+query/context is browse (`taskMatches: 0`); no text, files or facets is `INPUT_REQUIRED`.
+Unknown category/system/status is a usage error (exit 2); category errors suggest
+`categories list` and bounded legal values. Unknown ordinary tags succeed empty.
+Default statuses are `current`, `proposed`, `needs_review`; explicit statuses replace
+them and support `stale`, `deprecated`, `experimental`, `needs_verification`, `rejected`
+as well. Required claims cross all facets with `REQUIRED_DEPENDENCY/outsideFilters`;
+inactive, missing and budget-omitted obligations remain incomplete. Direct and
+opted-in baseline roots always obey facets.
+
+Repeated singleton/boolean flags (including positive/negative pairs), multiple
+positional query texts and `--include-stale` in v2 are usage errors. Use repeated
+`--status` instead. Existing v1 flags retain their meaning; new category/tag options
+require explicit format 2 on existing commands. No stored verification command is
+executed by retrieval.
+
+For rollback, restore the pinned prior package, revert reviewed concern/config
+changes if that validator rejects them, and compile only the selected disposable
+cache with that package. Keep canonical documents and other registry caches intact.
+Category adoption and consumer semantic edits require their separate workflow.

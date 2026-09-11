@@ -41,10 +41,16 @@ export function buildAgentCommands(commandPrefix: string): AgentCommandDescripti
       ]
     },
     {
+      name: "categories",
+      purpose: "List repository concern vocabulary, descriptions, and optional distinct eligible counts.",
+      whenToUse: "Discover exact concern facets before v2 browse. OR within repeated system/status filters; AND across facets. Default statuses: current, proposed, needs_review.",
+      examples: [`${commandPrefix} categories list --counts --json`, `${commandPrefix} categories list --system auth --status current --json`]
+    },
+    {
       name: "query",
       purpose: "Search compiled claims by topic.",
       whenToUse: "Use when you need memory about a behavior, subsystem, file, symbol, or route.",
-      examples: [`${commandPrefix} query "student oauth tenant"`, `${commandPrefix} query --format-version 2 --system auth --json`]
+      examples: [`${commandPrefix} query "student oauth tenant"`, `${commandPrefix} query --format-version 2 --system auth --json`, `${commandPrefix} query --format-version 2 --category security --tag concern:security --json`]
     },
     {
       name: "show",

@@ -241,12 +241,12 @@ describe("production v2 retrieval", () => {
     } finally { if (priorHome === undefined) delete process.env.AGENT_MEMORY_HOME; else process.env.AGENT_MEMORY_HOME = priorHome; }
   });
 
-  test("reserved category/tag CLI flags share the explicit core extension error", async () => {
+  test("category/tag CLI flags use v2 and remain unavailable to v1/show", async () => {
     const cwd = fixture(); await compileMemory({ cwd });
     for (const flag of ["--category", "--tag"]) {
       const result = await dispatch(["query", "--format-version", "2", flag, "security", "--json"], { cwd });
-      expect(result.exitCode).toBe(2);
-      expect(JSON.parse(result.stdout!).error).toEqual({ code: "INVALID_INPUT", message: "Category/tag facets require the category vocabulary extension." });
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout!).mode).toBe("browse");
       expect((await dispatch(["query", flag, "security", "--json"], { cwd })).exitCode).toBe(2);
       expect((await dispatch(["show", "accounts.receipt_retry", "--format-version", "2", flag, "security"], { cwd })).exitCode).toBe(2);
     }
