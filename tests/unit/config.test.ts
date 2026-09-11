@@ -307,6 +307,8 @@ claim_sources:
     expect(schema.properties.version.enum).toEqual([1, 2]);
     expect(schema.properties.database_scope.enum).toEqual(["local", "global"]);
     expect(schema.properties.memory_key.pattern).toContain("[a-z0-9]");
+    expect(schema.properties.retrieval.additionalProperties).toBe(true);
+    expect(schema.properties.retrieval.properties.default_format_version.enum).toEqual([1, 2]);
   });
 });
 

@@ -7,8 +7,9 @@
     "version": { "enum": [1, 2] },
     "retrieval": {
       "type": "object",
+      "description": "Per-app retrieval defaults. Unknown fields are preserved by upgrades.",
       "properties": { "default_format_version": { "enum": [1, 2], "default": 1 } },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "category_vocabulary": {
       "type": "object",
