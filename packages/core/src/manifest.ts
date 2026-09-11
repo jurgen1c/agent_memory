@@ -26,6 +26,7 @@ export interface AgentManifest {
   };
   commands: AgentCommandDescription[];
   capabilities: {
+    retrieval_defaults: { format_version: 1 | 2; override_flag: "--format-version"; commands: string[] };
     contextual_workflows: true;
     retrieval_adoption: { enabled: true; command: "upgrade"; format_version: 2; canonical_writes: false };
     categories: { enabled: true; command: "categories list"; format_version: 2; facets: string[] };
@@ -88,13 +89,14 @@ export function buildAgentManifest(options: BuildAgentManifestOptions = {}): Age
       }
     },
     commands: buildAgentCommands(commandPrefix),
-    capabilities: buildWorkflowCapabilities(),
+    capabilities: buildWorkflowCapabilities(loaded.config.retrieval?.default_format_version ?? 1),
     workflow_summary: workflowSummary
   };
 }
 
-function buildWorkflowCapabilities(): AgentManifest["capabilities"] {
+function buildWorkflowCapabilities(formatVersion: 1 | 2): AgentManifest["capabilities"] {
   return {
+    retrieval_defaults: { format_version: formatVersion, override_flag: "--format-version", commands: ["query", "context", "show", "audit"] },
     contextual_workflows: true,
     retrieval_adoption: { enabled: true, command: "upgrade", format_version: 2, canonical_writes: false },
     categories: { enabled: true, command: "categories list", format_version: 2, facets: ["category", "tag", "system", "status"] },

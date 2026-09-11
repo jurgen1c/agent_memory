@@ -13,7 +13,7 @@ import {
 } from "./skills";
 import type { AgentMemoryConfig, RepoInfo } from "./types";
 import { inspectRepositoryWrapper, tryReadRepositoryWrapper } from "./wrapper";
-import { mergeYamlMissingValues, parseYaml } from "./yaml";
+import { mergeYamlMissingValues, parseYaml, setYamlTopLevelValue } from "./yaml";
 
 export interface UpgradeOptions {
   cwd?: string;
@@ -41,6 +41,7 @@ type DeprecatedAliasWarningMode = "applied" | "planned" | "deferred";
 const CONFIG_SCHEMA: ConfigSchema = {
   version: true,
   category_vocabulary: true,
+  retrieval: { default_format_version: true },
   memory_root: true,
   database_path: true,
   memory_key: true,
@@ -106,10 +107,10 @@ const AGENT_TARGETS = ["codex", "generic"] satisfies AgentTarget[];
 const MEMORY_SCAFFOLD_DIRS = ["claims", "graph", "indexes", "recipes", "plans", "profiles", "waivers"];
 
 export interface PlannedUpgradeWrite { path: string; content: string; mode?: number }
-interface InternalUpgradeOptions extends UpgradeOptions { pending?: PlannedUpgradeWrite[] }
+interface InternalUpgradeOptions extends UpgradeOptions { pending?: PlannedUpgradeWrite[]; defaultFormatVersion?: 1 | 2 }
 
 /** Render the ordinary upgrade without mutating any files. Used by adoption preflight. */
-export function prepareUpgrade(options: Omit<UpgradeOptions, "write">): { result: UpgradeResult; writes: PlannedUpgradeWrite[] } {
+export function prepareUpgrade(options: Omit<UpgradeOptions, "write"> & { defaultFormatVersion?: 1 | 2 }): { result: UpgradeResult; writes: PlannedUpgradeWrite[] } {
   const writes: PlannedUpgradeWrite[] = [];
   const result = executeUpgrade({ ...options, write: true, pending: writes });
   return { result, writes };
@@ -136,6 +137,7 @@ function executeUpgrade(options: InternalUpgradeOptions): UpgradeResult {
   const preservesUnknownFields = unknownConfigPaths.length > 0 && !options.force;
   const aliasWarningMode: DeprecatedAliasWarningMode = preservesUnknownFields ? "deferred" : options.write ? "applied" : "planned";
   const config = applyDeprecatedConfigAliases(structuredClone(loaded.config), parsedConfig, warnings, aliasWarningMode);
+  if (options.defaultFormatVersion !== undefined) config.retrieval = { default_format_version: options.defaultFormatVersion };
   preserveLegacySingleAgentSelection(repo.root, config, warnings);
 
   for (const unknownPath of unknownConfigPaths) {
@@ -313,9 +315,16 @@ function upgradeConfigFile(options: {
   const relativePath = "agent-memory.config.yaml";
 
   const renderedConfig = renderConfigTemplate(options.config);
-  const nextConfig = options.hasUnknownFields && !options.options.force
+  let nextConfig = options.hasUnknownFields && !options.options.force
     ? mergeYamlMissingValues(options.rawConfig, renderedConfig, deprecatedReplacementPaths(options.parsedConfig))
     : renderedConfig;
+  if (options.options.defaultFormatVersion !== undefined) {
+    const parsed = parseYaml(nextConfig) as Record<string, unknown>;
+    nextConfig = setYamlTopLevelValue(nextConfig, "retrieval", {
+      ...(isRecord(parsed.retrieval) ? parsed.retrieval : {}),
+      default_format_version: options.options.defaultFormatVersion
+    });
+  }
 
   if (normalizeTrailingNewline(options.rawConfig) === nextConfig) {
     options.actions.push({ path: relativePath, status: "skipped", detail: "already current" });

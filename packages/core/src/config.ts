@@ -9,6 +9,7 @@ import { parseYaml } from "./yaml";
 
 const DEFAULT_CONFIG: AgentMemoryConfig = {
   version: 1,
+  retrieval: { default_format_version: 1 },
   database_scope: "local",
   memory_root: "docs/agent-memory",
   database_path: ".agent-memory/memory.sqlite",
@@ -105,6 +106,10 @@ export function renderConfigTemplate(config: AgentMemoryConfig = defaultConfig()
   return `# Config schema version.
 version: ${config.version}${renderGlobalStorageFields(config)}${config.category_vocabulary === undefined ? "" : `\n\n# Repository-owned extensions to the built-in concern tags.\ncategory_vocabulary: ${JSON.stringify(config.category_vocabulary)}`}
 
+# Default CLI format for query, context, show and audit. Explicit --format-version overrides this.
+retrieval:
+  default_format_version: ${config.retrieval?.default_format_version ?? 1}
+
 # Canonical memory source directory. The file patterns below are relative to this path.
 memory_root: ${renderYamlScalar(config.memory_root)}
 
@@ -192,6 +197,14 @@ function resolveRepo(options: LoadConfigOptions): RepoInfo {
   return findRepoRoot(options.cwd);
 }
 
+function readRetrievalDefaults(value: unknown): { default_format_version: 1 | 2 } {
+  if (value === undefined) return { default_format_version: 1 };
+  if (!isRecord(value)) throw new ConfigError("Config field retrieval must be a mapping.");
+  const version = value.default_format_version === undefined ? 1 : value.default_format_version;
+  if (version !== 1 && version !== 2) throw new ConfigError("retrieval.default_format_version must be 1 or 2.");
+  return { default_format_version: version };
+}
+
 function normalizeConfig(value: unknown, repoRoot: string): AgentMemoryConfig {
   if (!isRecord(value)) {
     throw new ConfigError("Config root must be a YAML mapping.");
@@ -210,6 +223,7 @@ function normalizeConfig(value: unknown, repoRoot: string): AgentMemoryConfig {
   return {
     version,
     ...globalStorage,
+    retrieval: readRetrievalDefaults(value.retrieval),
     ...(value.category_vocabulary === undefined ? {} : { category_vocabulary: readCategoryVocabulary(value.category_vocabulary) }),
     memory_root: readString(value, "memory_root", DEFAULT_CONFIG.memory_root),
     database_path: readString(value, "database_path", DEFAULT_CONFIG.database_path),

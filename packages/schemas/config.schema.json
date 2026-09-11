@@ -5,6 +5,11 @@
   "required": ["version", "memory_root", "database_path", "claims", "graphs", "indexes", "recipes", "plans", "profiles", "waivers"],
   "properties": {
     "version": { "enum": [1, 2] },
+    "retrieval": {
+      "type": "object",
+      "properties": { "default_format_version": { "enum": [1, 2], "default": 1 } },
+      "additionalProperties": false
+    },
     "category_vocabulary": {
       "type": "object",
       "description": "Repository-owned concern extensions. Duplicate YAML keys are rejected; descriptions are limited to 512 UTF-8 bytes by config validation.",

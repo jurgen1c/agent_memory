@@ -592,8 +592,8 @@ bin/memory audit --git-diff --base origin/main
 `audit` exits with code `6` for error findings. Shared routes, shared symbols, and same-system claims with at least two shared `source_files` are strong overlap signals and require review. Shared source or related files are warnings, while tag-only overlap is informational. Any semantically accurate explicit graph relationship records that an overlap pair was reviewed; invalid `deprecated_by` references and unresolved active conflicts remain blocking. A recorded `last_verified_commit` must be a full immutable commit object ID that resolves to a commit, and audit warns when referenced source files changed afterward.
 
 Use `agent-memory audit --format-version 2 --json` for independent `structure`,
-`cache`, and per-claim `verificationMetadata`/`verificationCheck` states. Version 1
-remains the default with its existing JSON shape. Version 2 exits 6 for invalid
+`cache`, and per-claim `verificationMetadata`/`verificationCheck` states. Existing apps without a retrieval default retain version 1 and its JSON shape;
+new apps use v2. Explicit `--format-version` overrides the app setting. Version 2 exits 6 for invalid
 structure, unsupported/unavailable cache, unavailable checks, invalid references,
 or other audit errors. Missing/stale cache and absent verification metadata are
 advisory; they do not rewrite lifecycle, confidence, or recorded commit IDs.
@@ -745,11 +745,12 @@ npm publish --access public
 
 The workflow verifies that the release tag matches the package version, then tests, builds, dry-runs the package, and runs `npm publish --provenance --access public`. Configure npm Trusted Publishing for the `@jurgen1c/agent-memory-cli` package with GitHub user `jurgen1c`, repository `agent_memory`, workflow `publish.yml`, allowed action `npm publish`, and no environment.
 
-## Opt-in searchable retrieval
+## Searchable retrieval
 
 Use `query`, `context`, or `show` with `--format-version 2` for searchable authored
 Markdown sections, exact source/symbol/route evidence and byte-bounded output.
-Recompile the selected checkout to schema 2 first; v1 defaults and APIs remain
+Recompile the selected checkout to schema 2 first. New apps default to v2; existing
+apps retain v1 until migrated. V1 APIs and explicit format overrides remain
 available. See [production retrieval](docs/features/category-retrieval/production-retrieval.md)
 for flags, complete inspection, cache rollback and measured fixture limitations.
 
@@ -758,3 +759,22 @@ then `agent-memory query --format-version 2 --category security --json`. Repeate
 category/tag/system/status values use OR within facets and AND across them. Plain
 `security` remains an ordinary tag; category membership uses `concern:security`.
 See the [category vocabulary, budgets and rollback guide](docs/features/category-retrieval/production-retrieval.md#category-vocabulary-and-exact-facets-am-92).
+
+### Choose the retrieval default for an existing app
+
+Fresh `init` selects v2 for `query`, `context`, `show`, and `audit`, in both local
+and global storage modes. Existing apps retain v1 until explicitly migrated:
+
+```bash
+agent-memory upgrade --adopt-retrieval --format-version 2 --default-format-version 2 --json
+agent-memory upgrade --adopt-retrieval --format-version 2 --default-format-version 2 --write
+agent-memory validate
+agent-memory compile
+```
+
+Review the preview before applying and pin legacy JSON consumers with
+`--format-version 1`. This sets `retrieval.default_format_version: 2`, refreshes
+managed guidance, and leaves canonical claim content and verification history
+unchanged. Use the same flow with `--default-format-version 1` to roll back.
+Storage config `version: 2` is a separate setting. Claim curation remains a reviewed
+workflow; see [adoption](docs/features/category-retrieval/adoption.md).

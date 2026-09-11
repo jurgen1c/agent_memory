@@ -40,11 +40,14 @@ try {
   expectOutput(cli(["doctor"]), "Agent Memory doctor passed.", "global doctor");
 
   const context = JSON.parse(
-    cli(["context", "--task", "verify packaged global registry", "--json"])
+    cli(["context", "--format-version", "1", "--task", "verify packaged global registry", "--json"])
   );
   if (!isInside(globalHome, context.databasePath)) {
     fail(`Context used a database outside the temporary global home: ${context.databasePath}`);
   }
+
+  const defaultContext = JSON.parse(cli(["context", "--task", "verify packaged global registry", "--json"]));
+  if (defaultContext.schemaVersion !== 2) fail("Fresh global init did not select v2 retrieval by default.");
 
   const registryList = JSON.parse(cli(["registry", "list", "--json"]));
   if (registryList.memories?.[0]?.memory_key !== "packaged-global-smoke") {

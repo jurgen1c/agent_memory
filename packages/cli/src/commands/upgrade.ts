@@ -23,17 +23,22 @@ interface UpgradeCommandOptions {
   global: boolean;
   memoryKey?: string;
   adopt?: boolean;
+  defaultFormatVersion?: 1 | 2;
   formatVersion?: string;
 }
 
 export function runUpgradeCommand(args: string[], context: UpgradeCommandContext = {}): UpgradeCommandResult {
-  const versioned = args.some(arg => arg === "--adopt-retrieval" || arg.startsWith("--format-version"));
+  const versioned = args.some(arg => arg === "--adopt-retrieval" || arg.startsWith("--format-version") || arg.startsWith("--default-format-version"));
   try {
   const options = parseUpgradeArgs(args);
   if (options.adopt) {
-    const plan = planRetrievalAdoption({ cwd: context.cwd, force: options.force });
+    const plan = planRetrievalAdoption({ cwd: context.cwd, force: options.force, defaultFormatVersion: options.defaultFormatVersion });
     const result = options.write ? applyRetrievalAdoption(plan) : plan;
-    return { exitCode: 0, stdout: options.json ? JSON.stringify(result) : `${renderUpgradeResult(result)}\n\nAdoption: ${result.adoption.claims.length} claims; ${result.adoption.mode}; verification not_run.\nReview ${result.adoption.guidance.join(", ") || "packaged docs/features/category-retrieval/adoption.md"}.\nNext: agent-memory upgrade --adopt-retrieval --format-version 2 --write` };
+    const defaultFlag = options.defaultFormatVersion === undefined ? "" : ` --default-format-version ${options.defaultFormatVersion}`;
+    const next = options.write ? "agent-memory validate; then agent-memory compile, followed by representative retrieval probes"
+      : `agent-memory upgrade --adopt-retrieval --format-version 2${defaultFlag}${options.force ? " --force" : ""} --write`;
+    const defaults = result.adoption.defaultFormatVersion;
+    return { exitCode: 0, stdout: options.json ? JSON.stringify(result) : `${renderUpgradeResult(result, false)}\n\nAdoption: ${result.adoption.claims.length} claims; ${result.adoption.mode}; verification not_run.\nCLI default: ${defaults.before} -> ${defaults.after}. Canonical claims unchanged.\nReview ${result.adoption.guidance.join(", ") || "packaged docs/features/category-retrieval/adoption.md"}.\nNext: ${next}` };
   }
   if (options.global) {
     const result = migrateRepositoryToGlobal({
@@ -75,6 +80,13 @@ function parseUpgradeArgs(args: string[]): UpgradeCommandOptions {
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg === "--default-format-version" || arg.startsWith("--default-format-version=")) {
+      if (options.defaultFormatVersion !== undefined) throw usage("--default-format-version may appear only once.");
+      const value = arg.includes("=") ? arg.slice("--default-format-version=".length) : args[++index];
+      if (value !== "1" && value !== "2") throw usage("--default-format-version must be 1 or 2.");
+      options.defaultFormatVersion = Number(value) as 1 | 2;
+      continue;
+    }
     if (arg === "--adopt-retrieval") { if (options.adopt) throw usage("--adopt-retrieval may appear only once."); options.adopt = true; continue; }
     if (arg === "--format-version" || arg.startsWith("--format-version=")) {
       if (options.formatVersion !== undefined) throw usage("--format-version may appear only once.");
@@ -127,6 +139,7 @@ function parseUpgradeArgs(args: string[]): UpgradeCommandOptions {
     });
   }
 
+  if (options.defaultFormatVersion !== undefined && !options.adopt) throw usage("--default-format-version requires --adopt-retrieval --format-version 2.");
   if (options.adopt && options.global) throw usage("Run --global migration separately from --adopt-retrieval.", "INCOMPATIBLE_OPTIONS");
   if (options.adopt && options.formatVersion !== "2") throw usage("Adoption requires --format-version 2.", "FORMAT_VERSION_REQUIRED");
   if (options.formatVersion === "2" && !options.adopt) throw usage("upgrade --format-version 2 requires --adopt-retrieval.");
@@ -164,7 +177,7 @@ function renderGlobalMigrationResult(result: GlobalMigrationResult): string {
   return lines.join("\n");
 }
 
-function renderUpgradeResult(result: UpgradeResult): string {
+function renderUpgradeResult(result: UpgradeResult, includeNext = true): string {
   const lines = [
     result.write ? "Agent Memory upgrade applied." : "Agent Memory upgrade dry run.",
     "",
@@ -187,7 +200,7 @@ function renderUpgradeResult(result: UpgradeResult): string {
     lines.push(`  ${action.status.padEnd(13)} ${action.path}${detail}`);
   }
 
-  if (!result.write) {
+  if (!result.write && includeNext) {
     lines.push("", "Next:");
     lines.push("  agent-memory upgrade --write");
   }

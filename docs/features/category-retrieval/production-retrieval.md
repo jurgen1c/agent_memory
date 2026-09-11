@@ -1,7 +1,8 @@
 # Production searchable retrieval (AM-91)
 
-`query`, `context`, and `show` now accept explicit `--format-version 2`. V1 remains
-the default; `--format-version 1` accepts legacy options and returns legacy shapes.
+`query`, `context`, and `show` now accept explicit `--format-version 2`. New apps use v2 by default. Existing apps without `retrieval.default_format_version`
+retain v1 until explicitly migrated. `--format-version 1` accepts legacy options
+and returns legacy shapes; explicit format flags always override app defaults.
 The exported `queryClaimsV2`, `buildContextV2`, and `showClaimV2` return the AM-90
 `ContextOutputResult`, including bounded stdout and its exit code.
 
@@ -47,8 +48,8 @@ Canonical deletion after compilation returns `CACHE_STALE` first.
 No-match is successful with `NO_TASK_MATCH`; optional `--baseline` admits eligible
 critical claims only when there are no exact/prose hits. It never grants them task
 match status. Category/tag/system/status facets are available.
-Collection integration remains a subsequent ticket; collections
-report `not_requested`. Existing v1 collection commands and selectors are unchanged.
+V2 context integrates workflow collections as described below; v2 query keeps
+collections `not_requested`. Existing v1 collection APIs are unchanged.
 
 Compilation reconstructs schema 2 in a temporary database, checks the same complete
 canonical-content fingerprint captured before validation/loading, then atomically
@@ -199,3 +200,45 @@ The public `planRetrievalAdoption` API returns the read-only plan;
 and conflicting output paths fail before writes (exit 4). Late write failures
 restore prior files and newly created directories; rollback failures are reported.
 Unflagged upgrade and the v1 context API retain their existing result shapes.
+
+## Per-app defaults and migration
+
+New `init` writes the following in local and global storage modes:
+
+```yaml
+retrieval:
+  default_format_version: 2
+```
+
+This controls `query`, `context`, `show`, and `audit` CLI dispatch only. It is
+independent of config schema version, local/global storage, and SQLite schema.
+Existing configs with no setting use 1. Repeated init and ordinary upgrade retain
+that choice. Existing exported v1 core APIs keep their signatures and results.
+An explicit `--format-version 1` or `--format-version 2` always wins. Help and
+`agent-manifest --json` describe the setting; wrappers forward arguments unchanged.
+
+From each existing app, preview and review the default change before applying:
+
+```sh
+agent-memory upgrade --adopt-retrieval --format-version 2 --default-format-version 2 --json
+agent-memory upgrade --adopt-retrieval --format-version 2 --default-format-version 2 --write
+agent-memory validate
+agent-memory compile
+agent-memory context --task "your task" --json
+agent-memory audit --json
+```
+
+The preview includes before/after defaults, support actions, inventory fingerprints
+and caller compatibility advice. Pin scripts that parse legacy JSON with explicit
+`--format-version 1`, and test the app's representative queries. Applying updates
+only config and managed instructions/references through the existing preflight and
+rollback mechanism. It never runs consumer commands, recompiles automatically, or
+rewrites canonical claims. The old cache becomes stale after the config change;
+compile explicitly in this checkout. Other registry entries remain untouched.
+
+For rollback use `--default-format-version 1` through the same preview/write flow,
+then validate and compile. Custom instructions and unknown config fields retain
+the existing preservation policy. Changing the default does not turn ordinary tags
+into concern tags or invent evidence. Follow the adoption guide to inspect complete
+old claims and eligible source, review specific edits, and validate/recompile/probe
+after applying those edits. Missing category tags remain valid `uncategorized`.

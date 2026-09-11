@@ -45,7 +45,7 @@ const TOPICS: HelpTopic[] = [
       "agent-memory init --yes --wrapper --package-manager bun"
     ],
     agentNotes: [
-      "Fresh init defaults to global storage and the agent-memory command; follow it with agent-memory sync and agent-memory doctor. Use --local for version 1 local compatibility, --wrapper to add bin/memory in global mode, and --memory-key to override offline key derivation. Safe to run repeatedly. Existing files are skipped unless --force is passed; configured instruction files keep local content and refresh only the managed agent-memory section. Repeat --instructions-file for multiple agent instruction targets. Use --skill-location with exactly one --agent target."
+      "Fresh init defaults to global storage, retrieval format 2, and the agent-memory command; --local changes storage only. Existing configs without retrieval.default_format_version remain on format 1; follow it with agent-memory sync and agent-memory doctor. Use --local for config schema 1 with local storage, --wrapper to add bin/memory in global mode, and --memory-key to override offline key derivation. Safe to run repeatedly. Existing files are skipped unless --force is passed; configured instruction files keep local content and refresh only the managed agent-memory section. Repeat --instructions-file for multiple agent instruction targets. Use --skill-location with exactly one --agent target."
     ],
     phase: "Phase 2"
   },
@@ -291,7 +291,7 @@ const TOPICS: HelpTopic[] = [
     agentNotes: [
       "Returns exit code 6 for strong unreviewed overlap or invalid stale markers; weak file overlap and tag-only overlap are advisory.",
       "Use --strict to retain legacy blocking behavior for every overlap and related-claim review finding.",
-      "Use --format-version 2 for separate structure, cache, verification metadata and Git check states. Git verification never executes stored commands or establishes claim truth."
+      "Audit follows retrieval.default_format_version (legacy apps default to 1). Explicit --format-version overrides it. Use --format-version 2 for separate structure, cache, verification metadata and Git check states. Git verification never executes stored commands or establishes claim truth."
     ],
     phase: "Phase 9"
   },
@@ -329,7 +329,8 @@ const TOPICS: HelpTopic[] = [
       "agent-memory upgrade --global --write --memory-key org-repository",
       "agent-memory upgrade --json",
       "agent-memory upgrade --adopt-retrieval --format-version 2 --json",
-      "agent-memory upgrade --adopt-retrieval --format-version 2 --write"
+      "agent-memory upgrade --adopt-retrieval --format-version 2 --write",
+      "agent-memory upgrade --adopt-retrieval --format-version 2 --default-format-version 2 --write"
     ],
     examples: [
       "agent-memory upgrade",
@@ -338,7 +339,7 @@ const TOPICS: HelpTopic[] = [
       "agent-memory upgrade --global --write --memory-key org-repository"
     ],
     agentNotes: [
-      "Adoption requires --adopt-retrieval --format-version 2. Dry-run inventories only this checkout with fingerprints and advisory review signals. --write applies support/config and managed guidance only; canonical memory is never rewritten. --global is incompatible: migrate separately. Stale adoption inputs exit 5; invalid canonical/safe-path preflight exits 4 with no writes. Custom guidance is preserved unless forced. See packaged docs/features/category-retrieval/adoption.md for reviewed semantic changes and rollback.",
+      "Adoption requires --adopt-retrieval --format-version 2. Add --default-format-version 2 to preview/apply the per-app CLI default, or 1 to restore legacy defaults. Recompile after applying. Without this option the current default is preserved. Dry-run inventories only this checkout with fingerprints and advisory review signals. --write applies support/config and managed guidance only; canonical memory is never rewritten. --global is incompatible: migrate separately. Stale adoption inputs exit 5; invalid canonical/safe-path preflight exits 4 with no writes. Custom guidance is preserved unless forced. See packaged docs/features/category-retrieval/adoption.md for reviewed semantic changes and rollback.",
       "Dry-run by default. Normal upgrade preserves config values and unknown fields while adding defaults. Use --global first to preview local-to-global migration, then repeat with --write: it writes version 2, memory_key, and global scope transactionally; refreshes managed instructions, generated skills, and generated hooks; and preserves bin/memory plus the local SQLite cache.",
       "After a written migration, run agent-memory sync and agent-memory doctor. Remove a generated wrapper only when the written migration output explicitly marks cleanup as safe; custom wrappers remain preserved for manual review. Preserve the local cache unless you make a separate backup or retention decision. --memory-key overrides key derivation but does not bypass safe repository identity validation. Use --force only to replace eligible custom skill or hook files."
     ],
@@ -425,7 +426,7 @@ export function renderHelp(topicName?: string): string {
       });
     }
 
-    const v2 = ["query", "context", "show"].includes(topicName) ? "\n\nV2 retrieval (explicit opt-in):\n  --format-version 2 --json --budget small|medium|full --max-bytes N\n  query/context: --task TEXT, --changed-files PATH..., --symbol VALUE, --route VALUE\n  Repeated --category/--tag/--system/--status filters use OR within each facet, AND across facets.\n  --limit N caps optional roots; --depth 0..10 caps optional graph expansion only.\n  --baseline explicitly enables zero-match fallback. --include-inferred adds optional inferred edges.\n  Tasks use Unicode NFKC lowercase prefix OR tokens (maximum 64 KiB).\n  Budgets are complete UTF-8 envelope bytes: 4096/16384/65536; max-bytes accepts 512..16777216.\n  show v2 returns the complete body/metadata/sections or BUDGET_TOO_SMALL.\n  Check taskMatches, completeness, reasons, warnings and omitted counts.\n  CACHE_STALE or CACHE_SCHEMA_UNSUPPORTED requires compile in the selected checkout.\n  Use categories list to discover concern tags; category-only browsing needs no task. Unknown categories/systems/statuses are errors; unknown ordinary tags match nothing. Default statuses: current, proposed, needs_review. Required dependencies may cross all facets with outsideFilters. context also accepts --recipe ID, --plan ID --stage ID, --profile ALIAS and --profile-trait ID. Existing selectors/eligibility apply; complete recipe and plan-stage requirements enter the same closure. Collections report empty/no_match/matched/not_requested and totalEligible/matched before byte packing. Query collections are not_requested. All command suggestions are suggested_not_run." : "";
+    const v2 = ["query", "context", "show"].includes(topicName) ? "\n\nRetrieval defaults: new apps use v2; existing apps without retrieval.default_format_version stay v1. Explicit --format-version overrides the per-app setting for query/context/show/audit.\nV2 retrieval:\n  --format-version 2 --json --budget small|medium|full --max-bytes N\n  query/context: --task TEXT, --changed-files PATH..., --symbol VALUE, --route VALUE\n  Repeated --category/--tag/--system/--status filters use OR within each facet, AND across facets.\n  --limit N caps optional roots; --depth 0..10 caps optional graph expansion only.\n  --baseline explicitly enables zero-match fallback. --include-inferred adds optional inferred edges.\n  Tasks use Unicode NFKC lowercase prefix OR tokens (maximum 64 KiB).\n  Budgets are complete UTF-8 envelope bytes: 4096/16384/65536; max-bytes accepts 512..16777216.\n  show v2 returns the complete body/metadata/sections or BUDGET_TOO_SMALL.\n  Check taskMatches, completeness, reasons, warnings and omitted counts.\n  CACHE_STALE or CACHE_SCHEMA_UNSUPPORTED requires compile in the selected checkout.\n  Use categories list to discover concern tags; category-only browsing needs no task. Unknown categories/systems/statuses are errors; unknown ordinary tags match nothing. Default statuses: current, proposed, needs_review. Required dependencies may cross all facets with outsideFilters. context also accepts --recipe ID, --plan ID --stage ID, --profile ALIAS and --profile-trait ID. Existing selectors/eligibility apply; complete recipe and plan-stage requirements enter the same closure. Collections report empty/no_match/matched/not_requested and totalEligible/matched before byte packing. Query collections are not_requested. All command suggestions are suggested_not_run." : "";
     return renderTopic(topic) + v2;
   }
 

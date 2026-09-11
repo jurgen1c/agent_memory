@@ -18,6 +18,8 @@ export function verifyAdoption(binary, temporaryRoot, globalHome) {
     run("git", ["init", "--quiet"]);
     cli(["init", "--yes", ...(mode === "local" ? ["--local"] : ["--memory-key", "adoption-selected"])]);
     const config = fs.readFileSync(path.join(cwd, "agent-memory.config.yaml"), "utf8");
+    // Simulate an app initialized by the older CLI: no per-app format setting.
+    fs.writeFileSync(path.join(cwd, "agent-memory.config.yaml"), config.replace(/retrieval:\n  default_format_version: [12]\n/, ""));
     const memoryRoot = /memory_root: (.+)/.exec(config)[1].trim();
     const write = (relative, content) => { const file = path.join(cwd, relative); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, content); };
     const canonical = `${memoryRoot}/claims/smoke.retry.md`;
@@ -32,12 +34,16 @@ export function verifyAdoption(binary, temporaryRoot, globalHome) {
     const plan = json(["upgrade", "--adopt-retrieval", "--format-version", "2"]);
     assert.deepEqual(plan, json(["upgrade", "--adopt-retrieval", "--format-version", "2"]));
     assert.deepEqual(snapshot(cwd), beforeFiles); assert.deepEqual(snapshot(globalHome), globalBefore);
+    assert.deepEqual(plan.adoption.defaultFormatVersion, { before: 1, after: 1 });
+    const migration = json(["upgrade", "--adopt-retrieval", "--format-version", "2", "--default-format-version", "2"]);
+    assert.deepEqual(migration.adoption.defaultFormatVersion, { before: 1, after: 2 });
+    assert.deepEqual(snapshot(cwd), beforeFiles); assert.deepEqual(snapshot(globalHome), globalBefore);
     assert.equal(plan.adoption.mode, mode); assert.equal(plan.adoption.claims.length, 1);
     assert.deepEqual(plan.adoption.claims[0].signals.map(signal => signal.code).sort(), ["GENERIC_SUMMARY", "ID_ONLY_TAGS", "UNCATEGORIZED", "VERIFICATION_METADATA_MISSING"].sort());
-    cli(["upgrade", "--adopt-retrieval", "--format-version", "2", "--write"]);
+    cli(["upgrade", "--adopt-retrieval", "--format-version", "2", "--default-format-version", "2", "--write"]);
     assert.equal(fs.readFileSync(path.join(cwd, canonical), "utf8"), legacy);
     assert.deepEqual(snapshot(globalHome), globalBefore);
-    const supportAfter = snapshot(cwd); cli(["upgrade", "--adopt-retrieval", "--format-version", "2", "--write"]); assert.deepEqual(snapshot(cwd), supportAfter);
+    const supportAfter = snapshot(cwd); cli(["upgrade", "--adopt-retrieval", "--format-version", "2", "--default-format-version", "2", "--write"]); assert.deepEqual(snapshot(cwd), supportAfter);
     const guidance = fs.readFileSync(path.join(cwd, plan.adoption.guidance[0]), "utf8");
     assert.match(guidance, /Propose a concrete Git diff/);
     // Follow the installed workflow: complete body + eligible source inspection, reviewed explicit diff, then probes.
@@ -52,7 +58,9 @@ export function verifyAdoption(binary, temporaryRoot, globalHome) {
     const diff = run("git", ["diff", "--", canonical]); assert.match(diff, /concern:security/); assert.match(diff, /src\/retry.mjs/);
     cli(["validate"]); cli(["compile"]);
     const afterCategory = json(["context", "--format-version", "2", "--category", "security"]);
-    const afterTask = json(["context", "--format-version", "2", "--task", "owner retry"]);
+    const afterTask = json(["context", "--task", "owner retry"]);
+    assert.equal(afterTask.schemaVersion, 2);
+    assert.equal(json(["context", "--format-version", "1", "--task", "owner retry"]).schemaVersion, undefined);
     const afterFile = json(["context", "--format-version", "2", "--changed-files", "src/retry.mjs"]);
     for (const output of [afterCategory, afterTask, afterFile]) { assert.equal(output.claims[0].id, "smoke.retry"); assert.equal(output.completeness, "complete"); assert(output.commands.every(command => command.state === "suggested_not_run")); }
     assert.equal(afterFile.claims[0].evidence.tier, 1);
