@@ -728,3 +728,9 @@ Markdown sections, exact source/symbol/route evidence and byte-bounded output.
 Recompile the selected checkout to schema 2 first; v1 defaults and APIs remain
 available. See [production retrieval](docs/features/category-retrieval/production-retrieval.md)
 for flags, complete inspection, cache rollback and measured fixture limitations.
+
+Browse cross-system concerns with `agent-memory categories list --counts --json`,
+then `agent-memory query --format-version 2 --category security --json`. Repeated
+category/tag/system/status values use OR within facets and AND across them. Plain
+`security` remains an ordinary tag; category membership uses `concern:security`.
+See the [category vocabulary, budgets and rollback guide](docs/features/category-retrieval/production-retrieval.md#category-vocabulary-and-exact-facets-am-92).

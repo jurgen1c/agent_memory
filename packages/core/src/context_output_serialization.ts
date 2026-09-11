@@ -12,6 +12,10 @@ export function resolveContextOutputCap(request: Pick<ContextOutputRequest, "bud
 
 /** Compact JSON and one LF; the decimal width of usedBytes participates in accounting. */
 export function serializeContextOutput(model: ContextOutputModel): string {
+  return serializeBudgetedOutput(model);
+}
+
+export function serializeBudgetedOutput<T extends { budget: { usedBytes: number } }>(model: T): string {
   model.budget.usedBytes = 0;
   for (;;) {
     const output = `${JSON.stringify(model)}\n`;
@@ -34,7 +38,7 @@ export function boundContextDiagnostics(message: string): string {
   return result;
 }
 
-export function contextOutputError(code: ContextOutputErrorCode, options: { invalidCap?: boolean; message?: string; maxBytes?: number; stderr?: string } = {}): ContextOutputResult {
+export function contextOutputError(code: ContextOutputErrorCode, options: { invalidCap?: boolean; message?: string; maxBytes?: number; stderr?: string } = {}): Exclude<ContextOutputResult, { exitCode: 0 }> {
   const exitCode = code === "BUDGET_TOO_SMALL" ? (options.invalidCap ? 2 : 7)
     : ["CLAIM_NOT_FOUND", "CACHE_MISSING"].includes(code) ? 3
     : code === "VALIDATION_FAILED" ? 4

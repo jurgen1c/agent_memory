@@ -1,3 +1,4 @@
+import { categoryVocabulary, isCategorySlug } from "./category_vocabulary";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveContainedPath } from "@jurgen1c/agent-core/repository";
@@ -165,6 +166,20 @@ export function validateRepository(options: ValidateRepositoryOptions = {}): Val
   const profileFiles = scoped ? selectChangedFiles(allProfileFiles, changedFiles, repoRoot) : allProfileFiles;
 
   const claims = loadClaims(pathContext, memoryRoot, claimFiles, loaded.config.validation, loaded.config.claim_sources, issues);
+  const vocabulary = categoryVocabulary(loaded.config.category_vocabulary);
+  for (const claim of claims) {
+    if (Object.hasOwn(claim.raw, "categories")) addError(issues, "claim.categories.unsupported", "Use concern:<slug> tags; a parallel categories field is not supported.", claim.relativePath, claim.id);
+    const seen = new Set<string>();
+    for (const tag of claim.tags) {
+      if (!tag.trim()) addError(issues, "claim.tags.empty", "Tags must be nonempty.", claim.relativePath, claim.id);
+      if (seen.has(tag)) addError(issues, "claim.tags.duplicate", "Tags must be unique.", claim.relativePath, claim.id);
+      seen.add(tag);
+      if (tag.startsWith("concern:")) {
+        const slug = tag.slice(8);
+        if (!isCategorySlug(slug) || slug === "uncategorized" || !Object.hasOwn(vocabulary, slug)) addError(issues, "claim.tags.unknown_concern", "Unknown or malformed concern tag. Run agent-memory categories list; extend category_vocabulary before authoring custom concerns.", claim.relativePath, claim.id);
+      }
+    }
+  }
   const recipes = loadRecipes(memoryRoot, recipeFiles, issues);
   const plans = loadPlans(memoryRoot, planFiles, pathContext, issues);
   const profiles = loadProfiles(memoryRoot, profileFiles, issues);

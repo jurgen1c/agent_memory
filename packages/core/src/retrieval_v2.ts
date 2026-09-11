@@ -1,3 +1,4 @@
+import { validateRetrievalFilters } from "./retrieval_filters";
 import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
 import { evaluateClaimSourcePath } from "./claim_sources";
 import { contextClaimOutsideFilters, normalizeContextOutputFilters, packContextOutput } from "./context_output";
@@ -29,13 +30,13 @@ async function retrieve(options: QueryClaimsV2Options): Promise<ContextOutputRes
   try {
     validateInput(options);
     const cache = await readRetrievalCache(options.cwd);
-    const filters = validateFilters(options.filters, cache);
+    const filters = validateRetrievalFilters(options.filters, cache);
     const requestedFiles = normalizeChangedFiles([...(options.changedFiles ?? []), ...(options.gitDiff ? readGitDiffFiles(cache.loaded.repo.root) : [])], cache.loaded.repo.root);
     if (requestedFiles.some(file => file === ".." || file.startsWith("../"))) throw new RetrievalV2Error("INVALID_INPUT", "Changed files must be inside this repository.");
     const files = [...new Set(requestedFiles)].filter(file => evaluateClaimSourcePath(file, cache.loaded.config.claim_sources, cache.loaded.repo.root).eligible).sort(codePointCompare);
     const task = options.task ?? options.query;
     const browse = !task?.trim() && !requestedFiles.length && !options.gitDiff && !options.symbols?.length && !options.routes?.length;
-    if (browse && !Object.values(options.filters ?? {}).some(values => values?.length)) throw new RetrievalV2Error("INPUT_REQUIRED", "Supply task text, exact files/symbols/routes, or a system/status filter.");
+    if (browse && !Object.values(options.filters ?? {}).some(values => values?.length)) throw new RetrievalV2Error("INPUT_REQUIRED", "Supply task text, exact files/symbols/routes, or a category/tag/system/status filter.");
     let roots = rankClaimsV2(cache, { task, files, symbols: options.symbols ?? [], routes: options.routes ?? [], filters, browse });
     const taskMatchCount = new Set(roots.filter(root => ["TEXT_MATCH", "EXACT_SOURCE", "EXACT_SYMBOL", "EXACT_ROUTE"].includes(root.reason)).map(root => root.claimId)).size;
     if (options.baseline && !browse && taskMatchCount === 0) {
@@ -84,15 +85,6 @@ function validateInput(options: QueryClaimsV2Options): void {
   if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit <= 0)) throw new RetrievalV2Error("INVALID_INPUT", "limit must be a positive integer.");
   if (options.depth !== undefined && (!Number.isInteger(options.depth) || options.depth < 0 || options.depth > 10)) throw new RetrievalV2Error("INVALID_INPUT", "depth must be an integer from 0 through 10; required closure is never capped.");
   for (const values of [options.changedFiles, options.symbols, options.routes, ...Object.values(options.filters ?? {})]) if (values !== undefined && (!Array.isArray(values) || values.some(value => typeof value !== "string" || !value.trim()))) throw new RetrievalV2Error("INVALID_INPUT", "Filters and associations must be lists of nonempty strings.");
-}
-
-function validateFilters(filters: ContextOutputFilters = {}, cache: RetrievalCache): ContextOutputFilters {
-  if (filters.categories?.length || filters.tags?.length) throw new RetrievalV2Error("INVALID_INPUT", "Category/tag facets require the category vocabulary extension.");
-  const systems = new Set(cache.claims.map(claim => claim.system));
-  const statuses = ["current", "proposed", "needs_review", "stale", "deprecated", "experimental", "needs_verification", "rejected"];
-  if (filters.systems?.some(system => !systems.has(system))) throw new RetrievalV2Error("UNKNOWN_SYSTEM", "Unknown system in the selected corpus.");
-  if (filters.statuses?.some(status => !statuses.includes(status))) throw new RetrievalV2Error("UNKNOWN_STATUS", `Expected status: ${statuses.join(", ")}.`);
-  return normalizeContextOutputFilters(filters);
 }
 
 function expandOptionalRoots(cache: RetrievalCache, roots: ContextOutputRoot[], depth: number, inferred: boolean, filters: ContextOutputFilters, limit?: number, requiredIds: string[] = []): ContextOutputRoot[] {

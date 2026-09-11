@@ -74,6 +74,14 @@ const TOPICS: HelpTopic[] = [
     phase: "Phase 4"
   },
   {
+    name: "categories",
+    phase: "AM-92",
+    purpose: "List repository concern vocabulary and optional eligible claim counts (v2).",
+    usage: ["agent-memory categories list [--counts] [--system SYSTEM] [--status STATUS] [--budget small|medium|full] [--max-bytes N] [--json]"],
+    examples: ["agent-memory categories list --counts --json", "agent-memory query --format-version 2 --category security --json"],
+    agentNotes: ["Includes zero-count categories and virtual uncategorized. Repeated system/status values are OR; facets are AND. Default statuses: current, proposed, needs_review. Complete vocabulary and filters must fit the UTF-8 byte cap; otherwise BUDGET_TOO_SMALL. Counts do not expand dependencies."]
+  },
+  {
     name: "query",
     purpose: "Search compiled memory by text and metadata.",
     usage: [
@@ -412,7 +420,7 @@ export function renderHelp(topicName?: string): string {
       });
     }
 
-    const v2 = ["query", "context", "show"].includes(topicName) ? "\n\nV2 retrieval (explicit opt-in):\n  --format-version 2 --json --budget small|medium|full --max-bytes N\n  query/context: --task TEXT, --changed-files PATH..., --symbol VALUE, --route VALUE\n  Repeated --system/--status filters use OR within each facet, AND across facets.\n  --limit N caps optional roots; --depth 0..10 caps optional graph expansion only.\n  --baseline explicitly enables zero-match fallback. --include-inferred adds optional inferred edges.\n  Tasks use Unicode NFKC lowercase prefix OR tokens (maximum 64 KiB).\n  Budgets are complete UTF-8 envelope bytes: 4096/16384/65536; max-bytes accepts 512..16777216.\n  show v2 returns the complete body/metadata/sections or BUDGET_TOO_SMALL.\n  Check taskMatches, completeness, reasons, warnings and omitted counts.\n  CACHE_STALE or CACHE_SCHEMA_UNSUPPORTED requires compile in the selected checkout.\n  Category/tag vocabulary and collection selectors are separate extensions." : "";
+    const v2 = ["query", "context", "show"].includes(topicName) ? "\n\nV2 retrieval (explicit opt-in):\n  --format-version 2 --json --budget small|medium|full --max-bytes N\n  query/context: --task TEXT, --changed-files PATH..., --symbol VALUE, --route VALUE\n  Repeated --category/--tag/--system/--status filters use OR within each facet, AND across facets.\n  --limit N caps optional roots; --depth 0..10 caps optional graph expansion only.\n  --baseline explicitly enables zero-match fallback. --include-inferred adds optional inferred edges.\n  Tasks use Unicode NFKC lowercase prefix OR tokens (maximum 64 KiB).\n  Budgets are complete UTF-8 envelope bytes: 4096/16384/65536; max-bytes accepts 512..16777216.\n  show v2 returns the complete body/metadata/sections or BUDGET_TOO_SMALL.\n  Check taskMatches, completeness, reasons, warnings and omitted counts.\n  CACHE_STALE or CACHE_SCHEMA_UNSUPPORTED requires compile in the selected checkout.\n  Use categories list to discover concern tags; category-only browsing needs no task. Unknown categories/systems/statuses are errors; unknown ordinary tags match nothing. Default statuses: current, proposed, needs_review. Required dependencies may cross all facets with outsideFilters. Collection selectors remain a separate extension." : "";
     return renderTopic(topic) + v2;
   }
 
@@ -431,6 +439,7 @@ export function renderHelp(topicName?: string): string {
     "  new                  Create a safe claim or recipe draft.",
     "  validate             Validate canonical memory files.",
     "  compile              Build the configured SQLite memory cache.",
+    "  categories           List concern vocabulary and optional eligible counts (v2).",
     "  query                Search compiled claims.",
     "  show                 Show one compiled claim.",
     "  system               Summarize compiled memory for one system.",

@@ -724,6 +724,8 @@ function coverageAndValidationReference(): string {
   return `${generatedReferenceHeader("repo-memory/coverage-and-validation.md")}
 # Coverage And Validation
 
+Discover concern categories with \`categories list --counts --json\`. Browse with \`query --format-version 2 --category security --json\`, or compose repeated category/tag/system/status facets (OR within, AND across). Claims use reviewed \`concern:<slug>\` tags; plain tags and profile categories are independent. Missing concern tags remain uncategorized. Inspect required outsideFilters and incomplete context; never execute stored suggestions as part of retrieval. Recompile after vocabulary edits.
+
 Run \`validate\` before finishing memory changes. Run \`compile\` and \`doctor\` when retrieval behavior or generated SQLite freshness matters.
 
 Use \`coverage --git-diff\` for non-trivial code changes. If watched files changed without memory updates, either update the relevant claim, index, recipe, or graph, or add a time-boxed waiver with a clear reason.
