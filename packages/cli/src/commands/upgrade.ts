@@ -1,3 +1,4 @@
+import { planRetrievalAdoption, applyRetrievalAdoption } from "../../../core/src/retrieval_adoption";
 import { AgentMemoryError } from "../../../core/src/errors";
 import {
   migrateRepositoryToGlobal,
@@ -21,10 +22,19 @@ interface UpgradeCommandOptions {
   json: boolean;
   global: boolean;
   memoryKey?: string;
+  adopt?: boolean;
+  formatVersion?: string;
 }
 
 export function runUpgradeCommand(args: string[], context: UpgradeCommandContext = {}): UpgradeCommandResult {
+  const versioned = args.some(arg => arg === "--adopt-retrieval" || arg.startsWith("--format-version"));
+  try {
   const options = parseUpgradeArgs(args);
+  if (options.adopt) {
+    const plan = planRetrievalAdoption({ cwd: context.cwd, force: options.force });
+    const result = options.write ? applyRetrievalAdoption(plan) : plan;
+    return { exitCode: 0, stdout: options.json ? JSON.stringify(result) : `${renderUpgradeResult(result)}\n\nAdoption: ${result.adoption.claims.length} claims; ${result.adoption.mode}; verification not_run.\nReview ${result.adoption.guidance.join(", ") || "packaged docs/features/category-retrieval/adoption.md"}.\nNext: agent-memory upgrade --adopt-retrieval --format-version 2 --write` };
+  }
   if (options.global) {
     const result = migrateRepositoryToGlobal({
       cwd: context.cwd,
@@ -48,6 +58,11 @@ export function runUpgradeCommand(args: string[], context: UpgradeCommandContext
     exitCode: 0,
     stdout: options.json ? JSON.stringify(result, null, 2) : renderUpgradeResult(result)
   };
+  } catch (error) {
+    if (!versioned) throw error;
+    const typed = error instanceof AgentMemoryError ? error : new AgentMemoryError(String(error), { code: "VALIDATION_FAILED", exitCode: 4 });
+    return { exitCode: typed.code === "AGENT_MEMORY_ERROR" ? 2 : typed.exitCode, stdout: JSON.stringify({ schemaVersion: 2, error: { code: typed.code === "AGENT_MEMORY_ERROR" ? "INVALID_INPUT" : typed.code, message: typed.message, ...(typed.details.length ? { details: typed.details } : {}) } }) };
+  }
 }
 
 function parseUpgradeArgs(args: string[]): UpgradeCommandOptions {
@@ -60,6 +75,13 @@ function parseUpgradeArgs(args: string[]): UpgradeCommandOptions {
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg === "--adopt-retrieval") { if (options.adopt) throw usage("--adopt-retrieval may appear only once."); options.adopt = true; continue; }
+    if (arg === "--format-version" || arg.startsWith("--format-version=")) {
+      if (options.formatVersion !== undefined) throw usage("--format-version may appear only once.");
+      options.formatVersion = arg.includes("=") ? arg.slice(17) : args[++index];
+      if (!["1", "2"].includes(options.formatVersion ?? "")) throw usage("Supported format versions are 1 and 2.");
+      continue;
+    }
     if (arg === "--write") {
       options.write = true;
       continue;
@@ -105,6 +127,9 @@ function parseUpgradeArgs(args: string[]): UpgradeCommandOptions {
     });
   }
 
+  if (options.adopt && options.global) throw usage("Run --global migration separately from --adopt-retrieval.", "INCOMPATIBLE_OPTIONS");
+  if (options.adopt && options.formatVersion !== "2") throw usage("Adoption requires --format-version 2.", "FORMAT_VERSION_REQUIRED");
+  if (options.formatVersion === "2" && !options.adopt) throw usage("upgrade --format-version 2 requires --adopt-retrieval.");
   if (options.memoryKey !== undefined && !options.global) {
     throw new AgentMemoryError("--memory-key requires --global.", {
       details: ["Use `agent-memory upgrade --global --memory-key <key>`."]
@@ -169,3 +194,5 @@ function renderUpgradeResult(result: UpgradeResult): string {
 
   return lines.join("\n");
 }
+
+function usage(message: string, code = "INVALID_INPUT"): AgentMemoryError { return new AgentMemoryError(message, { code, exitCode: 2 }); }

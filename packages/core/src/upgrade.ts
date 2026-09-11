@@ -105,7 +105,26 @@ const DEPRECATED_CONFIG_FIELDS = new Map<string, string>([
 const AGENT_TARGETS = ["codex", "generic"] satisfies AgentTarget[];
 const MEMORY_SCAFFOLD_DIRS = ["claims", "graph", "indexes", "recipes", "plans", "profiles", "waivers"];
 
-export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
+export interface PlannedUpgradeWrite { path: string; content: string; mode?: number }
+interface InternalUpgradeOptions extends UpgradeOptions { pending?: PlannedUpgradeWrite[] }
+
+/** Render the ordinary upgrade without mutating any files. Used by adoption preflight. */
+export function prepareUpgrade(options: Omit<UpgradeOptions, "write">): { result: UpgradeResult; writes: PlannedUpgradeWrite[] } {
+  const writes: PlannedUpgradeWrite[] = [];
+  const result = executeUpgrade({ ...options, write: true, pending: writes });
+  return { result, writes };
+}
+
+export function upgradeRepository(options: UpgradeOptions): UpgradeResult { return executeUpgrade(options); }
+
+function writeUpgradeFile(options: InternalUpgradeOptions, target: string, content: string, mode?: number): void {
+  if (options.pending) { options.pending.push({ path: target, content, mode }); return; }
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, content);
+  if (mode !== undefined) fs.chmodSync(target, mode);
+}
+
+function executeUpgrade(options: InternalUpgradeOptions): UpgradeResult {
   const repo = findRepoRoot(options.cwd);
   const actions: UpgradeAction[] = [];
   const warnings = [...repo.warnings];
@@ -153,7 +172,7 @@ export function upgradeRepository(options: UpgradeOptions): UpgradeResult {
 function upgradeMemoryScaffold(
   repoRoot: string,
   config: AgentMemoryConfig,
-  options: UpgradeOptions,
+  options: InternalUpgradeOptions,
   actions: UpgradeAction[],
   warnings: string[]
 ): void {
@@ -180,8 +199,7 @@ function upgradeMemoryScaffold(
     }
 
     if (options.write) {
-      fs.mkdirSync(directoryPath, { recursive: true });
-      fs.writeFileSync(absolutePath, "");
+      writeUpgradeFile(options, absolutePath, "");
       actions.push({ path: displayPath, status: "created", detail: "scaffolded memory directory" });
       continue;
     }
@@ -213,7 +231,7 @@ function tryResolveMemoryScaffoldPath(
 function upgradeMemoryWrapper(
   repoRoot: string,
   config: AgentMemoryConfig,
-  options: UpgradeOptions,
+  options: InternalUpgradeOptions,
   actions: UpgradeAction[],
   warnings: string[]
 ): "agent-memory" | "bin/memory" {
@@ -247,7 +265,8 @@ function upgradeMemoryWrapper(
   if (existing === next) {
     if (!isExecutable(absolutePath)) {
       if (options.write) {
-        fs.chmodSync(absolutePath, 0o755);
+        if (options.pending) options.pending.push({ path: absolutePath, content: existing!, mode: 0o755 });
+        else fs.chmodSync(absolutePath, 0o755);
         actions.push({ path: relativePath, status: "updated", detail: "made wrapper executable" });
         return "bin/memory";
       }
@@ -261,9 +280,7 @@ function upgradeMemoryWrapper(
   }
 
   if (options.write) {
-    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-    fs.writeFileSync(absolutePath, next);
-    fs.chmodSync(absolutePath, 0o755);
+    writeUpgradeFile(options, absolutePath, next, 0o755);
     actions.push({
       path: relativePath,
       status: existing === null ? "created" : "updated",
@@ -290,7 +307,7 @@ function upgradeConfigFile(options: {
   parsedConfig: unknown;
   config: AgentMemoryConfig;
   hasUnknownFields: boolean;
-  options: UpgradeOptions;
+  options: InternalUpgradeOptions;
   actions: UpgradeAction[];
 }): void {
   const relativePath = "agent-memory.config.yaml";
@@ -306,7 +323,7 @@ function upgradeConfigFile(options: {
   }
 
   if (options.options.write) {
-    fs.writeFileSync(path.join(options.repoRoot, relativePath), nextConfig);
+    writeUpgradeFile(options.options, path.join(options.repoRoot, relativePath), nextConfig);
     options.actions.push({
       path: relativePath,
       status: "updated",
@@ -349,7 +366,7 @@ function upgradeAgentInstructionsFile(
   repoRoot: string,
   config: AgentMemoryConfig,
   commandPrefix: "agent-memory" | "bin/memory",
-  options: UpgradeOptions,
+  options: InternalUpgradeOptions,
   actions: UpgradeAction[],
   warnings: string[]
 ): void {
@@ -363,7 +380,7 @@ function upgradeOneAgentInstructionsFile(
   configuredPath: string,
   config: AgentMemoryConfig,
   commandPrefix: "agent-memory" | "bin/memory",
-  options: UpgradeOptions,
+  options: InternalUpgradeOptions,
   actions: UpgradeAction[],
   warnings: string[]
 ): void {
@@ -398,8 +415,7 @@ function upgradeOneAgentInstructionsFile(
   }
 
   if (options.write) {
-    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-    fs.writeFileSync(absolutePath, update.content);
+    writeUpgradeFile(options, absolutePath, update.content);
     actions.push({ path: relativePath, status: update.status, detail: update.detail });
     return;
   }
@@ -411,7 +427,7 @@ function upgradeSkillFiles(
   repoRoot: string,
   config: AgentMemoryConfig,
   commandPrefix: "agent-memory" | "bin/memory",
-  options: UpgradeOptions,
+  options: InternalUpgradeOptions,
   actions: UpgradeAction[],
   warnings: string[]
 ): void {
@@ -448,8 +464,7 @@ function upgradeSkillFiles(
     }
 
     if (options.write) {
-      fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-      fs.writeFileSync(absolutePath, next);
+      writeUpgradeFile(options, absolutePath, next);
       actions.push({ path: relativePath, status: existing === null ? "created" : "updated", detail: existing === null ? "installed skill" : "refreshed skill" });
       if (agent === "codex") {
         upgradeCodexSkillReferences(repoRoot, absolutePath, config, options, actions, warnings);
@@ -530,7 +545,7 @@ function upgradeCodexSkillReferences(
   repoRoot: string,
   absoluteSkillPath: string,
   config: AgentMemoryConfig,
-  options: UpgradeOptions,
+  options: InternalUpgradeOptions,
   actions: UpgradeAction[],
   warnings: string[]
 ): void {
@@ -553,8 +568,7 @@ function upgradeCodexSkillReferences(
     }
 
     if (options.write) {
-      fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-      fs.writeFileSync(absolutePath, reference.content);
+      writeUpgradeFile(options, absolutePath, reference.content);
       actions.push({
         path: relativePath,
         status: existing === null ? "created" : "updated",

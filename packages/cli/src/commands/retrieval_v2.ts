@@ -3,7 +3,7 @@ import { runContextCommand } from "./context";
 import { runShowCommand } from "./show";
 import type { CliResult } from "../router";
 import { contextOutputError, renderContextOutputHuman, resolveContextOutputCap } from "../../../core/src/context_output_serialization";
-import { buildContextV2, queryClaimsV2, showClaimV2, type QueryClaimsV2Options } from "../../../core/src/retrieval_v2";
+import { buildContextV2, queryClaimsV2, showClaimV2, type BuildContextV2Options } from "../../../core/src/retrieval_v2";
 
 const V2_ONLY = new Set(["--format-version", "--max-bytes", "--baseline", "--no-baseline", "--symbol", "--route", "--category", "--tag"]);
 export function usesV2Retrieval(args: string[], command: string): boolean {
@@ -25,7 +25,7 @@ export async function runRetrievalV2Command(command: "query" | "context" | "show
   }
   let json = false;
   try {
-    const options: QueryClaimsV2Options = { cwd, changedFiles: [], symbols: [], routes: [], filters: { systems: [], statuses: [], categories: [], tags: [] } };
+    const options: BuildContextV2Options = { cwd, recipeIds: [], profileTraitIds: [], changedFiles: [], symbols: [], routes: [], filters: { systems: [], statuses: [], categories: [], tags: [] } };
     let positional: string | undefined;
     let version: string | undefined;
     const seen = new Set<string>();
@@ -46,7 +46,7 @@ export async function runRetrievalV2Command(command: "query" | "context" | "show
         continue;
       }
       if (key === "--include-stale") throw new Error("--include-stale is v1 only; use repeated --status in v2.");
-      if (!["--format-version", "--task", "--changed-files", "--symbol", "--route", "--system", "--status", "--category", "--tag", "--budget", "--max-bytes", "--limit", "--depth"].includes(key)) throw new Error(`Unknown ${command} v2 option: ${key}`);
+      if (!["--format-version", "--task", "--changed-files", "--symbol", "--route", "--system", "--status", "--category", "--tag", "--budget", "--max-bytes", "--limit", "--depth", ...(command === "context" ? ["--recipe", "--plan", "--stage", "--profile", "--profile-trait"] : [])].includes(key)) throw new Error(`Unknown ${command} v2 option: ${key}`);
       const value = equal >= 0 ? raw.slice(equal + 1) : args[++i];
       if (!value || value.startsWith("--")) throw new Error(`${key} requires a value.`);
       if (key === "--changed-files") {
@@ -60,12 +60,17 @@ export async function runRetrievalV2Command(command: "query" | "context" | "show
       if (key === "--status") { options.filters!.statuses!.push(value); continue; }
       if (key === "--category") { options.filters!.categories!.push(value); continue; }
       if (key === "--tag") { options.filters!.tags!.push(value); continue; }
+      if (key === "--recipe") { options.recipeIds!.push(value); continue; }
+      if (key === "--profile-trait") { options.profileTraitIds!.push(value); continue; }
       single(key);
+      if (key === "--plan") options.planId = value;
+      if (key === "--stage") options.stageId = value;
+      if (key === "--profile") options.profileAlias = value;
       if (key === "--format-version") version = value;
       if (key === "--task") options.task = value;
       if (key === "--budget") {
         if (!["small", "medium", "full"].includes(value)) throw new Error("budget must be small, medium or full.");
-        options.budget = value as QueryClaimsV2Options["budget"];
+        options.budget = value as BuildContextV2Options["budget"];
       }
       if (["--max-bytes", "--limit", "--depth"].includes(key)) {
         if (!/^\d+$/.test(value)) {
@@ -77,6 +82,7 @@ export async function runRetrievalV2Command(command: "query" | "context" | "show
         if (key === "--depth") options.depth = Number(value);
       }
     }
+    if (options.stageId && !options.planId) throw new Error("--stage requires --plan.");
     if (version === undefined || version === "1") return contextOutputError("FORMAT_VERSION_REQUIRED", { message: "New retrieval options require --format-version 2.", maxBytes: errorCap });
     if (version !== "2") throw new Error("Supported format versions are 1 (legacy options) and 2.");
     if (command === "context" && positional !== undefined) throw new Error("context requires --task for task text.");

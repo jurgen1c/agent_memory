@@ -61,7 +61,8 @@
     "dist/web/",
     "README.md",
     "LICENSE",
-    "docs/features/category-retrieval/production-retrieval.md"
+    "docs/features/category-retrieval/production-retrieval.md",
+    "docs/features/category-retrieval/adoption.md"
   ],
   "publishConfig": {
     "access": "public"

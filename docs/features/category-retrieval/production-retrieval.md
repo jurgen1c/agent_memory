@@ -164,3 +164,38 @@ For rollback, restore the pinned prior package, revert reviewed concern/config
 changes if that validator rejects them, and compile only the selected disposable
 cache with that package. Keep canonical documents and other registry caches intact.
 Category adoption and consumer semantic edits require their separate workflow.
+
+## Guided adoption and workflow collections (AM-94)
+
+Existing and mixed legacy/category memories remain valid. Use
+`agent-memory upgrade --adopt-retrieval --format-version 2 --json` to inventory
+only the current checkout and preview the ordinary support/config upgrade.
+`--write` installs managed guidance and allowed support updates after preflight;
+it never changes canonical claims, graphs, recipes, verification commits or status.
+See [the complete adoption workflow](adoption.md) for bounded inspection, review,
+explicit consumer edits, actual validation/probes, custom references and rollback.
+Global migration is a separate command; adoption never reads personal memory or
+other registry consumers and its dry-run never resolves or writes the cache.
+
+V2 context reuses recipe matching, plan/stage selection and profile conflict and
+eligibility rules. `--recipe`, `--plan --stage`, `--profile`, and
+`--profile-trait` retain their existing meanings. Context matches recipes from
+text/files/claims; plans are selected explicitly, as in v1 context. Profiles use
+existing aliases, conditions and conflicts; disabling profile traits in config
+returns `not_requested`. Each collection reports `totalEligible`, `matched` and
+`empty|no_match|matched|not_requested`. V2 query keeps every collection
+`not_requested`. V2 discovers all matched obligations before the shared byte cap,
+instead of using v1 item caps. Required claims and their complete `requires`
+closure survive filters and optional limits; omission or inactivity is incomplete.
+
+Files and commands retain all claim/recipe/plan source IDs and canonical paths,
+are deduplicated and share the output cap. Commands always remain
+`suggested_not_run`. Listing a verification command, compiling memory, or resolving
+an authored commit does not establish that a behavioral check passed.
+
+The public `planRetrievalAdoption` API returns the read-only plan;
+`applyRetrievalAdoption(plan)` rereads all inputs and rejects changed plans with
+`ADOPTION_PLAN_STALE` (exit 5). Validation, duplicate IDs, unsafe or symlink paths,
+and conflicting output paths fail before writes (exit 4). Late write failures
+restore prior files and newly created directories; rollback failures are reported.
+Unflagged upgrade and the v1 context API retain their existing result shapes.

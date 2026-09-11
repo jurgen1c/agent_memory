@@ -327,7 +327,9 @@ const TOPICS: HelpTopic[] = [
       "agent-memory upgrade --global",
       "agent-memory upgrade --global --write",
       "agent-memory upgrade --global --write --memory-key org-repository",
-      "agent-memory upgrade --json"
+      "agent-memory upgrade --json",
+      "agent-memory upgrade --adopt-retrieval --format-version 2 --json",
+      "agent-memory upgrade --adopt-retrieval --format-version 2 --write"
     ],
     examples: [
       "agent-memory upgrade",
@@ -336,6 +338,7 @@ const TOPICS: HelpTopic[] = [
       "agent-memory upgrade --global --write --memory-key org-repository"
     ],
     agentNotes: [
+      "Adoption requires --adopt-retrieval --format-version 2. Dry-run inventories only this checkout with fingerprints and advisory review signals. --write applies support/config and managed guidance only; canonical memory is never rewritten. --global is incompatible: migrate separately. Stale adoption inputs exit 5; invalid canonical/safe-path preflight exits 4 with no writes. Custom guidance is preserved unless forced. See packaged docs/features/category-retrieval/adoption.md for reviewed semantic changes and rollback.",
       "Dry-run by default. Normal upgrade preserves config values and unknown fields while adding defaults. Use --global first to preview local-to-global migration, then repeat with --write: it writes version 2, memory_key, and global scope transactionally; refreshes managed instructions, generated skills, and generated hooks; and preserves bin/memory plus the local SQLite cache.",
       "After a written migration, run agent-memory sync and agent-memory doctor. Remove a generated wrapper only when the written migration output explicitly marks cleanup as safe; custom wrappers remain preserved for manual review. Preserve the local cache unless you make a separate backup or retention decision. --memory-key overrides key derivation but does not bypass safe repository identity validation. Use --force only to replace eligible custom skill or hook files."
     ],
@@ -422,7 +425,7 @@ export function renderHelp(topicName?: string): string {
       });
     }
 
-    const v2 = ["query", "context", "show"].includes(topicName) ? "\n\nV2 retrieval (explicit opt-in):\n  --format-version 2 --json --budget small|medium|full --max-bytes N\n  query/context: --task TEXT, --changed-files PATH..., --symbol VALUE, --route VALUE\n  Repeated --category/--tag/--system/--status filters use OR within each facet, AND across facets.\n  --limit N caps optional roots; --depth 0..10 caps optional graph expansion only.\n  --baseline explicitly enables zero-match fallback. --include-inferred adds optional inferred edges.\n  Tasks use Unicode NFKC lowercase prefix OR tokens (maximum 64 KiB).\n  Budgets are complete UTF-8 envelope bytes: 4096/16384/65536; max-bytes accepts 512..16777216.\n  show v2 returns the complete body/metadata/sections or BUDGET_TOO_SMALL.\n  Check taskMatches, completeness, reasons, warnings and omitted counts.\n  CACHE_STALE or CACHE_SCHEMA_UNSUPPORTED requires compile in the selected checkout.\n  Use categories list to discover concern tags; category-only browsing needs no task. Unknown categories/systems/statuses are errors; unknown ordinary tags match nothing. Default statuses: current, proposed, needs_review. Required dependencies may cross all facets with outsideFilters. Collection selectors remain a separate extension." : "";
+    const v2 = ["query", "context", "show"].includes(topicName) ? "\n\nV2 retrieval (explicit opt-in):\n  --format-version 2 --json --budget small|medium|full --max-bytes N\n  query/context: --task TEXT, --changed-files PATH..., --symbol VALUE, --route VALUE\n  Repeated --category/--tag/--system/--status filters use OR within each facet, AND across facets.\n  --limit N caps optional roots; --depth 0..10 caps optional graph expansion only.\n  --baseline explicitly enables zero-match fallback. --include-inferred adds optional inferred edges.\n  Tasks use Unicode NFKC lowercase prefix OR tokens (maximum 64 KiB).\n  Budgets are complete UTF-8 envelope bytes: 4096/16384/65536; max-bytes accepts 512..16777216.\n  show v2 returns the complete body/metadata/sections or BUDGET_TOO_SMALL.\n  Check taskMatches, completeness, reasons, warnings and omitted counts.\n  CACHE_STALE or CACHE_SCHEMA_UNSUPPORTED requires compile in the selected checkout.\n  Use categories list to discover concern tags; category-only browsing needs no task. Unknown categories/systems/statuses are errors; unknown ordinary tags match nothing. Default statuses: current, proposed, needs_review. Required dependencies may cross all facets with outsideFilters. context also accepts --recipe ID, --plan ID --stage ID, --profile ALIAS and --profile-trait ID. Existing selectors/eligibility apply; complete recipe and plan-stage requirements enter the same closure. Collections report empty/no_match/matched/not_requested and totalEligible/matched before byte packing. Query collections are not_requested. All command suggestions are suggested_not_run." : "";
     return renderTopic(topic) + v2;
   }
 

@@ -50,6 +50,8 @@ export interface RecipeSearchInput {
   recipeIds?: string[];
   limit?: number;
   includeInactive?: boolean;
+  /** Discover every text match before the v2 shared byte cap; v1 keeps its candidate limit. */
+  completeTextMatches?: boolean;
 }
 
 export interface RecipeSearchResult {
@@ -141,7 +143,7 @@ export function searchRecipeMatches(database: SqliteDatabase, input: Omit<Recipe
   }
 
   if (input.query?.trim()) {
-    applyTextMatches(database, input.query, recipesById, scores, reasons);
+    applyTextMatches(database, input.query, recipesById, scores, reasons, input.completeTextMatches ? -1 : 20);
   }
 
   if (changedFiles.length > 0 || claimIds.size > 0) {
@@ -211,7 +213,8 @@ function applyTextMatches(
   query: string,
   recipesById: Map<string, RecipeRow>,
   scores: Map<string, number>,
-  reasons: Map<string, RecipeMatchReason[]>
+  reasons: Map<string, RecipeMatchReason[]>,
+  candidateLimit: number
 ): void {
   const ftsQuery = toFtsQuery(query);
 
@@ -224,8 +227,8 @@ function applyTextMatches(
      FROM recipes_fts
      WHERE recipes_fts MATCH ?
      ORDER BY rank_score ASC
-     LIMIT 20`,
-    [ftsQuery]
+     LIMIT ?`,
+    [ftsQuery, candidateLimit]
   )) {
     const recipeRow = recipesById.get(row.id);
 

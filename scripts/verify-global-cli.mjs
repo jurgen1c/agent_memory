@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { verifyAdoption } from "./verify-adoption.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -89,6 +90,9 @@ try {
   if (JSON.parse(otherCli(["categories", "list", "--json"])).categories.some(entry => entry.slug === "privacy")) fail("Config rollback retained a removed category.");
   if (!fs.readFileSync(firstDatabase).equals(firstBytes)) fail("Rollback changed another registry cache.");
 
+  const unrelatedBytes = fs.readFileSync(firstDatabase);
+  verifyAdoption(binary, temporaryRoot, globalHome);
+  if (!fs.readFileSync(firstDatabase).equals(unrelatedBytes)) fail("Adoption changed unrelated global cache.");
   console.log("Agent Memory packaged global CLI smoke test passed. Category listing/browse, two checkout vocabularies, selected config/cache rollback passed.");
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

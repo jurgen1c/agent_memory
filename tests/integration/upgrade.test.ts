@@ -264,11 +264,14 @@ agent_instructions:
     fs.mkdirSync(path.dirname(wrapperPath), { recursive: true });
     fs.writeFileSync(wrapperPath, wrapperTemplate("npm"));
     fs.chmodSync(wrapperPath, 0o644);
+    fs.utimesSync(wrapperPath, new Date("2020-01-01T00:00:00Z"), new Date("2020-01-01T00:00:00Z"));
+    const modifiedAt = fs.statSync(wrapperPath).mtimeMs;
 
     const result = await dispatch(["upgrade", "--write"], { cwd: repoRoot });
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("made wrapper executable");
+    expect(fs.statSync(wrapperPath).mtimeMs).toBe(modifiedAt);
     expect(fs.statSync(wrapperPath).mode & 0o111).toBeGreaterThan(0);
   });
 

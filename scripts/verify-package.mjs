@@ -31,6 +31,8 @@ try {
     "dist/index.d.ts",
     "dist/retrieval_v2.d.ts",
     "dist/categories.d.ts",
+    "dist/retrieval_adoption.d.ts",
+    "docs/features/category-retrieval/adoption.md",
     "docs/features/category-retrieval/production-retrieval.md",
     "dist/agent-memory.js",
     "dist/web/index.html",
@@ -91,11 +93,13 @@ import {
   queryClaimsV2,
   buildContextV2,
   showClaimV2,
+  planRetrievalAdoption,
+  applyRetrievalAdoption,
   parseClaimSections,
   openSqliteDatabase
 } from "@jurgen1c/agent-memory-cli";
 
-for (const api of [listCategories, queryClaimsV2, buildContextV2, showClaimV2]) {
+for (const api of [listCategories, queryClaimsV2, buildContextV2, showClaimV2, planRetrievalAdoption, applyRetrievalAdoption]) {
   if (typeof api !== "function") throw new Error("Packaged v2 API is missing.");
 }
 if (parseClaimSections("Title\\n===\\n")[0]?.heading !== "Title") {

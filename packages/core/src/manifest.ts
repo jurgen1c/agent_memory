@@ -27,6 +27,7 @@ export interface AgentManifest {
   commands: AgentCommandDescription[];
   capabilities: {
     contextual_workflows: true;
+    retrieval_adoption: { enabled: true; command: "upgrade"; format_version: 2; canonical_writes: false };
     categories: { enabled: true; command: "categories list"; format_version: 2; facets: string[] };
     recipes: {
       enabled: true;
@@ -95,6 +96,7 @@ export function buildAgentManifest(options: BuildAgentManifestOptions = {}): Age
 function buildWorkflowCapabilities(): AgentManifest["capabilities"] {
   return {
     contextual_workflows: true,
+    retrieval_adoption: { enabled: true, command: "upgrade", format_version: 2, canonical_writes: false },
     categories: { enabled: true, command: "categories list", format_version: 2, facets: ["category", "tag", "system", "status"] },
     recipes: {
       enabled: true,
