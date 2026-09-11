@@ -241,6 +241,28 @@ describe("production v2 retrieval", () => {
     } finally { if (priorHome === undefined) delete process.env.AGENT_MEMORY_HOME; else process.env.AGENT_MEMORY_HOME = priorHome; }
   });
 
+  test("reserved category/tag CLI flags share the explicit core extension error", async () => {
+    const cwd = fixture(); await compileMemory({ cwd });
+    for (const flag of ["--category", "--tag"]) {
+      const result = await dispatch(["query", "--format-version", "2", flag, "security", "--json"], { cwd });
+      expect(result.exitCode).toBe(2);
+      expect(JSON.parse(result.stdout!).error).toEqual({ code: "INVALID_INPUT", message: "Category/tag facets require the category vocabulary extension." });
+      expect((await dispatch(["query", flag, "security", "--json"], { cwd })).exitCode).toBe(2);
+      expect((await dispatch(["show", "accounts.receipt_retry", "--format-version", "2", flag, "security"], { cwd })).exitCode).toBe(2);
+    }
+  });
+
+  test("retrieval normalizes realpath spelling through the same canonical-root helper as compile", async () => {
+    const cwd = fixture(); await compileMemory({ cwd });
+    const realpath = fs.realpathSync;
+    const spelling = spyOn(fs, "realpathSync").mockImplementation((value, options) => {
+      const result = realpath(value, options as never);
+      return typeof result === "string" && path.resolve(String(value)) === cwd ? `${result}/` : result;
+    });
+    try { expect((await queryClaimsV2({ cwd, query: "retry" })).exitCode).toBe(0); }
+    finally { spelling.mockRestore(); }
+  });
+
   test("CLI parsing errors obey a valid requested cap in either option order", async () => {
     const unknown = `--${"x".repeat(3000)}`;
     for (const args of [["--max-bytes", "512", unknown], [unknown, "--max-bytes=512"], ["--max-bytes=512", "--task", "one", "--task", "two"]]) {

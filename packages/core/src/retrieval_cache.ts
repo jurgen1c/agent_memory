@@ -6,6 +6,7 @@ import { claimBodyDigest } from "./claim_sections";
 import { loadConfig } from "./config";
 import { assertGlobalDatabaseProvenance, resolveConfiguredDatabaseLocation } from "./database";
 import { resolveConfiguredPath, toPosix } from "./files";
+import { canonicalRepositoryRoot } from "./registry";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite";
 import type { ContextOutputClaim, ContextOutputData, ContextOutputEdge, ContextOutputErrorCode } from "./context_output_types";
 import { validateRepository } from "./validator";
@@ -35,7 +36,7 @@ export async function readRetrievalCache(cwd?: string): Promise<RetrievalCache> 
     if (metadata.get("schema_version") !== "2") throw new RetrievalV2Error("CACHE_SCHEMA_UNSUPPORTED", "Schema 2 is required. Run agent-memory compile; rollback requires recompilation with the prior package.");
     try { assertGlobalDatabaseProvenance(database, location, loaded); }
     catch { throw new RetrievalV2Error("CACHE_STALE", "Cache provenance differs from this checkout. Run agent-memory compile."); }
-    if (fs.realpathSync(loaded.repo.root) !== metadata.get("repo_root") || metadata.get("canonical_content_hash") !== canonicalContentDigest(loaded)) throw new RetrievalV2Error("CACHE_STALE", "Canonical memory or checkout changed. Run agent-memory compile.");
+    if (canonicalRepositoryRoot(loaded.repo.root) !== metadata.get("repo_root") || metadata.get("canonical_content_hash") !== canonicalContentDigest(loaded)) throw new RetrievalV2Error("CACHE_STALE", "Canonical memory or checkout changed. Run agent-memory compile.");
     const validation = validateRepository({ cwd });
     if (!validation.valid) throw new RetrievalV2Error("VALIDATION_FAILED", "Canonical memory or source associations are invalid. Run agent-memory validate.");
     const claims = hydrateClaims(database, loaded);

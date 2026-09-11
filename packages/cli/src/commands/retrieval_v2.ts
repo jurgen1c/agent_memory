@@ -25,7 +25,7 @@ export async function runRetrievalV2Command(command: "query" | "context" | "show
   }
   let json = false;
   try {
-    const options: QueryClaimsV2Options = { cwd, changedFiles: [], symbols: [], routes: [], filters: { systems: [], statuses: [] } };
+    const options: QueryClaimsV2Options = { cwd, changedFiles: [], symbols: [], routes: [], filters: { systems: [], statuses: [], categories: [], tags: [] } };
     let positional: string | undefined;
     let version: string | undefined;
     const seen = new Set<string>();
@@ -46,7 +46,7 @@ export async function runRetrievalV2Command(command: "query" | "context" | "show
         continue;
       }
       if (key === "--include-stale") throw new Error("--include-stale is v1 only; use repeated --status in v2.");
-      if (!["--format-version", "--task", "--changed-files", "--symbol", "--route", "--system", "--status", "--budget", "--max-bytes", "--limit", "--depth"].includes(key)) throw new Error(`Unknown ${command} v2 option: ${key}`);
+      if (!["--format-version", "--task", "--changed-files", "--symbol", "--route", "--system", "--status", "--category", "--tag", "--budget", "--max-bytes", "--limit", "--depth"].includes(key)) throw new Error(`Unknown ${command} v2 option: ${key}`);
       const value = equal >= 0 ? raw.slice(equal + 1) : args[++i];
       if (!value || value.startsWith("--")) throw new Error(`${key} requires a value.`);
       if (key === "--changed-files") {
@@ -58,6 +58,8 @@ export async function runRetrievalV2Command(command: "query" | "context" | "show
       if (key === "--route") { options.routes!.push(value); continue; }
       if (key === "--system") { options.filters!.systems!.push(value); continue; }
       if (key === "--status") { options.filters!.statuses!.push(value); continue; }
+      if (key === "--category") { options.filters!.categories!.push(value); continue; }
+      if (key === "--tag") { options.filters!.tags!.push(value); continue; }
       single(key);
       if (key === "--format-version") version = value;
       if (key === "--task") options.task = value;
@@ -82,7 +84,7 @@ export async function runRetrievalV2Command(command: "query" | "context" | "show
       if (options.task !== undefined) throw new Error("Supply positional query text or --task, once.");
       options.query = positional;
     }
-    if (command === "show" && (options.task !== undefined || options.changedFiles!.length || options.symbols!.length || options.routes!.length || options.filters!.systems!.length || options.filters!.statuses!.length || options.limit !== undefined || options.depth !== undefined || options.gitDiff !== undefined || options.baseline !== undefined || options.includeInferred !== undefined)) throw new Error("show v2 accepts one ID, --budget, --max-bytes, --format-version and --json.");
+    if (command === "show" && (options.task !== undefined || options.changedFiles!.length || options.symbols!.length || options.routes!.length || Object.values(options.filters!).some(values => values.length) || options.limit !== undefined || options.depth !== undefined || options.gitDiff !== undefined || options.baseline !== undefined || options.includeInferred !== undefined)) throw new Error("show v2 accepts one ID, --budget, --max-bytes, --format-version and --json.");
     const result = command === "show" ? await showClaimV2({ cwd, id: positional ?? "", budget: options.budget, maxBytes: options.maxBytes }) : command === "query" ? await queryClaimsV2(options) : await buildContextV2(options);
     return !json && result.exitCode === 0 ? { ...result, stdout: renderContextOutputHuman(result.model) } : result;
   } catch (error) { return contextOutputError("INVALID_INPUT", { message: error instanceof Error ? error.message : "Invalid retrieval input.", maxBytes: errorCap }); }
