@@ -233,7 +233,7 @@ function findOutdatedVerifiedClaims(
         remediation: resolution.remediation
       });
       if (resolution.state === "unavailable" &&
-        (resolution.phase !== "object" || resolution.code !== "GIT_CHECK_FAILED")) break;
+        (resolution.phase !== "object" || !["GIT_CHECK_FAILED", "GIT_PERMISSION_DENIED"].includes(resolution.code))) break;
       continue;
     }
     const commit = reference.toLowerCase();

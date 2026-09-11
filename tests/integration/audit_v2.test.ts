@@ -119,7 +119,7 @@ describe("v2 audit health", () => {
     } finally { fs.chmodSync(graph, 0o755); }
   });
 
-  test("a corrupt referenced commit cannot hide another claim's source drift", async () => {
+  for (const failure of ["corrupt", "unreadable"]) test(`a ${failure} referenced commit cannot hide another claim's source drift`, async () => {
     const cwd = fixture(); const old = commit(cwd);
     fs.appendFileSync(path.join(cwd, "README.md"), "\nNew verification commit\n");
     const current = commit(cwd);
@@ -129,11 +129,15 @@ describe("v2 audit health", () => {
     fs.writeFileSync(second, fs.readFileSync(second, "utf8").replace("last_verified_commit: null", `last_verified_commit: ${current}`));
     fs.appendFileSync(path.join(cwd, "src/tenant.js"), "\n// source drift\n");
     const corrupt = path.join(cwd, ".git/objects", old.slice(0, 2), old.slice(2));
-    fs.chmodSync(corrupt, 0o644); fs.writeFileSync(corrupt, "corrupt loose commit");
-    const result = await auditMemoryV2({ cwd });
-    expect(result.claims[0].diagnostic).toMatchObject({ code: "GIT_CHECK_FAILED", phase: "object" });
-    expect(result.claims[1].verificationCheck).toBe("verified");
-    expect(result.claims[1].qualitySignals.some((signal) => signal.code === "SOURCE_CHANGED_SINCE_VERIFICATION")).toBe(true);
+    if (failure === "corrupt") {
+      fs.chmodSync(corrupt, 0o644); fs.writeFileSync(corrupt, "corrupt loose commit");
+    } else fs.chmodSync(corrupt, 0);
+    try {
+      const result = await auditMemoryV2({ cwd });
+      expect(result.claims[0].diagnostic).toMatchObject({ code: failure === "corrupt" ? "GIT_CHECK_FAILED" : "GIT_PERMISSION_DENIED", phase: "object" });
+      expect(result.claims[1].verificationCheck).toBe("verified");
+      expect(result.claims[1].qualitySignals.some((signal) => signal.code === "SOURCE_CHANGED_SINCE_VERIFICATION")).toBe(true);
+    } finally { fs.chmodSync(corrupt, 0o644); }
   });
 
   test("inaccessible canonical files report unavailable structure and retain other readable claims", async () => {
