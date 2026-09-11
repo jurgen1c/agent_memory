@@ -64,7 +64,32 @@ try {
     fail("Packaged global smoke did not create registry metadata in AGENT_MEMORY_HOME.");
   }
 
-  console.log("Agent Memory packaged global CLI smoke test passed.");
+  const list = JSON.parse(cli(["categories", "list", "--counts", "--json"]));
+  if (!list.categories.some(entry => entry.slug === "security" && typeof entry.description === "string" && entry.count === 0)
+      || !list.categories.some(entry => entry.slug === "uncategorized")) fail("Installed category vocabulary/counts unavailable.");
+  const withoutCounts = JSON.parse(cli(["categories", "list", "--json"]));
+  if (withoutCounts.categories.some(entry => Object.hasOwn(entry, "count"))) fail("Unrequested counts leaked.");
+  const browse = JSON.parse(cli(["query", "--format-version", "2", "--category", "security", "--json"]));
+  if (browse.mode !== "browse" || browse.taskMatches !== 0) fail("Installed category-only browse unavailable.");
+  const firstDatabase = context.databasePath;
+  const firstBytes = fs.readFileSync(firstDatabase);
+  const otherRepo = path.join(temporaryRoot, "other-consumer"); fs.mkdirSync(otherRepo);
+  run("git", ["init"], otherRepo);
+  const otherCli = args => run(process.execPath, [binary, ...args], otherRepo, { ...process.env, AGENT_MEMORY_HOME: globalHome });
+  otherCli(["init", "--yes", "--memory-key", "other-global-smoke"]);
+  fs.appendFileSync(path.join(otherRepo, "agent-memory.config.yaml"), '\ncategory_vocabulary: {privacy: "Other checkout only"}\n');
+  otherCli(["compile"]);
+  const otherList = JSON.parse(otherCli(["categories", "list", "--json"]));
+  if (!otherList.categories.some(entry => entry.slug === "privacy") || list.categories.some(entry => entry.slug === "privacy")) fail("Vocabulary crossed registry checkouts.");
+  if (!fs.readFileSync(firstDatabase).equals(firstBytes)) fail("Second checkout changed the first cache.");
+  // Restore a pre-category config and rebuild only this selected generated cache.
+  const otherConfigPath = path.join(otherRepo, "agent-memory.config.yaml");
+  fs.writeFileSync(otherConfigPath, fs.readFileSync(otherConfigPath, "utf8").replace('\ncategory_vocabulary: {privacy: "Other checkout only"}\n', ""));
+  otherCli(["compile"]);
+  if (JSON.parse(otherCli(["categories", "list", "--json"])).categories.some(entry => entry.slug === "privacy")) fail("Config rollback retained a removed category.");
+  if (!fs.readFileSync(firstDatabase).equals(firstBytes)) fail("Rollback changed another registry cache.");
+
+  console.log("Agent Memory packaged global CLI smoke test passed. Category listing/browse, two checkout vocabularies, selected config/cache rollback passed.");
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;

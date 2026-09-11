@@ -5,6 +5,9 @@ executable **test-only design model**, sanitized fixtures, and reproduction tool
 It does not enable new production commands, alter consumer memory, or complete the
 implementation packages below. AM-87 is related work, not a dependency.
 
+AM-90 adds the [production output foundation](output-api.md). Public v2 retrieval
+adapters and the remaining implementation packages still require their own gates.
+
 ## Evidence and scope
 
 The [reproduction record](reproduction.md) separates the historical Facturi audit,

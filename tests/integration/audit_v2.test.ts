@@ -171,6 +171,25 @@ describe("v2 audit health", () => {
     expect((await auditMemoryV2({ cwd })).cache.state).toBe("unavailable");
   });
 
+  test("schema-2 health requires body, section, search and category tables and current checkout provenance", async () => {
+    const cwd = fixture();
+    for (const table of ["claim_bodies", "claim_sections", "claim_terms", "claim_categories"]) {
+      const compiled = await compileMemory({ cwd });
+      expect((await auditMemoryV2({ cwd })).cache.state).toBe("fresh");
+      const database = await openSqliteDatabase(compiled.databasePath);
+      database.run(`DROP TABLE ${table}`); database.close();
+      expect((await auditMemoryV2({ cwd })).cache.state).toBe("unsupported");
+    }
+    const compiled = await compileMemory({ cwd });
+    const database = await openSqliteDatabase(compiled.databasePath);
+    database.run("UPDATE compile_metadata SET value = 'another-checkout' WHERE key = 'repo_root'"); database.close();
+    expect((await auditMemoryV2({ cwd })).cache.state).toBe("stale");
+    await compileMemory({ cwd });
+    const legacy = await openSqliteDatabase(compiled.databasePath);
+    legacy.run("UPDATE compile_metadata SET value = '1' WHERE key = 'schema_version'"); legacy.close();
+    expect((await auditMemoryV2({ cwd })).cache.state).toBe("unsupported");
+  });
+
   test("concurrent canonical or configuration changes cannot certify an old compiled snapshot as fresh", async () => {
     for (const changeConfig of [false, true]) {
       const cwd = fixture(); const compiled = await compileMemory({ cwd });

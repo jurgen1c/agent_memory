@@ -43,3 +43,14 @@ export * from "./yaml";
 export * from "./audit_v2";
 export * from "./git_verification";
 export * from "./quality_signals";
+export * from "./context_output";
+export * from "./context_output_types";
+export * from "./context_output_serialization";
+
+export { queryClaimsV2, buildContextV2, showClaimV2 } from "./retrieval_v2";
+export type { QueryClaimsV2Options, BuildContextV2Options, ShowClaimV2Options } from "./retrieval_v2";
+export { parseClaimSections, claimBodyDigest } from "./claim_sections";
+export { canonicalContentDigest } from "./canonical_digest";
+
+export { listCategories, renderCategoriesHuman, type ListCategoriesOptions, type ListCategoriesResult, type CategoriesModel } from "./categories";
+export { BUILTIN_CATEGORY_VOCABULARY } from "./category_vocabulary";

@@ -1,4 +1,4 @@
-import { canonicalMemoryContentDigest } from "./canonical_digest";
+import { canonicalContentDigest } from "./canonical_digest";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -11,6 +11,7 @@ import { createGitCommitVerifier, type GitVerificationDiagnostic, type Verificat
 import { canonicalMemoryFileInventory, configuredPathRelativeToRepo, discoverFiles, resolveConfiguredPath } from "./files";
 import { readMemoryClaim, type MemoryClaim } from "./memory";
 import { claimQualitySignals, type ClaimQualitySignal } from "./quality_signals";
+import { canonicalRepositoryRoot } from "./registry";
 import { openSqliteDatabase } from "./sqlite";
 import { validateRepository } from "./validator";
 
@@ -155,14 +156,15 @@ export async function auditCacheHealth(loaded: ReturnType<typeof loadConfig>): P
       if (!table) return state("unsupported", "Cache metadata schema is missing.");
       const requiredTables = ["claims", "claim_files", "claim_symbols", "claim_tags", "claim_routes", "claim_relations",
         "indexes", "recipes", "recipe_claims", "profile_traits", "plan_templates", "plan_stages", "claims_fts",
-        "recipes_fts", "plan_templates_fts", "profile_traits_fts"];
+        "recipes_fts", "plan_templates_fts", "profile_traits_fts",
+        "claim_bodies", "claim_sections", "claim_terms", "claim_categories"];
       const tables = new Set(database.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").map((row) => row.name));
       if (requiredTables.some((name) => !tables.has(name))) return state("unsupported", "Required cache query tables are missing.");
       const metadata = new Map(database.all<{ key: string; value: string }>("SELECT key, value FROM compile_metadata").map((row) => [row.key, row.value]));
-      if (metadata.get("schema_version") !== "1") return state("unsupported", "Cache schema version is unsupported.");
+      if (metadata.get("schema_version") !== "2") return state("unsupported", "Cache schema version is unsupported.");
       const hash = (text: string) => crypto.createHash("sha256").update(text).digest("hex");
       const inventory = canonicalMemoryFileInventory(resolveConfiguredPath(loaded.repo.root, loaded.config.memory_root), loaded.config);
-      if (metadata.get("canonical_content_hash") !== canonicalMemoryContentDigest(resolveConfiguredPath(loaded.repo.root, loaded.config.memory_root), loaded.config) || metadata.get("canonical_files_hash") !== hash(JSON.stringify(inventory)) || metadata.get("config_hash") !== hash(fs.readFileSync(loaded.path, "utf8"))) {
+      if (metadata.get("repo_root") !== canonicalRepositoryRoot(loaded.repo.root) || metadata.get("canonical_content_hash") !== canonicalContentDigest(loaded) || metadata.get("canonical_files_hash") !== hash(JSON.stringify(inventory)) || metadata.get("config_hash") !== hash(fs.readFileSync(loaded.path, "utf8"))) {
         return state("stale", "Canonical inventory or configuration differs from the compiled cache.");
       }
       return state("fresh", "Cache matches canonical inventory.");

@@ -1,3 +1,4 @@
+import { readCategoryVocabulary } from "./category_vocabulary";
 import fs from "node:fs";
 import path from "node:path";
 import { ConfigError, MissingConfigError } from "./errors";
@@ -102,7 +103,7 @@ export function defaultConfig(): AgentMemoryConfig {
 
 export function renderConfigTemplate(config: AgentMemoryConfig = defaultConfig()): string {
   return `# Config schema version.
-version: ${config.version}${renderGlobalStorageFields(config)}
+version: ${config.version}${renderGlobalStorageFields(config)}${config.category_vocabulary === undefined ? "" : `\n\n# Repository-owned extensions to the built-in concern tags.\ncategory_vocabulary: ${JSON.stringify(config.category_vocabulary)}`}
 
 # Canonical memory source directory. The file patterns below are relative to this path.
 memory_root: ${renderYamlScalar(config.memory_root)}
@@ -209,6 +210,7 @@ function normalizeConfig(value: unknown, repoRoot: string): AgentMemoryConfig {
   return {
     version,
     ...globalStorage,
+    ...(value.category_vocabulary === undefined ? {} : { category_vocabulary: readCategoryVocabulary(value.category_vocabulary) }),
     memory_root: readString(value, "memory_root", DEFAULT_CONFIG.memory_root),
     database_path: readString(value, "database_path", DEFAULT_CONFIG.database_path),
     claims: readStringArray(value, "claims", DEFAULT_CONFIG.claims),
