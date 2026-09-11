@@ -57,7 +57,10 @@ describe("repository concern vocabulary and facets", () => {
     const cwd = fixture(); change(cwd, "legacy.notes", { tags: ["security"] }); await compileMemory({ cwd });
     const filters = { categories: ["security", "reliability", "security"], systems: ["accounts"], tags: ["concern:security"], statuses: ["current", "current"] };
     const query = await queryClaimsV2({ cwd, filters }); const context = await buildContextV2({ cwd, filters });
-    expect(query.exitCode).toBe(0); expect(query.stdout).toBe(context.stdout);
+    expect(query.exitCode).toBe(0); expect(context.exitCode).toBe(0);
+    expect(result(query.stdout).claims).toEqual(result(context.stdout).claims);
+    expect(result(query.stdout).recipes.state).toBe("not_requested");
+    expect(result(context.stdout).recipes.state).toBe("empty");
     const model = result(query.stdout); expect(model.mode).toBe("browse"); expect(model.taskMatches).toBe(0);
     expect(model.filters).toEqual({ categories: ["reliability", "security"], systems: ["accounts"], tags: ["concern:security"], statuses: ["current"] });
     expect(model.roots).toEqual(["accounts.diagnostics_retry", "accounts.receipt_retry"]);

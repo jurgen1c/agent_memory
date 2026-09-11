@@ -1,3 +1,7 @@
+import { NotFoundError } from "./errors";
+import { canonicalContentDigest } from "./canonical_digest";
+import { selectContextCollections, type ContextCollectionSelectors } from "./context_collections";
+import { resolvePlanStageContext } from "./plans";
 import { validateRetrievalFilters } from "./retrieval_filters";
 import { normalizeChangedFiles, readGitDiffFiles } from "./changes";
 import { evaluateClaimSourcePath } from "./claim_sources";
@@ -19,25 +23,31 @@ export interface QueryClaimsV2Options extends Omit<ContextOutputRequest, "mode">
   depth?: number;
   includeInferred?: boolean;
 }
-export type BuildContextV2Options = QueryClaimsV2Options;
+export type BuildContextV2Options = QueryClaimsV2Options & ContextCollectionSelectors;
 export interface ShowClaimV2Options { cwd?: string; id: string; budget?: ContextOutputRequest["budget"]; maxBytes?: number }
 
 /** Query and context deliberately share the same production selector and envelope. */
 export const queryClaimsV2 = (options: QueryClaimsV2Options): Promise<ContextOutputResult> => retrieve(options);
-export const buildContextV2 = (options: BuildContextV2Options): Promise<ContextOutputResult> => retrieve(options);
+export const buildContextV2 = (options: BuildContextV2Options): Promise<ContextOutputResult> => retrieve(options, true);
 
-async function retrieve(options: QueryClaimsV2Options): Promise<ContextOutputResult> {
+async function retrieve(options: BuildContextV2Options, collections = false): Promise<ContextOutputResult> {
   try {
     validateInput(options);
+    for (const value of [options.planId, options.stageId, options.profileAlias]) if (value !== undefined && (typeof value !== "string" || !value.trim())) throw new RetrievalV2Error("INVALID_INPUT", "Collection selectors must be nonempty strings.");
+    if (options.stageId && !options.planId) throw new RetrievalV2Error("INVALID_INPUT", "stageId requires planId.");
+    for (const values of [options.recipeIds, options.profileTraitIds]) if (values !== undefined && (!Array.isArray(values) || values.some(value => typeof value !== "string" || !value.trim()))) throw new RetrievalV2Error("INVALID_INPUT", "Collection selectors must be lists of nonempty IDs.");
     const cache = await readRetrievalCache(options.cwd);
+    const digest = canonicalContentDigest(cache.loaded);
+    const plan = collections && options.planId ? await resolvePlanStageContext({ ...options, planId: options.planId! }) : undefined;
     const filters = validateRetrievalFilters(options.filters, cache);
-    const requestedFiles = normalizeChangedFiles([...(options.changedFiles ?? []), ...(options.gitDiff ? readGitDiffFiles(cache.loaded.repo.root) : [])], cache.loaded.repo.root);
+    const requestedFiles = normalizeChangedFiles([...(options.changedFiles ?? []), ...(plan?.stage.sourceFiles ?? []), ...(options.gitDiff ? readGitDiffFiles(cache.loaded.repo.root) : [])], cache.loaded.repo.root);
     if (requestedFiles.some(file => file === ".." || file.startsWith("../"))) throw new RetrievalV2Error("INVALID_INPUT", "Changed files must be inside this repository.");
     const files = [...new Set(requestedFiles)].filter(file => evaluateClaimSourcePath(file, cache.loaded.config.claim_sources, cache.loaded.repo.root).eligible).sort(codePointCompare);
     const task = options.task ?? options.query;
     const browse = !task?.trim() && !requestedFiles.length && !options.gitDiff && !options.symbols?.length && !options.routes?.length;
-    if (browse && !Object.values(options.filters ?? {}).some(values => values?.length)) throw new RetrievalV2Error("INPUT_REQUIRED", "Supply task text, exact files/symbols/routes, or a category/tag/system/status filter.");
-    let roots = rankClaimsV2(cache, { task, files, symbols: options.symbols ?? [], routes: options.routes ?? [], filters, browse });
+    if (browse && !Object.values(options.filters ?? {}).some(values => values?.length) && !(collections && (options.recipeIds?.length || options.planId || options.profileAlias || options.profileTraitIds?.length))) throw new RetrievalV2Error("INPUT_REQUIRED", "Supply task text, exact files/symbols/routes, or a category/tag/system/status filter.");
+    const selectorOnly = browse && !Object.values(options.filters ?? {}).some(values => values?.length);
+    let roots = selectorOnly ? [] : rankClaimsV2(cache, { task, files, symbols: options.symbols ?? [], routes: options.routes ?? [], filters, browse });
     const taskMatchCount = new Set(roots.filter(root => ["TEXT_MATCH", "EXACT_SOURCE", "EXACT_SYMBOL", "EXACT_ROUTE"].includes(root.reason)).map(root => root.claimId)).size;
     if (options.baseline && !browse && taskMatchCount === 0) {
       roots.push(...cache.claims.filter(claim => claim.metadata?.severity === "critical" && !contextClaimOutsideFilters(claim, normalizeContextOutputFilters(filters)).length).map(claim => ({ claimId: claim.id, reason: "BASELINE_FALLBACK" as const })));
@@ -47,10 +57,18 @@ async function retrieve(options: QueryClaimsV2Options): Promise<ContextOutputRes
     const rootIds = [...allRootIds].slice(0, options.limit);
     const requiredClaimIds = cache.edges.filter(edge => edge.origin === "explicit" && edge.relation === "requires" && allRootIds.has(edge.sourceClaimId) && !rootIds.includes(edge.sourceClaimId)).map(edge => edge.sourceClaimId);
     roots = roots.filter(root => rootIds.includes(root.claimId));
-    roots = expandOptionalRoots(cache, roots, options.depth ?? 0, options.includeInferred ?? false, filters, options.limit, requiredClaimIds);
-    const candidates: ContextOutputCandidates = { roots, requiredClaimIds, taskMatchCount, claims: cache.claims.map(claim => payload(claim, false)), edges: cache.edges.filter(edge => edge.origin === "explicit" || options.includeInferred === true) };
-    candidates.files = cache.claims.flatMap(claim => [...claim.associations!.files, ...claim.relatedFiles].map(value => ({ value, origins: [{ kind: "claim" as const, id: claim.id, sourcePath: claim.sourcePath }] })));
-    candidates.commands = cache.claims.flatMap(claim => claim.verification.map(value => ({ value, origins: [{ kind: "claim" as const, id: claim.id, sourcePath: claim.sourcePath }] })));
+    const expand = (obligations: string[] = []): string[] => {
+      requiredClaimIds.push(...obligations);
+      roots = expandOptionalRoots(cache, roots, options.depth ?? 0, options.includeInferred ?? false, filters, options.limit, requiredClaimIds);
+      return [...roots.map(root => root.claimId), ...requiredClaimIds];
+    };
+    const selected = collections ? await selectContextCollections(cache, { ...options, task }, files, [...allRootIds], plan, expand) : undefined;
+    if (!collections) expand();
+    const candidates: ContextOutputCandidates = { roots, requiredClaimIds, taskMatchCount, claims: cache.claims.map(claim => payload(claim, false)), edges: cache.edges.filter(edge => edge.origin === "explicit" || options.includeInferred === true),
+      ...(selected ? { recipes: selected.recipes, plans: selected.plans, profiles: selected.profiles } : {}) };
+    candidates.files = [...cache.claims.flatMap(claim => [...claim.associations!.files, ...claim.relatedFiles].map(value => ({ value, origins: [{ kind: "claim" as const, id: claim.id, sourcePath: claim.sourcePath }] }))), ...(selected?.files ?? [])];
+    candidates.commands = [...cache.claims.flatMap(claim => claim.verification.map(value => ({ value, origins: [{ kind: "claim" as const, id: claim.id, sourcePath: claim.sourcePath }] }))), ...(selected?.commands ?? [])];
+    if (canonicalContentDigest(cache.loaded) !== digest) throw new RetrievalV2Error("CACHE_STALE", "Canonical memory changed while selecting workflows. Recompile and retry.");
     return packContextOutput({ mode: browse ? "browse" : "task", ...options, filters }, candidates);
   } catch (error) { return retrievalError(error, options); }
 }
@@ -132,6 +150,7 @@ function expandOptionalRoots(cache: RetrievalCache, roots: ContextOutputRoot[], 
 }
 
 function retrievalError(error: unknown, options: { budget?: ContextOutputRequest["budget"]; maxBytes?: number }): ContextOutputResult {
+  if (error instanceof NotFoundError) return contextOutputError("INVALID_INPUT", { message: error.message, maxBytes: options.maxBytes });
   if (error instanceof RetrievalV2Error) return contextOutputError(error.code, { message: error.message, maxBytes: options.maxBytes, invalidCap: error.code === "BUDGET_TOO_SMALL" });
   return contextOutputError("VALIDATION_FAILED", { message: error instanceof Error ? error.message : "Could not read canonical memory.", maxBytes: options.maxBytes });
 }

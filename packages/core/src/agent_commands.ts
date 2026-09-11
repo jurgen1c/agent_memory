@@ -140,7 +140,7 @@ export function buildAgentCommands(commandPrefix: string): AgentCommandDescripti
       name: "upgrade",
       purpose: "Refresh generated support files or migrate local wrapper mode to global storage.",
       whenToUse: "Run after upgrading the package, or use --global for an explicit dry-run-first local-to-global migration.",
-      examples: [`${commandPrefix} upgrade`, `${commandPrefix} upgrade --write`, "agent-memory upgrade --global --write"]
+      examples: [`${commandPrefix} upgrade`, `${commandPrefix} upgrade --write`, `${commandPrefix} upgrade --adopt-retrieval --format-version 2 --json`, "agent-memory upgrade --global --write"]
     }
   ];
 }

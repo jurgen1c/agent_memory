@@ -54,3 +54,6 @@ export { canonicalContentDigest } from "./canonical_digest";
 
 export { listCategories, renderCategoriesHuman, type ListCategoriesOptions, type ListCategoriesResult, type CategoriesModel } from "./categories";
 export { BUILTIN_CATEGORY_VOCABULARY } from "./category_vocabulary";
+
+export { planRetrievalAdoption, applyRetrievalAdoption } from "./retrieval_adoption";
+export type { RetrievalAdoptionOptions, RetrievalAdoptionPlan, AdoptionClaim } from "./retrieval_adoption";
