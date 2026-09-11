@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -72,6 +72,31 @@ describe("production Git verification diagnostics", () => {
     fs.chmodSync(objectDir, 0);
     try { expect(verifyGitCommit(root, "f".repeat(40)).code).toBe("GIT_PERMISSION_DENIED"); }
     finally { fs.chmodSync(objectDir, 0o755); }
+  });
+
+  test("preflight never enumerates loose object files and does not traverse fanout symlinks", () => {
+    const { root, oid } = repository();
+    const fanout = path.join(root, ".git/objects", oid.slice(0, 2));
+    for (let index = 0; index < 100; index++) runGit(root, ["hash-object", "-w", "--stdin"], { input: `unrelated object ${index}` });
+    const enumerate = spyOn(fs, "readdirSync");
+    try {
+      expect(verifyGitCommit(root, oid).code).toBe("GIT_VERIFIED");
+      expect(enumerate.mock.calls.some(([target]) => String(target) === fanout)).toBe(false);
+    } finally { enumerate.mockRestore(); }
+    const moved = path.join(root, "fanout-target");
+    fs.renameSync(fanout, moved); fs.symlinkSync(moved, fanout, "dir");
+    const diagnostic = verifyGitCommit(root, oid);
+    expect(diagnostic.code).toBe("GIT_CHECK_FAILED"); expect(diagnostic.remediation).not.toContain("repair");
+  });
+
+  test("requested unreadable loose objects remain unavailable without reading unrelated loose files", () => {
+    const { root, oid } = repository();
+    const object = path.join(root, ".git/objects", oid.slice(0, 2), oid.slice(2));
+    fs.chmodSync(object, 0);
+    try {
+      const diagnostic = verifyGitCommit(root, oid);
+      expect(diagnostic.code).toBe("GIT_PERMISSION_DENIED"); expect(diagnostic.remediation).not.toContain("repair");
+    } finally { fs.chmodSync(object, 0o444); }
   });
 
   test("corrupt packed-object indexes preserve successful stderr and cannot suggest repairing existing history", () => {

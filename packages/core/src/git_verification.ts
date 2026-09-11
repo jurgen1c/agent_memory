@@ -44,6 +44,7 @@ export function verifyGitCommit(repoRoot: string, reference: string, options: Gi
 /** Reuses one accessible-store preflight for a read-only audit invocation. */
 export function createGitCommitVerifier(repoRoot: string, options: GitCommandOptions = {}): (reference: string) => GitVerificationDiagnostic {
   let preparation: 40 | 64 | GitVerificationDiagnostic | undefined;
+  const stores = new Set<string>();
   const probe = (args: string[], extra: GitCommandOptions = {}): string => {
     const result = runGitResult(repoRoot, args, { ...options, ...extra });
     // Even status-zero Git probes report damaged packs on stderr. Any diagnostic
@@ -69,14 +70,13 @@ export function createGitCommitVerifier(repoRoot: string, options: GitCommandOpt
           if (format !== "sha1" && format !== "sha256") throw new GitCommandError("Git returned an unsupported repository object format.", { status: 0 });
           const objectPath = probe(["rev-parse", "--git-path", "objects"]);
           if (!objectPath || objectPath.includes("\n")) throw new GitCommandError("Git returned an invalid object-store path.", { status: 0 });
-          const visited = new Set<string>();
-          assertObjectStoreAccessible(path.resolve(repoRoot, objectPath), visited);
+          assertObjectStoreAccessible(path.resolve(repoRoot, objectPath), stores);
           const inventory = probe(["count-objects", "-v"]);
           // Git resolves file comments, quoted paths, nested alternates and environment
           // alternates itself. Its output C-quotes paths, including embedded newlines.
           for (const line of inventory.split("\n")) {
             if (line.startsWith("alternate: ")) {
-              assertObjectStoreAccessible(path.resolve(repoRoot, decodeAlternatePath(line.slice("alternate: ".length))), visited);
+              assertObjectStoreAccessible(path.resolve(repoRoot, decodeAlternatePath(line.slice("alternate: ".length))), stores);
             }
           }
           preparation = format === "sha1" ? 40 : 64;
@@ -85,6 +85,7 @@ export function createGitCommitVerifier(repoRoot: string, options: GitCommandOpt
       if (typeof preparation !== "number") return preparation;
       if (!isFullGitObjectId(reference, preparation)) return malformed();
       const oid = reference.toLowerCase();
+      for (const store of stores) assertOptionalObjectFileReadable(path.join(store, oid.slice(0, 2), oid.slice(2)));
       const output = probe(["--no-replace-objects", "cat-file", "--batch-check=%(objectname) %(objecttype)"], { input: `${oid}\n`, trim: false });
       if (output === `${oid} missing\n`) return outcome("GIT_UNKNOWN_OBJECT", "invalid_reference",
         "The accessible Git object store explicitly reports the recorded commit is missing.",
@@ -95,19 +96,54 @@ export function createGitCommitVerifier(repoRoot: string, options: GitCommandOpt
   };
 }
 
-// Git can report inaccessible loose objects as missing. Check every local and alternate
-// store before trusting that result; reading directory entries does not read object content.
-function assertObjectStoreAccessible(root: string, visited = new Set<string>()): void {
+// Check the fixed loose-object fanout directories, never enumerate loose files.
+// Git can report an inaccessible directory or requested loose object as missing.
+function assertObjectStoreAccessible(root: string, visited: Set<string>): void {
   const real = fs.realpathSync(root);
   if (visited.has(real)) return;
+  if (visited.size >= 64) throw new GitCommandError("Git object-store preflight exceeded its alternate-store limit.", { status: 0 });
   visited.add(real);
   fs.accessSync(real, fs.constants.R_OK | fs.constants.X_OK);
-  for (const entry of fs.readdirSync(real, { withFileTypes: true })) {
-    const target = path.join(real, entry.name);
-    if (fs.statSync(target).isDirectory()) assertObjectStoreAccessible(target, visited);
-    else fs.accessSync(target, fs.constants.R_OK);
+  for (let prefix = 0; prefix < 256; prefix++) {
+    assertOptionalObjectDirectoryAccessible(path.join(real, prefix.toString(16).padStart(2, "0")));
   }
+  if (assertOptionalObjectDirectoryAccessible(path.join(real, "info"))) {
+    assertOptionalObjectFileReadable(path.join(real, "info/alternates"));
+  }
+  const pack = path.join(real, "pack");
+  if (!assertOptionalObjectDirectoryAccessible(pack)) return;
+  const directory = fs.opendirSync(pack);
+  try {
+    let count = 0;
+    for (let entry = directory.readSync(); entry !== null; entry = directory.readSync()) {
+      if (++count > 4096) throw new GitCommandError("Git object-store preflight exceeded its pack-entry limit.", { status: 0 });
+      if (entry.isSymbolicLink()) throw new GitCommandError("Git pack storage contains a symbolic link; inspect repository storage.", { status: 0 });
+      if (entry.isFile()) fs.accessSync(path.join(pack, entry.name), fs.constants.R_OK);
+    }
+  } finally { directory.closeSync(); }
+}
 
+function optionalObjectStat(target: string): fs.Stats | undefined {
+  try { return fs.lstatSync(target); }
+  catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+function assertOptionalObjectDirectoryAccessible(target: string): boolean {
+  const stat = optionalObjectStat(target);
+  if (!stat) return false;
+  if (!stat.isDirectory()) throw new GitCommandError("Git object storage is not a directory or contains a symbolic link.", { status: 0 });
+  fs.accessSync(target, fs.constants.R_OK | fs.constants.X_OK);
+  return true;
+}
+
+function assertOptionalObjectFileReadable(target: string): void {
+  const stat = optionalObjectStat(target);
+  if (!stat) return;
+  if (!stat.isFile()) throw new GitCommandError("Git object storage is not a regular file or contains a symbolic link.", { status: 0 });
+  fs.accessSync(target, fs.constants.R_OK);
 }
 
 // Git alternate files use C-style quoting, including octal UTF-8 bytes.
