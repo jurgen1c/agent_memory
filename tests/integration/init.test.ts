@@ -290,7 +290,7 @@ describe("init command", () => {
       .run("checkout:tampered");
     tamperedDatabase.close();
 
-    for (const command of [["query", "anything"], ["doctor"]]) {
+    for (const command of [["query", "anything", "--format-version", "1"], ["doctor"]]) {
       const rejectedRead = spawnSync("bun", [cliPath, ...command], {
         cwd: repoRoot,
         encoding: "utf8",

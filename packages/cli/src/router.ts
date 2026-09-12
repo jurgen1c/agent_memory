@@ -1,3 +1,4 @@
+import { withDefaultFormatVersion } from "./commands/format_default";
 import { runCategoriesCommand } from "./commands/categories";
 import { runRetrievalV2Command, usesV2Retrieval } from "./commands/retrieval_v2";
 import { AgentMemoryError, formatError, NotFoundError, toAgentMemoryError } from "../../core/src/errors";
@@ -144,7 +145,8 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
       };
     }
 
-    if (usesV2Retrieval(rest, command)) return runRetrievalV2Command("query", rest, context.cwd);
+    const versionedArgs = withDefaultFormatVersion(rest, context.cwd);
+    if (usesV2Retrieval(versionedArgs, command)) return runRetrievalV2Command("query", versionedArgs, context.cwd);
     return runQueryCommand(rest, { cwd: context.cwd });
   }
 
@@ -156,7 +158,8 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
       };
     }
 
-    if (usesV2Retrieval(rest, command)) return runRetrievalV2Command("show", rest, context.cwd);
+    const versionedArgs = withDefaultFormatVersion(rest, context.cwd);
+    if (usesV2Retrieval(versionedArgs, command)) return runRetrievalV2Command("show", versionedArgs, context.cwd);
     return runShowCommand(rest, { cwd: context.cwd });
   }
 
@@ -223,7 +226,8 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
       };
     }
 
-    if (usesV2Retrieval(rest, command)) return runRetrievalV2Command("context", rest, context.cwd);
+    const versionedArgs = withDefaultFormatVersion(rest, context.cwd);
+    if (usesV2Retrieval(versionedArgs, command)) return runRetrievalV2Command("context", versionedArgs, context.cwd);
     return runContextCommand(rest, { cwd: context.cwd });
   }
 
@@ -246,7 +250,7 @@ export async function dispatch(args: string[], context: CliContext = {}): Promis
       };
     }
 
-    return runVersionedAuditCommand(rest, { cwd: context.cwd });
+    return runVersionedAuditCommand(withDefaultFormatVersion(rest, context.cwd), { cwd: context.cwd });
   }
 
   if (command === "doctor") {

@@ -204,6 +204,7 @@ function existingInitConfig(repoRoot: string, options: InitOptions): AgentMemory
 
 function newInitConfig(repoRoot: string, options: InitOptions): AgentMemoryConfig {
   const config = defaultConfig();
+  config.retrieval = { default_format_version: 2 };
 
   if (options.local) {
     return config;
@@ -490,6 +491,8 @@ function agentsMemorySection(config: AgentMemoryConfig, commandPrefix: "agent-me
 
   return `<!-- agent-memory:start -->
 ## Agent Memory Knowledge Base
+
+Query, context, show and audit default to format ${config.retrieval?.default_format_version ?? 1} in this repository. Explicit \`--format-version 1\` or \`--format-version 2\` overrides the default. Recompile after changing the default; canonical claims remain unchanged.
 
 Use the repo-memory skill or instruction file whenever it is available. This section is the repo-level fallback and requirement.
 

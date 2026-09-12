@@ -14,7 +14,7 @@ import { prepareUpgrade, type PlannedUpgradeWrite, type UpgradeResult } from "./
 import { validateRepository } from "./validator";
 import { PACKAGE_VERSION } from "./version";
 
-export interface RetrievalAdoptionOptions { cwd?: string; force?: boolean }
+export interface RetrievalAdoptionOptions { cwd?: string; force?: boolean; defaultFormatVersion?: 1 | 2 }
 export interface AdoptionClaim {
   id: string; path: string; fingerprint: string;
   verificationMetadata: "present" | "missing";
@@ -27,6 +27,8 @@ export interface RetrievalAdoptionPlan extends UpgradeResult {
   packageVersion: string;
   adoption: {
     repositoryIdentity: string; mode: "local" | "global"; memoryKey: string | null; memoryRoot: string;
+    requestedDefaultFormatVersion?: 1 | 2;
+    defaultFormatVersion: { before: 1 | 2; after: 1 | 2 };
     inventoryDigest: string; supportFingerprint: string; claims: AdoptionClaim[];
     verificationCheck: "not_run";
     guidance: string[];
@@ -42,7 +44,7 @@ export function planRetrievalAdoption(options: RetrievalAdoptionOptions = {}): R
 /** Re-plan all inputs before writing. Callers may retain a reviewed plan across turns. */
 export function applyRetrievalAdoption(plan: RetrievalAdoptionPlan): RetrievalAdoptionPlan {
   let current: Prepared;
-  try { current = prepare({ cwd: plan.repo.root, force: plan.force }); }
+  try { current = prepare({ cwd: plan.repo.root, force: plan.force, defaultFormatVersion: plan.adoption.requestedDefaultFormatVersion }); }
   catch (error) { throw stale(error); }
   if (JSON.stringify(current.plan) !== JSON.stringify(plan)) throw stale();
   applyWrites(current.writes);
@@ -52,6 +54,7 @@ export function applyRetrievalAdoption(plan: RetrievalAdoptionPlan): RetrievalAd
 
 function prepare(options: RetrievalAdoptionOptions): Prepared {
   try {
+    if (options.defaultFormatVersion !== undefined && options.defaultFormatVersion !== 1 && options.defaultFormatVersion !== 2) throw invalid("defaultFormatVersion must be 1 or 2.");
     const repo = findRepoRoot(options.cwd);
     safePath(repo.root, "agent-memory.config.yaml");
     const loaded = loadConfig({ repoRoot: repo.root });
@@ -69,7 +72,8 @@ function prepare(options: RetrievalAdoptionOptions): Prepared {
       for (const reference of [...codexSkillReferenceFiles("repo", loaded.config), { path: "references/retrieval-adoption.md" }]) support.add(path.join(path.dirname(skill.path), reference.path));
     }
     for (const file of support) safePath(repo.root, file);
-    const prepared = prepareUpgrade({ cwd: repo.root, force: options.force ?? false });
+    const prepared = prepareUpgrade({ cwd: repo.root, force: options.force ?? false, defaultFormatVersion: options.defaultFormatVersion });
+    if (options.defaultFormatVersion !== undefined) prepared.result.warnings.push("Review callers of query/context/show/audit. Pin legacy JSON consumers with --format-version 1. After applying, run validate and compile in this checkout before retrieval; canonical claims and verification history are unchanged.");
     const guidance: string[] = [];
     for (const skill of Object.values(loaded.config.agent_skills)) {
       if (!skill.enabled) continue;
@@ -114,7 +118,10 @@ function prepare(options: RetrievalAdoptionOptions): Prepared {
       actions: prepared.result.actions.map(action => ({ ...action, status: action.status === "created" ? "would_create" : action.status === "updated" ? "would_update" : action.status })),
       schemaVersion: 2, packageVersion: PACKAGE_VERSION,
       adoption: { repositoryIdentity: deriveRepositoryIdentity(repo.root), mode: loaded.config.database_scope ?? "local", memoryKey: loaded.config.memory_key ?? null,
-        memoryRoot: toPosix(path.relative(repo.root, memoryRoot)), inventoryDigest: canonicalContentDigest(loaded), supportFingerprint, claims, verificationCheck: "not_run", guidance } };
+        memoryRoot: toPosix(path.relative(repo.root, memoryRoot)),
+        ...(options.defaultFormatVersion === undefined ? {} : { requestedDefaultFormatVersion: options.defaultFormatVersion }),
+        defaultFormatVersion: { before: loaded.config.retrieval?.default_format_version ?? 1, after: options.defaultFormatVersion ?? loaded.config.retrieval?.default_format_version ?? 1 },
+        inventoryDigest: canonicalContentDigest(loaded), supportFingerprint, claims, verificationCheck: "not_run", guidance } };
     return { plan, writes: prepared.writes };
   } catch (error) {
     if (error instanceof AgentMemoryError && error.code === "VALIDATION_FAILED") throw error;
